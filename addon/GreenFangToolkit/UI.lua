@@ -25,14 +25,19 @@ local manualScan = false
 UI.sortKey, UI.sortAscending = "name", true
 UI.SORT_KEYS = { name = true, rank = true, race = true, class = true, professions = true,
     level = true, zone = true, online = true }
--- Professions cell (GF-001-D8): one line of text, "鍛造 34/75" per profession,
--- primary first, then cooking / first aid / fishing. What does not fit is
--- counted as "+N"; the hover tooltip lists everything. Row height is unchanged.
--- "－" (full-width; the em dash is not a glyph we know the game font has)
--- means no data.
-local LIST_SLOTS, LIST_GAP = 6, 8
+-- Professions cell (GF-001-D18, was text since D8): one line, the
+-- profession's built-in icon and its skill points ("[icon]300"), primary
+-- first. Cooking / first aid / fishing follow only while they fit whole;
+-- they are never counted, the tooltip has them. A primary that does not fit
+-- is counted as "+N". Members known only from the guild roster (no points)
+-- get dimmed icons alone; a profession without an icon falls back to its
+-- name. "－" (full-width, faint) means no data. Row height is unchanged.
+local LIST_SLOTS, LIST_GAP, GROUP_GAP = 6, 8, 6
+local ICON_SIZE, ICON_GAP, MORE_WIDTH = 14, 2, 20
 local NO_DATA = "－"
 local SECONDARY_COLOR, NAMES_COLOR, TEXT_COLOR = { 0.72, 0.8, 0.74 }, { 0.6, 0.6, 0.6 }, { 1, 1, 1 }
+local NO_DATA_COLOR = { 0.42, 0.42, 0.42 }
+local NAMES_ALPHA, SECONDARY_ALPHA = 0.55, 0.85
 local ONLINE_COLOR, OFFLINE_COLOR = { 0.4, 1, 0.4 }, { 0.55, 0.55, 0.55 }
 local RANK_COLOR = { 0.85, 0.82, 0.65 }
 
@@ -163,11 +168,14 @@ local function newRow(i)
             row.profX, row.profW = col.x, col.w
             row.profSlots = {}
             for k = 1, LIST_SLOTS do
+                local icon = row:CreateTexture(nil, "ARTWORK")
+                icon:SetSize(ICON_SIZE, ICON_SIZE)
+                icon:Hide()
                 local label = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
                 label:SetHeight(ROW_HEIGHT)
                 label:SetJustifyH("LEFT")
                 label:SetWordWrap(false)
-                row.profSlots[k] = label
+                row.profSlots[k] = { icon = icon, label = label }
             end
             row.profMore = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
             row.profMore:SetHeight(ROW_HEIGHT)
@@ -177,7 +185,17 @@ local function newRow(i)
     row:EnableMouse(true)
     row:SetScript("OnEnter", function(self)
         local detail = self.detail
-        if not detail then return end
+        if not detail then
+            -- Names from the guild roster only: say which icons these are.
+            local names = self.rosterNames
+            if not names or #names == 0 then return end
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine(str(self.memberName))
+            for _, name in ipairs(names) do GameTooltip:AddLine(str(name), 0.9, 0.9, 0.9) end
+            GameTooltip:AddLine("技能點數未知：對方還沒有用工具箱分享資料", 0.75, 0.9, 0.75)
+            GameTooltip:Show()
+            return
+        end
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine(str(self.memberName))
         local anyRecipes = false
@@ -379,65 +397,129 @@ function UI.layoutRows()
     end
 end
 
--- Professions cell: one line, "鍛造 34/75" per profession (own record or what
--- the member shared, D-011). Members without that data: profession names
--- from the guild roster in grey, or "－". Own row: remember where each
--- profession is so UI.placeOwnButtons can put a secure button on it.
+-- Professions cell (D18): icon + skill points per profession (own record or
+-- what the member shared, D-011), primary first; secondary ones only while
+-- they fit. Members without that data: dimmed icons of the names in the
+-- guild roster, or a faint "－". Own row: remember where each profession is
+-- so UI.placeOwnButtons can put a secure button on it.
+--
+-- Every label is measured with SetWidth(0) first. Before D18 a reused label
+-- kept the fixed width of what it showed last, and the client measures text
+-- within that width, so a longer name came out as "剝…" or only "…".
+local function hideSlot(s)
+    s.icon:Hide()
+    s.label:SetText("")
+    s.label:Hide()
+end
+
+-- Put one entry into slot s at x; returns its width, or nil when it does not
+-- fit in `room`. `first` may be cut to the cell (the cell is never empty).
+local function placeEntry(row, s, e, x, room, first)
+    local hasIcon = e.prof and Icons.setProfessionIcon(s.icon, e.prof) or false
+    local text
+    if hasIcon then
+        text = e.points or ""
+    else
+        text = e.points and (e.name .. " " .. e.points) or e.name
+    end
+    s.label:SetWidth(0)
+    s.label:SetText(text)
+    local textW = text ~= "" and (ns.num((s.label:GetStringWidth())) or 30) or 0
+    local iconW = hasIcon and (ICON_SIZE + (textW > 0 and ICON_GAP or 0)) or 0
+    local w = iconW + textW
+    if w > room and not first then
+        hideSlot(s)
+        return nil
+    end
+    local left = row.profX + x
+    if hasIcon then
+        s.icon:ClearAllPoints()
+        s.icon:SetPoint("LEFT", row, "LEFT", left, 0)
+        s.icon:SetAlpha(e.alpha)
+        s.icon:Show()
+    end
+    if textW > 0 then
+        s.label:ClearAllPoints()
+        s.label:SetPoint("LEFT", row, "LEFT", left + iconW, 0)
+        if w > room then s.label:SetWidth(math.max(1, room - iconW)) end
+        s.label:SetTextColor(e.color[1], e.color[2], e.color[3])
+        s.label:Show()
+    else
+        s.label:Hide()
+    end
+    return math.min(w, room)
+end
+
 local function fillProfessions(row, cell, m)
     local detail = UI.detailFor(m)
+    local Prof = ns.Professions
     row.detail, row.memberName, row.memberGuid = detail, m.name, m.guid
+    row.rosterNames = nil
     row.ownList = nil
     cell:SetText("")
     local entries = {}
     if detail then
         for _, prof in ipairs(detail.professions) do
-            entries[#entries + 1] = { text = UI.shortLabel(prof), prof = prof,
-                color = ns.Professions.isSecondary(prof) and SECONDARY_COLOR or TEXT_COLOR }
+            local secondary = Prof.isSecondary(prof)
+            entries[#entries + 1] = { prof = prof, name = str(prof.name), secondary = secondary,
+                points = type(prof.rank) == "number" and tostring(prof.rank) or nil,
+                color = secondary and SECONDARY_COLOR or TEXT_COLOR,
+                alpha = secondary and SECONDARY_ALPHA or 1 }
         end
-    elseif type(m.professions) == "table" then
-        for _, name in ipairs(m.professions) do
-            entries[#entries + 1] = { text = str(name), color = NAMES_COLOR }
+    elseif type(m.professions) == "table" and #m.professions > 0 then
+        row.rosterNames = m.professions
+        local list = {}
+        for _, name in ipairs(m.professions) do list[#list + 1] = { name = str(name) } end
+        for _, prof in ipairs(Prof.ordered(list)) do
+            entries[#entries + 1] = { prof = prof, name = prof.name, secondary = Prof.isSecondary(prof),
+                color = NAMES_COLOR, alpha = NAMES_ALPHA }
         end
-    end
-    if #entries == 0 then
-        entries[1] = { text = NO_DATA, color = NAMES_COLOR }
     end
     local own = detail and detail.source == "本人"
     if own then row.ownList = {} end
-    local x, shown = 0, 0
     row.profMore:SetText("")
     row.profMore:Hide()
-    for k, label in ipairs(row.profSlots) do
-        local e = entries[k]
-        local fits = false
-        if e and shown == k - 1 then
-            label:SetText(e.text)
-            local w = ns.num((label:GetStringWidth())) or 60
-            -- Leave room for "+N" when more entries follow.
-            local reserve = entries[k + 1] and 18 or 0
-            if x + w + reserve <= row.profW or k == 1 then
-                fits = true
-                label:ClearAllPoints()
-                label:SetPoint("LEFT", row, "LEFT", row.profX + x, 0)
-                label:SetWidth(math.min(w + 2, row.profW - x))
-                label:SetTextColor(e.color[1], e.color[2], e.color[3])
-                label:Show()
+    local slots = row.profSlots
+    if #entries == 0 then
+        for k = 2, #slots do hideSlot(slots[k]) end
+        placeEntry(row, slots[1], { name = NO_DATA, color = NO_DATA_COLOR }, 0, row.profW, true)
+        return
+    end
+    -- Primaries left after entry i (room is kept for "+N" while there are).
+    local primariesAfter, count = {}, 0
+    for i = #entries, 1, -1 do
+        primariesAfter[i] = count
+        if not entries[i].secondary then count = count + 1 end
+    end
+    local x, used, hiddenPrimary, full = 0, 0, 0, false
+    local lastSecondary = false
+    for i, e in ipairs(entries) do
+        local s = slots[used + 1]
+        local w
+        if s and not full then
+            local gap = 0
+            if used > 0 then gap = LIST_GAP + ((e.secondary and not lastSecondary) and GROUP_GAP or 0) end
+            local reserve = primariesAfter[i] > 0 and MORE_WIDTH or 0
+            w = placeEntry(row, s, e, x + gap, row.profW - x - gap - reserve, used == 0)
+            if w then
                 if own and e.prof then
-                    row.ownList[#row.ownList + 1] = { prof = e.prof, x = row.profX + x, w = math.min(w + 2, row.profW - x) }
+                    row.ownList[#row.ownList + 1] = { prof = e.prof, x = row.profX + x + gap, w = w }
                 end
-                x = x + w + LIST_GAP
-                shown = k
+                x = x + gap + w
+                used = used + 1
+                lastSecondary = e.secondary
             end
         end
-        if not fits then
-            label:SetText("")
-            label:Hide()
+        if not w then
+            full = true
+            if not e.secondary then hiddenPrimary = hiddenPrimary + 1 end
         end
     end
-    if shown < #entries then
+    for k = used + 1, #slots do hideSlot(slots[k]) end
+    if hiddenPrimary > 0 then
         row.profMore:ClearAllPoints()
-        row.profMore:SetPoint("LEFT", row, "LEFT", row.profX + math.max(0, x - LIST_GAP + 2), 0)
-        row.profMore:SetText("+" .. (#entries - shown))
+        row.profMore:SetPoint("LEFT", row, "LEFT", row.profX + x + 4, 0)
+        row.profMore:SetText("+" .. hiddenPrimary)
         row.profMore:Show()
     end
 end

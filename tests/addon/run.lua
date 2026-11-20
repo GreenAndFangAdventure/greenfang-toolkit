@@ -1474,6 +1474,33 @@ test("icons: class colour from C_ClassColor, else built-in; class icon falls bac
     eq(ns.Icons.setClassIcon(tex, "NOPE"), false, "unknown class -> hidden")
 end)
 
+-- GF-001-D18: the professions cell as text, one entry per shown slot:
+-- "<icon file name>:<points>" (just the icon name when no points), the text
+-- when there is no icon, then "+N". Icon paths keep only the last part.
+local function profIconName(t)
+    if type(t) == "string" then return (t:match("([^\\]+)$")) end
+    return tostring(t)
+end
+
+local function profCell(row)
+    local list = {}
+    for _, s in ipairs(row.profSlots) do
+        local icon = s.icon:IsShown() and profIconName(s.icon._texture) or nil
+        local text = s.label:IsShown() and s.label:GetText() or ""
+        if icon and text ~= "" then list[#list + 1] = icon .. ":" .. text
+        elseif icon then list[#list + 1] = icon
+        elseif text ~= "" then list[#list + 1] = text end
+    end
+    if row.profMore:IsShown() then list[#list + 1] = row.profMore:GetText() end
+    return table.concat(list, "|")
+end
+
+local function rosterRow(ns, name)
+    for _, row in ipairs(ns.UI.rows()) do
+        if row:IsShown() and row.memberName == name then return row end
+    end
+end
+
 test("roster: rows show class icon/colour, rank column, profession names; rank sorts by index", function()
     wow.reset()
     local ns = wow.login(ADDON_DIR)
@@ -1490,9 +1517,21 @@ test("roster: rows show class icon/colour, rank column, profession names; rank s
         if o._texture then textures[o._texture] = true end
     end
     ok(textures["Interface\\Icons\\ClassIcon_Warrior"], "warrior class icon in the roster")
-    -- GF-001-D8: the professions cell is a compact text list (no icons).
-    local texts = table.concat(wow.allTexts(), "\n")
-    ok(texts:find("採礦", 1, true), "mining name for a member with a name only")
+    -- GF-001-D18: the professions cell shows icons (dimmed, no points, for a
+    -- member known by name only); the tooltip names them.
+    ok(textures["Interface\\Icons\\Trade_Mining"], "mining icon for a member with a name only")
+    local named
+    for _, row in ipairs(ns.UI.rows()) do
+        if row:IsShown() and row.rosterNames then named = row end
+    end
+    ok(named, "a row with names only")
+    ok(not profCell(named):find(":", 1, true), "no points for names only: " .. profCell(named))
+    named._scripts.OnEnter(named)
+    local tip = {}
+    for _, l in ipairs(GameTooltip._lines) do tip[#tip + 1] = l.text end
+    tip = table.concat(tip, "\n")
+    ok(tip:find(named.rosterNames[1], 1, true), "tooltip names the profession")
+    ok(tip:find("技能點數未知", 1, true), "tooltip says the points are unknown")
 end)
 
 test("character page: icons and progress bars for own professions", function()
@@ -1757,9 +1796,10 @@ test("roster window: shared professions show skill points and update time", func
     eq(detail.source, "公會成員分享", "source")
     eq(ns.UI.skillLabel(detail.professions[3]), "釣魚 150 / 225", "label")
     ok(ns.UI.updatedText(detail):find("更新時間", 1, true), "update time text")
-    local texts = table.concat(wow.allTexts(), "\n")
-    ok(texts:find("採礦 300/300", 1, true), "shared skill points in the list")
-    ok(texts:find("製皮 151/225", 1, true), "own row uses own skill points")
+    local peerCell = profCell(rosterRow(ns, PEER))
+    ok(peerCell:find("^Trade_Mining:300|"), "shared skill points in the list: " .. peerCell)
+    local ownCell = profCell(rosterRow(ns, "測試甲-測試伺服器"))
+    ok(ownCell:find(":151", 1, true), "own row uses own skill points: " .. ownCell)
     local quiet
     for _, m in ipairs(ns.Roster.current().members) do if m.name == "測試丁-測試伺服器" then quiet = m end end
     eq(ns.UI.detailFor(quiet), nil, "members without data unchanged")
@@ -1883,25 +1923,24 @@ local function rowFor(ns, name)
     end
 end
 
-local function rowTexts(row)
-    local list = {}
-    for _, l in ipairs(row.profSlots) do if l:IsShown() then list[#list + 1] = l:GetText() end end
-    if row.profMore:IsShown() then list[#list + 1] = row.profMore:GetText() end
-    return table.concat(list, "|")
-end
+local rowTexts = profCell
 
-test("D8 roster: one-line list with skill points, primary then secondary, +N, － without data", function()
+test("D18 roster: icon + skill points, primary then secondary, － without data", function()
     wow.reset({ player = crafter() })
     local ns = wow.login(ADDON_DIR)
     sendFrom(ns, PEER, peerData())
     ns.Framework.open("roster")
     local own = rowFor(ns, "測試甲-測試伺服器")
-    eq(rowTexts(own), "鍛造 34/75|採礦 50/75|急救 10/75|釣魚 20/75|+1", "own: primary first, then secondary")
+    -- Own icons are the file IDs GetProfessionInfo returns.
+    eq(rowTexts(own), "136241:34|136248:50|135966:10|136245:20|133971:1", "own: primary first, then secondary")
     local peer = rowFor(ns, PEER)
-    eq(rowTexts(peer), "採礦 300/300|鍛造 280/300|釣魚 150/225|+2", "peer: what does not fit is counted")
+    eq(rowTexts(peer), "Trade_Mining:300|Trade_BlackSmithing:280|Trade_Fishing:150|INV_Misc_Food_15:90|Spell_Holy_SealOfSacrifice:75",
+        "peer: every profession fits as icon + points")
+    eq(peer.profSlots[3].label._color[1], 0.72, "secondary points in the secondary colour")
     eq(peer._h, 23, "row height unchanged")
-    eq(rowTexts(rowFor(ns, "測試丙-測試伺服器")), "裁縫|附魔", "names only from the roster")
-    eq(rowTexts(rowFor(ns, "測試丁-測試伺服器")), "－", "no data")
+    eq(rowTexts(rowFor(ns, "測試丙-測試伺服器")), "Trade_Tailoring|Trade_Engraving", "names only: icons without points")
+    eq(rowTexts(rowFor(ns, "測試丁-測試伺服器")), "－", "no data: a faint dash")
+    eq(rowFor(ns, "測試丁-測試伺服器").profSlots[1].label._color[1], 0.42, "the dash is faint")
     peer._scripts.OnEnter(peer)
     local lines = {}
     for _, l in ipairs(GameTooltip._lines) do lines[#lines + 1] = l.text end
@@ -1909,7 +1948,73 @@ test("D8 roster: one-line list with skill points, primary then secondary, +N, �
     for _, want in ipairs({ "採礦 300 / 300", "鍛造 280 / 300", "釣魚 150 / 225", "烹飪 90 / 150", "急救 75 / 150", "更新時間" }) do
         ok(tip:find(want, 1, true), "tooltip has " .. want)
     end
-    eq(ns.UI.shortLabel({ name = "鍛造", rank = 34, max = 75 }), "鍛造 34/75", "format")
+    for _, t in ipairs(wow.allTexts()) do ok(not t:find("…", 1, true), "no ellipsis in any text: " .. t) end
+end)
+
+test("D18 roster: a reused row measures its new text in full (the 0.9.2 「剝…」/「…」 rows)", function()
+    wow.reset({ player = crafter() })
+    local ns = wow.login(ADDON_DIR)
+    sendFrom(ns, PEER, peerData())
+    ns.Framework.open("roster")
+    local members = {}
+    for _, m in ipairs(ns.Roster.current().members) do members[m.name] = m end
+    local row = rowFor(ns, "測試丁-測試伺服器")
+    -- Same row, longer content each time: no data -> peer -> names only -> icons missing (text).
+    wow.state.missingFiles = {}
+    ns.UI.fillRow(row, members[PEER])
+    eq(rowTexts(row), "Trade_Mining:300|Trade_BlackSmithing:280|Trade_Fishing:150|INV_Misc_Food_15:90|Spell_Holy_SealOfSacrifice:75", "peer after no data")
+    for _, path in pairs(ns.Icons.PROFESSION) do wow.state.missingFiles[path] = true end
+    ns.UI.fillRow(row, members["測試丁-測試伺服器"])
+    ns.UI.fillRow(row, members["測試丙-測試伺服器"])
+    eq(rowTexts(row), "裁縫|附魔", "no icon in the client: the name instead")
+    ns.UI.fillRow(row, members[PEER])
+    eq(rowTexts(row), "採礦 300|鍛造 280|釣魚 150|烹飪 90|急救 75", "no icon: name and points")
+    for k, s in ipairs(row.profSlots) do
+        ok(not s.label:IsTruncated(), "slot " .. k .. " not cut: " .. s.label:GetText())
+    end
+    wow.state.missingFiles = nil
+end)
+
+test("D18 roster: secondary professions only while they fit; hidden primaries are counted", function()
+    wow.reset({ player = crafter() })
+    local ns = wow.login(ADDON_DIR)
+    sendFrom(ns, PEER, peerData())
+    ns.Framework.open("roster")
+    local peer = rowFor(ns, PEER)
+    local member
+    for _, m in ipairs(ns.Roster.current().members) do if m.name == PEER then member = m end end
+    local width = peer.profW
+    peer.profW = 100 -- 2 icons with 3 digits fit (34 + 8 + 34), a third does not
+    ns.UI.fillRow(peer, member)
+    eq(rowTexts(peer), "Trade_Mining:300|Trade_BlackSmithing:280", "secondaries left to the tooltip, not counted")
+    sendFrom(ns, PEER, peerData({ professions = {
+        { name = "採礦", skillLineID = 186, rank = 300, max = 300 },
+        { name = "鍛造", skillLineID = 164, rank = 280, max = 300 },
+        { name = "工程學", skillLineID = 202, rank = 5, max = 75 },
+        { name = "釣魚", skillLineID = 356, rank = 150, max = 225 } } }), "a2")
+    peer.profW = 80
+    ns.UI.fillRow(peer, member)
+    eq(rowTexts(peer), "Trade_Mining:300|+2", "room kept for +N while primaries remain")
+    peer.profW = width
+    ns.UI.fillRow(peer, member)
+    eq(rowTexts(peer), "Trade_Mining:300|Trade_BlackSmithing:280|Trade_Engineering:5|Trade_Fishing:150", "full width again")
+end)
+
+test("D18 roster: sorting by 專業技能 still uses the profession names", function()
+    wow.reset({ player = crafter() })
+    local ns = wow.login(ADDON_DIR)
+    ns.Framework.open("roster")
+    local list = ns.UI.sortMembers(ns.UI.filterMembers(ns.Roster.current().members, ""), "professions", true)
+    local last = list[#list]
+    ok(type(last.professions) ~= "table" or #last.professions == 0, "members without professions sort last")
+    local names = {}
+    for _, m in ipairs(list) do
+        if type(m.professions) == "table" and #m.professions > 0 then names[#names + 1] = table.concat(m.professions, "、") end
+    end
+    ok(#names >= 2, "several members with professions")
+    local desc = ns.UI.sortMembers(ns.UI.filterMembers(ns.Roster.current().members, ""), "professions", false)
+    ok(type(desc[#desc].professions) ~= "table" or #desc[#desc].professions == 0, "still last when descending")
+    ok(desc[1] ~= list[1] or #names == 1, "descending changes the order")
 end)
 
 test("D8 roster: own row only gets secure buttons; none for others; hidden when scrolled away", function()
@@ -1919,17 +2024,17 @@ test("D8 roster: own row only gets secure buttons; none for others; hidden when 
     ns.Framework.open("roster")
     local own = rowFor(ns, "測試甲-測試伺服器")
     local shown = ns.Professions.shown("roster")
-    -- 烹飪 is the 5th entry and does not fit in the cell (counted as +1).
-    eq(spellsOf(shown), "急救,熔煉,鍛造", "own visible professions with a window")
+    -- D18: all five fit as icons; 釣魚 has no window, so four buttons.
+    eq(spellsOf(shown), "急救,烹飪,熔煉,鍛造", "own visible professions with a window")
     for _, b in ipairs(shown) do eq(b._points[1][2], own, "anchored to the own row only") end
     ns.UI.scrollFrame():SetVerticalScroll(200)
     eq(#ns.Professions.shown("roster"), 0, "own row scrolled out of view -> hidden")
     ns.UI.scrollFrame():SetVerticalScroll(0)
-    eq(#ns.Professions.shown("roster"), 3, "back in view")
+    eq(#ns.Professions.shown("roster"), 4, "back in view")
     ns.Framework.open("sleepingbag")
     eq(#ns.Professions.shown("roster"), 0, "hidden with the page")
     ns.Framework.open("roster")
-    eq(#ns.Professions.shown("roster"), 3, "back with the page")
+    eq(#ns.Professions.shown("roster"), 4, "back with the page")
     ns.Framework.toggle() -- close the toolkit window
     eq(#ns.Professions.shown("roster"), 0, "hidden when the window closes")
     eq(#wow.state.blocked, 0, "nothing blocked")
