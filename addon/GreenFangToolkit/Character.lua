@@ -13,7 +13,7 @@ ns.Character = Character
 
 local MAX_ROWS = 6
 local BAR_TEXTURE = "Interface\\TargetingFrame\\UI-StatusBar"
-local panel, classIcon, nameLine, infoLine, guildLine, locationLine, profTitle, emptyLine, clickHint
+local panel, classIcon, nameLine, infoLine, guildLine, locationLine, profTitle, emptyLine
 local profRows = {}
 
 -- "151 / 225", or just the current value when the maximum is unknown.
@@ -29,13 +29,13 @@ function Character.skillFraction(p)
     return math.max(0, math.min(1, p.rank / p.max))
 end
 
--- "配方 120 個，3 天前記錄" / "還沒記錄配方：打開一次專業視窗" / "" (no recipes).
+-- "配方 120 個", or "" (GF-001-D19: no times, no hints).
 function Character.recipeText(prof)
     local id = ns.Professions.skillLineOf(prof)
     if not (id and ns.Recipes and ns.Recipes.CRAFTS[id]) then return "" end
     local r = ns.Recipes.of(ns.Data.player().guid, id)
-    if not r then return "還沒記錄配方：打開一次專業視窗" end
-    return string.format("配方 %d 個，%s記錄", #r.ids, ns.Recipes.agoText(r.t))
+    if not r then return "" end
+    return string.format("配方 %d 個", #r.ids)
 end
 
 function Character.locationText()
@@ -93,8 +93,7 @@ function Character.refresh()
     end
     locationLine:SetText(Character.locationText())
     local profs = ns.Professions.ordered((ns.Data.ownProfessionsDetailed()))
-    emptyLine:SetText(#profs == 0 and "沒有讀到專業技能。" or "")
-    local bound = 0
+    emptyLine:SetText(#profs == 0 and "還沒有學專業技能。" or "")
     for i = 1, math.min(#profs, MAX_ROWS) do
         local prof = profs[i]
         local row = profRows[i] or newProfRow(i)
@@ -119,11 +118,9 @@ function Character.refresh()
         row:Show()
         -- Secure spell button over the row (only professions with a window).
         ns.Professions.bind("character", i, row, prof, 0, 0, 560, 40)
-        if ns.Professions.windowSpell(prof) then bound = bound + 1 end
     end
     for i = #profs + 1, #profRows do profRows[i]:Hide() end
     ns.Professions.hideFrom("character", math.min(#profs, MAX_ROWS) + 1)
-    clickHint:SetText(bound > 0 and "點專業可以開啟技能視窗（戰鬥中不可用；草藥學、剝皮、釣魚沒有視窗）" or "")
 end
 
 local function build(p)
@@ -148,9 +145,6 @@ local function build(p)
     profTitle = p:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     profTitle:SetPoint("TOPLEFT", p, "TOPLEFT", 22, -152)
     profTitle:SetText("專業技能")
-    clickHint = p:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    clickHint:SetPoint("LEFT", profTitle, "RIGHT", 12, 0)
-    clickHint:SetJustifyH("LEFT")
     emptyLine = p:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     emptyLine:SetPoint("TOPLEFT", p, "TOPLEFT", 22, -176)
     -- The buttons live on UIParent: hide them with the page (out of combat;

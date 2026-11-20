@@ -25,9 +25,16 @@ function Diag.shareText()
         for _ in pairs(groups) do records = records + 1 end
     end
     local st = Share.stats
-    return string.format("記錄 %d / %d 筆（%d 位成員）｜佇列 %d 則｜等待補資料 %d 筆｜這次登入：送出 %d、收到 %d、轉傳 %d、被節流 %d、逾時丟棄 %d、空間不足刪除 %d 位",
+    local text = string.format("記錄 %d / %d 筆（%d 位成員）｜佇列 %d 則｜等待補資料 %d 筆｜這次登入：送出 %d、收到 %d、轉傳 %d、被節流 %d、逾時丟棄 %d、空間不足刪除 %d 位",
         records, Share.maxRecords(), authors, Share.queued(), Share.waiting(), st.sent, st.received, st.relayed,
         st.throttled, st.dropped, st.evicted)
+    -- GF-001-D19: a profession window with a filter keeps the saved recipes;
+    -- this used to be a chat message at every login.
+    local skipped = ns.Recipes and ns.Recipes.skippedFiltered() or {}
+    if #skipped > 0 then
+        text = text .. "｜專業視窗有篩選，配方沒有更新：" .. table.concat(skipped, "、")
+    end
+    return text
 end
 
 function Diag.rosterText()
@@ -139,7 +146,6 @@ function Diag.smallButton(parent, point, x, y)
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("同步與診斷")
-        GameTooltip:AddLine("點一下查看待上傳資料和分享情形", 0.75, 0.9, 0.75)
         GameTooltip:Show()
     end)
     b:SetScript("OnLeave", function() GameTooltip:Hide() end)

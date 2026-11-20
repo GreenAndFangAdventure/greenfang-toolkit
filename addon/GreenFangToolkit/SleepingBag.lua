@@ -157,7 +157,7 @@ function SB.refresh()
     if not panel then return end
     local route, s = SB.route(), SB.state()
     local total = route and #route.steps or 0
-    modeButton:SetText("目前：" .. SB.MODES[s.mode] .. "（點一下切換）")
+    modeButton:SetText("目前：" .. SB.MODES[s.mode])
     progressLine:SetText(string.format("%s｜進度 %d / %d｜%s",
         route and route.title or "", math.min(s.step - 1, total), total,
         "每一步都待實地驗證，進度請自行確認"))

@@ -348,12 +348,9 @@ function F.createMinimapButton()
     end)
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        -- GF-001-D19: the name only; how to move or reset it is common
+        -- minimap-button behaviour, and sync status is in 「同步與診斷」.
         GameTooltip:AddLine("綠皮冒險工具箱")
-        GameTooltip:AddLine("點擊：開啟工具箱", 1, 1, 1)
-        GameTooltip:AddLine("拖曳：沿小地圖外圈調整位置", 0.7, 0.9, 0.7)
-        GameTooltip:AddLine("右鍵：恢復預設位置", 0.7, 0.9, 0.7)
-        local c = ns.Sync.statusColor()
-        GameTooltip:AddLine(ns.Sync.shortStatus(), c[1], c[2], c[3])
         GameTooltip:Show()
     end)
     b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -370,4 +367,109 @@ function F.createMinimapButton()
     if Minimap.HookScript then
         Minimap:HookScript("OnSizeChanged", minimapPosition)
     end
+end
+
+---------------------------------------------------------------------------
+-- Small filter widgets (GF-001-D19): plain frames and buttons only, so they
+-- work without UIDropDownMenu or the newer menu system.
+---------------------------------------------------------------------------
+
+local openMenu
+
+local function closeMenu()
+    if openMenu then openMenu:Hide() end
+    openMenu = nil
+end
+F.closeMenu = closeMenu
+
+-- A button that shows the chosen option; a click opens a list below it.
+-- options() returns { { value = v, text = "..." }, ... }; the first one is
+-- "all" (value nil). onChoose(value) is called after a pick. options() is
+-- only called when the list opens (it may walk the whole roster); the
+-- button text comes from that list, or label(value) when given.
+function ns.choiceButton(parent, w, x, y, options, onChoose, allText, label)
+    local b = ns.createFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    b:SetSize(w, 24)
+    b:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+    b.options, b.value = options, nil
+    local menu = CreateFrame("Frame", nil, b)
+    menu:SetFrameStrata("FULLSCREEN_DIALOG")
+    menu:SetPoint("TOPLEFT", b, "BOTTOMLEFT", 0, -2)
+    local bg = menu:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetColorTexture(0.05, 0.07, 0.06, 0.96)
+    menu:EnableMouse(true)
+    menu:Hide()
+    menu.items = {}
+    b.menu = menu
+    function b.textFor(value)
+        if value == nil and allText then return allText end
+        for _, o in ipairs(b.lastOptions or {}) do
+            if o.value == value then return o.text end
+        end
+        if label then
+            local text = label(value)
+            if text then return text end
+        end
+        local list = b.options()
+        for _, o in ipairs(list) do
+            if o.value == value then return o.text end
+        end
+        return list[1].text
+    end
+    function b.choose(value)
+        b.value = value
+        b:SetText(b.textFor(value) .. " ▼")
+        closeMenu()
+        onChoose(value)
+    end
+    function b.refreshText() b:SetText(b.textFor(b.value) .. " ▼") end
+    b:SetScript("OnClick", function()
+        if menu:IsShown() then closeMenu(); return end
+        closeMenu()
+        local list = b.options()
+        b.lastOptions = list
+        for i, o in ipairs(list) do
+            local item = menu.items[i]
+            if not item then
+                item = CreateFrame("Button", nil, menu)
+                item:SetSize(w + 20, 18)
+                item:SetPoint("TOPLEFT", menu, "TOPLEFT", 4, -4 - (i - 1) * 18)
+                pcall(item.SetNormalFontObject, item, "GameFontHighlightSmall")
+                item:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+                menu.items[i] = item
+            end
+            item:SetText(o.text)
+            local value = o.value
+            item:SetScript("OnClick", function() b.choose(value) end)
+            item:Show()
+        end
+        for i = #list + 1, #menu.items do menu.items[i]:Hide() end
+        menu:SetSize(w + 28, #list * 18 + 8)
+        menu:Show()
+        openMenu = menu
+    end)
+    b:HookScript("OnHide", function() if openMenu == menu then closeMenu() end end)
+    b.refreshText()
+    return b
+end
+
+-- A check box with a label on its right; onChange(checked).
+function ns.checkBox(parent, text, x, y, onChange)
+    local c = ns.createFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+    c:SetSize(24, 24)
+    c:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+    c.label = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    c.label:SetPoint("LEFT", c, "RIGHT", 0, 0)
+    c.label:SetText(text)
+    c.checked = false
+    function c.set(on)
+        c.checked = on and true or false
+        if c.SetChecked then c:SetChecked(c.checked) end
+    end
+    c:SetScript("OnClick", function()
+        c.set(not c.checked)
+        onChange(c.checked)
+    end)
+    return c
 end

@@ -21,7 +21,9 @@ Recipes.CRAFTS = { [164] = true, [165] = true, [197] = true, [202] = true, [171]
     [333] = true, [185] = true, [129] = true, [186] = true }
 Recipes.READ_AGAIN = { 2, 5 }
 
-local filterWarned = {}
+-- Professions whose window had a filter on this session, so the saved list
+-- was kept (GF-001-D19: no chat message; shown in 「同步與診斷」).
+local skippedFiltered = {}
 
 local function T() return C_TradeSkillUI end
 
@@ -89,11 +91,7 @@ function Recipes.scan()
     local old = Share.get(a, g)
     local oldIDs = old and Share.decodeValue(g, old.v) or nil
     if oldIDs and #ids < #oldIDs and isSubset(ids, oldIDs) then
-        if not filterWarned[skill] then
-            filterWarned[skill] = true
-            ns.say(string.format("%s視窗目前有篩選，配方清單沒有更新（取消篩選後再開一次即可）。",
-                ns.Data.skillName(nil, skill) or "專業"))
-        end
+        skippedFiltered[skill] = true
         return "filtered"
     end
     if oldIDs then
@@ -106,6 +104,15 @@ function Recipes.scan()
     end
     local r = Share.ownRecord(g, Share.encodeValue(g, ids))
     return r
+end
+
+-- Names of the professions skipped because of a window filter (sorted).
+function Recipes.skippedFiltered()
+    local list = {}
+    for skill in pairs(skippedFiltered) do list[#list + 1] = skill end
+    table.sort(list)
+    for i, skill in ipairs(list) do list[i] = ns.Data.skillName(nil, skill) or ("專業 " .. skill) end
+    return list
 end
 
 local readTimers = {}
@@ -280,20 +287,27 @@ end
 function Recipes.isBuilding() return building ~= nil end
 
 -- Rows for one profession: { { id, name, crafters } }, filtered and sorted by name.
-function Recipes.rows(index, skill, query, onlyGuid)
+-- opts (GF-001-D19): online = only crafters who are online; who = "mine"
+-- (only recipes I know) or "others" (only other members).
+function Recipes.rows(index, skill, query, onlyGuid, opts)
     local p = index[skill]
     local rows = {}
     if not p then return rows end
+    opts = opts or {}
     local q = ns.keyName(query)
     for id, who in pairs(p.recipes) do
-        local list = {}
+        local list, mine = {}, false
         for _, m in ipairs(who) do
-            if not onlyGuid or m.guid == onlyGuid then list[#list + 1] = m end
+            if m.self then mine = true end
+            local keep = (not onlyGuid or m.guid == onlyGuid)
+                and (not opts.online or m.online)
+                and (opts.who ~= "others" or not m.self)
+            if keep then list[#list + 1] = m end
         end
-        if #list > 0 then
+        if #list > 0 and (opts.who ~= "mine" or mine) then
             local name = Recipes.name(id)
             if q == "" or ns.keyName(name):find(q, 1, true) then
-                rows[#rows + 1] = { id = id, name = name, crafters = list } -- already online first
+                rows[#rows + 1] = { id = id, name = name, crafters = list, mine = mine } -- already online first
             end
         end
     end
@@ -313,21 +327,156 @@ function Recipes.crafterText(list)
     return text
 end
 
+-- First online crafter other than this character, or nil.
+function Recipes.onlineCrafter(list)
+    for _, m in ipairs(list or {}) do
+        if m.online and not m.self then return m end
+    end
+    return nil
+end
+
+---------------------------------------------------------------------------
+-- What a click on a recipe can do (GF-001-D19; docs/research/recipe-click.md)
+---------------------------------------------------------------------------
+
+-- Chat link of a recipe: the trade skill link when the client gives one,
+-- else the spell link. nil when neither works.
+function Recipes.link(id)
+    local t = T()
+    if type(t) == "table" and type(t.GetRecipeLink) == "function" then
+        local link = ns.call(t.GetRecipeLink, id)
+        if type(link) == "string" and link ~= "" then return link end
+    end
+    if C_Spell and type(C_Spell.GetSpellLink) == "function" then
+        local link = ns.call(C_Spell.GetSpellLink, id)
+        if type(link) == "string" and link ~= "" then return link end
+    end
+    return nil
+end
+
+local function chatUtil(modern, legacy)
+    if type(ChatFrameUtil) == "table" and type(ChatFrameUtil[modern]) == "function" then return ChatFrameUtil[modern] end
+    if type(_G[legacy]) == "function" then return _G[legacy] end
+    return nil
+end
+
+-- Shift-click: put the link into the chat box (opening it when closed).
+function Recipes.insertLink(id)
+    local link = Recipes.link(id)
+    if not link then return false end
+    local insert = chatUtil("InsertLink", "ChatEdit_InsertLink")
+    if insert and ns.call(insert, link) then return true end
+    local open = chatUtil("OpenChat", "ChatFrame_OpenChat")
+    if open then
+        local ok = pcall(open, link)
+        return ok
+    end
+    return false
+end
+
+-- Click: the recipe's own tooltip, pinned (as a chat link opens).
+function Recipes.showDetail(id)
+    local tip = ItemRefTooltip
+    if type(tip) ~= "table" or type(tip.SetHyperlink) ~= "function" then return false end
+    local link = Recipes.link(id)
+    local hyperlink = link and link:match("|H(.-)|h") or ("spell:" .. id)
+    if tip.SetOwner then pcall(tip.SetOwner, tip, UIParent, "ANCHOR_PRESERVE") end
+    local ok = pcall(tip.SetHyperlink, tip, hyperlink)
+    if ok and tip.Show then tip:Show() end
+    return ok
+end
+
+-- 「密語」: open a whisper to an online crafter, with the recipe in it. The
+-- player still presses Enter; nothing is sent by the toolkit.
+function Recipes.whisper(data)
+    local m = data and Recipes.onlineCrafter(data.crafters)
+    if not m then return false end
+    local link = Recipes.link(data.id) or data.name
+    local withText = chatUtil("SendTellWithMessage", "ChatFrame_SendTellWithMessage")
+    if withText and pcall(withText, m.name, "可以幫我做" .. link .. "嗎？") then return true end
+    local tell = chatUtil("SendTell", "ChatFrame_SendTell")
+    return tell ~= nil and pcall(tell, m.name) or false
+end
+
+-- 「打開」: this character's own recipe in its profession window. Only out of
+-- combat; the client may still refuse (then nothing happens).
+function Recipes.openOwn(id)
+    if ns.inCombat() then return false end
+    local t = T()
+    if type(t) ~= "table" or type(t.OpenRecipe) ~= "function" then return false end
+    return (pcall(t.OpenRecipe, id))
+end
+
 ---------------------------------------------------------------------------
 -- 「配方」 page
 ---------------------------------------------------------------------------
 
 local ROW_HEIGHT, MAX_TABS = 22, 9
-local panel, scroll, content, search, emptyLine, filterLine, clearFilter, footer
+local panel, scroll, content, search, emptyLine, filterLine, clearFilter
 local tabs, rowWidgets = {}, {}
 local shownRows = {} -- all rows of the current list; only those in view have frames
-local current = { skill = nil, guid = nil, query = "" }
+local current = { skill = nil, guid = nil, query = "", online = false, who = nil }
 Recipes.state = current
 
 local function professionName(skill) return ns.Data.skillName(nil, skill) or ("專業 " .. skill) end
 
+-- 「密語」 and 「打開」: one pair for the whole page, shown on the row under
+-- the cursor (a page can have hundreds of rows).
+local actions = {}
+Recipes.actions = actions
+
+local function hideActions()
+    for _, b in pairs(actions) do b:Hide() end
+    actions.row = nil
+end
+
+local function overActions()
+    for _, key in ipairs({ "whisper", "open" }) do
+        local b = actions[key]
+        if b and b:IsShown() and b.IsMouseOver and b:IsMouseOver() then return true end
+    end
+    return false
+end
+
+function Recipes.showActions(row)
+    local data = row and row.data
+    if not (data and actions.whisper) then return end
+    actions.row = row
+    local x = -6
+    for _, key in ipairs({ "open", "whisper" }) do
+        local b = actions[key]
+        local want = (key == "whisper" and Recipes.onlineCrafter(data.crafters) ~= nil)
+            or (key == "open" and data.mine and not ns.inCombat())
+        if want then
+            b:ClearAllPoints()
+            b:SetPoint("RIGHT", row, "RIGHT", x, 0)
+            if b.SetFrameLevel and row.GetFrameLevel then
+                pcall(b.SetFrameLevel, b, (ns.num((row:GetFrameLevel())) or 1) + 3)
+            end
+            b.data = data
+            b:Show()
+            x = x - 54
+        else
+            b:Hide()
+        end
+    end
+end
+
+local function actionButton(text, fn)
+    local b = ns.createFrame("Button", nil, content, "UIPanelButtonTemplate")
+    b:SetSize(50, 20)
+    b:SetText(text)
+    b:SetScript("OnClick", function(self) fn(self.data) end)
+    b:SetScript("OnLeave", function()
+        local row = actions.row
+        if not (row and row.IsMouseOver and row:IsMouseOver()) then hideActions() end
+    end)
+    b:Hide()
+    return b
+end
+
 local function newRow(i)
-    local row = CreateFrame("Frame", nil, content)
+    local row = CreateFrame("Button", nil, content)
     row:SetSize(930, ROW_HEIGHT)
     row.bg = row:CreateTexture(nil, "BACKGROUND")
     row.bg:SetAllPoints()
@@ -338,10 +487,11 @@ local function newRow(i)
     row.name:SetWordWrap(false)
     row.who = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     row.who:SetPoint("LEFT", row, "LEFT", 440, 0)
-    row.who:SetWidth(480)
+    row.who:SetWidth(370) -- room on the right for 「密語」「打開」
     row.who:SetJustifyH("LEFT")
     row.who:SetWordWrap(false)
     row:EnableMouse(true)
+    if row.RegisterForClicks then row:RegisterForClicks("LeftButtonUp") end
     row:SetScript("OnEnter", function(self)
         local data = self.data
         if not data then return end
@@ -355,12 +505,25 @@ local function newRow(i)
         GameTooltip:AddLine("會做的人", 1, 0.82, 0)
         for _, m in ipairs(data.crafters) do
             local c = m.online and { 0.4, 1, 0.4 } or { 0.8, 0.8, 0.8 }
-            local note = Recipes.agoText(m.t) .. "記錄" .. (m.relayed and "，公會成員轉傳" or "")
-            GameTooltip:AddLine(string.format("%s（%s）", ns.shortName(m.name), note), c[1], c[2], c[3])
+            GameTooltip:AddLine(ns.shortName(m.name), c[1], c[2], c[3])
         end
         GameTooltip:Show()
     end)
-    row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    row:HookScript("OnEnter", Recipes.showActions)
+    row:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+        if not overActions() then hideActions() end
+    end)
+    -- Click: the recipe's tooltip pinned; Shift-click: link it in chat.
+    row:SetScript("OnClick", function(self)
+        local data = self.data
+        if not data then return end
+        if type(IsShiftKeyDown) == "function" and IsShiftKeyDown() then
+            Recipes.insertLink(data.id)
+        else
+            Recipes.showDetail(data.id)
+        end
+    end)
     rowWidgets[i] = row
     return row
 end
@@ -392,6 +555,7 @@ function Recipes.layoutRows()
     if h <= 0 then h = 400 end
     local count = math.ceil(h / ROW_HEIGHT) + 1
     local first = math.max(1, math.floor(offset / ROW_HEIGHT) + 1)
+    hideActions()
     for k = 1, math.max(count, #rowWidgets) do
         local i = first + k - 1
         local data = k <= count and shownRows[i] or nil
@@ -459,15 +623,16 @@ function Recipes.refresh()
             end
         end
     end
-    local rows = current.skill and Recipes.rows(index, current.skill, current.query, current.guid) or {}
+    local opts = { online = current.online, who = current.who }
+    local rows = current.skill and Recipes.rows(index, current.skill, current.query, current.guid, opts) or {}
     shownRows = rows
     content:SetHeight(math.max(1, #rows * ROW_HEIGHT))
     Recipes.layoutRows()
+    local filtered = current.query ~= "" or current.online or current.who ~= nil
     if #skills == 0 then
-        emptyLine:SetText(current.guid and "這位成員還沒有分享配方。"
-            or "還沒有人分享配方。打開自己的專業視窗，就會分享你的配方。")
+        emptyLine:SetText(current.guid and "這位成員還沒有分享配方。" or "還沒有人分享配方。")
     elseif #rows == 0 then
-        emptyLine:SetText(current.query ~= "" and "找不到符合的配方。" or "這個專業還沒有配方資料。")
+        emptyLine:SetText(filtered and "找不到符合的配方。" or "這個專業還沒有配方資料。")
     else
         emptyLine:SetText("")
     end
@@ -479,7 +644,7 @@ function Recipes.refresh()
         filterLine:SetText("只看：" .. ns.shortName(name or "?"))
         clearFilter:Show()
     else
-        filterLine:SetText(current.skill and string.format("%s｜%d 個配方", professionName(current.skill), #rows) or "")
+        filterLine:SetText(current.skill and string.format("%d 個配方", #rows) or "")
         clearFilter:Hide()
     end
 end
@@ -492,25 +657,35 @@ function Recipes.show(guid, skill)
     Recipes.refresh()
 end
 
+Recipes.WHO_OPTIONS = {
+    { value = nil, text = "所有人" },
+    { value = "mine", text = "只看我的" },
+    { value = "others", text = "只看別人的" },
+}
+
 local function build(p)
     panel = p
+    local label = p:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    label:SetPoint("TOPLEFT", p, "TOPLEFT", 22, -80)
+    label:SetText("搜尋")
     search = ns.createFrame("EditBox", nil, p, "InputBoxTemplate")
-    search:SetSize(260, 24)
+    search:SetSize(220, 24)
     search:SetPoint("TOPLEFT", p, "TOPLEFT", 70, -74)
     search:SetAutoFocus(false)
     search:SetMaxLetters(60)
     search:SetScript("OnTextChanged", function(self) current.query = str(self:GetText()); Recipes.refresh() end)
     search:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     Recipes.searchBox = search
-    local label = p:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    label:SetPoint("TOPLEFT", p, "TOPLEFT", 22, -80)
-    label:SetText("搜尋")
+    Recipes.whoChoice = ns.choiceButton(p, 110, 304, -74, function() return Recipes.WHO_OPTIONS end,
+        function(value) current.who = value; Recipes.refresh() end, "所有人")
+    Recipes.onlineCheck = ns.checkBox(p, "只看在線", 424, -74,
+        function(on) current.online = on; Recipes.refresh() end)
     filterLine = p:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    filterLine:SetPoint("TOPLEFT", p, "TOPLEFT", 350, -80)
+    filterLine:SetPoint("TOPLEFT", p, "TOPLEFT", 530, -80)
     filterLine:SetJustifyH("LEFT")
     clearFilter = ns.createFrame("Button", nil, p, "UIPanelButtonTemplate")
     clearFilter:SetSize(110, 22)
-    clearFilter:SetPoint("TOPLEFT", p, "TOPLEFT", 560, -75)
+    clearFilter:SetPoint("TOPLEFT", p, "TOPLEFT", 680, -75)
     clearFilter:SetText("看全部的人")
     clearFilter:SetScript("OnClick", function() current.guid = nil; Recipes.refresh() end)
     clearFilter:Hide()
@@ -520,21 +695,18 @@ local function build(p)
     header:SetText("配方")
     local header2 = p:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
     header2:SetPoint("TOPLEFT", p, "TOPLEFT", 460, -108)
-    header2:SetText("會做的人（在線的在前）")
+    header2:SetText("會做的人")
     scroll = ns.createFrame("ScrollFrame", nil, p, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", 20, -126)
-    scroll:SetPoint("BOTTOMRIGHT", -40, 44)
+    scroll:SetPoint("BOTTOMRIGHT", -40, 24)
     content = CreateFrame("Frame", nil, scroll)
     content:SetSize(930, 1)
     scroll:SetScrollChild(content)
+    actions.whisper = actionButton("密語", function(d) Recipes.whisper(d) end)
+    actions.open = actionButton("打開", function(d) if d then Recipes.openOwn(d.id) end end)
     scroll:HookScript("OnVerticalScroll", function() Recipes.layoutRows() end)
     emptyLine = p:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     emptyLine:SetPoint("TOP", p, "TOP", 0, -170)
-    footer = p:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    footer:SetPoint("BOTTOMLEFT", p, "BOTTOMLEFT", 22, 18)
-    footer:SetWidth(940)
-    footer:SetJustifyH("LEFT")
-    footer:SetText("配方由公會內有裝工具箱的人分享與轉傳；打開自己的專業視窗就會更新。你的配方也會分享給公會成員。")
 end
 
 ns.Framework.register({

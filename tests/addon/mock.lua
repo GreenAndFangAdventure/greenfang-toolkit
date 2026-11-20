@@ -45,6 +45,7 @@ local function fixedWidthOf(self)
     if self._kind == "FontString" and type(fixed) == "number" and fixed > 0 then return fixed end
 end
 local function setWidth(self, w) self._fixedWidth = w end
+local function setAlpha(self, a) self._alpha = a end
 local function getStringWidth(self)
     local w, fixed = textWidth(self._text), fixedWidthOf(self)
     if fixed and w > fixed then return fixed end
@@ -82,6 +83,7 @@ local function newObject(kind, name)
     function methods.GetAttribute(self, k) return self._attrs[k] end
     function methods.RegisterForClicks(self, ...) self._clicks = { ... } end
     methods.SetWidth, methods.GetStringWidth, methods.IsTruncated = setWidth, getStringWidth, isTruncated
+    methods.SetAlpha = setAlpha
     function methods.SetVerticalScroll(self, v)
         self._vscroll = v
         if self._scripts.OnVerticalScroll then self._scripts.OnVerticalScroll(self, v) end
