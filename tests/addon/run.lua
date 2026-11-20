@@ -3936,10 +3936,11 @@ test("D19 recipe filters: only mine / only others, only online crafters, search"
     eq(shown, 4, "page: all again")
 end)
 
-test("D19 recipe actions: detail, Shift-click link, whisper an online crafter, open my own", function()
+test("D20 recipe clicks: mine opens, others pinned, Shift links, right-click whisper menu", function()
     local ns = shareLogin({ tradeSkill = leatherWindow() })
-    wow.fire("TRADE_SKILL_SHOW")
-    shareFrom(ns, PEER, (rMsg(ns, A_PEER, 165, wow.state.now - 600, { 2152, 2153 })))
+    wow.fire("TRADE_SKILL_SHOW")                                          -- mine: 2149, 2152
+    shareFrom(ns, PEER, (rMsg(ns, A_PEER, 165, wow.state.now - 600, { 2152, 2153 })))  -- online
+    shareFrom(ns, PEER, (rMsg(ns, A_THIRD, 165, wow.state.now - 600, { 2153 })))       -- offline
     local calls = {}
     C_TradeSkillUI.GetRecipeLink = function(id) return "|cffffd000|Henchant:" .. id .. "|h[配方" .. id .. "]|h|r" end
     C_TradeSkillUI.OpenRecipe = function(id) calls[#calls + 1] = "open:" .. id end
@@ -3950,35 +3951,50 @@ test("D19 recipe actions: detail, Shift-click link, whisper an online crafter, o
     local shift = false
     IsShiftKeyDown = function() return shift end
     ns.Recipes.show(nil, 165)
-    local row
-    for _, r in ipairs(ns.Recipes.rowFrames()) do if r:IsShown() and r.data.id == 2152 then row = r end end
-    ok(row, "row for 2152 (mine and the peer's)")
-    row._scripts.OnClick(row, "LeftButton")
-    eq(pinned, "enchant:2152", "click: the recipe pinned")
-    shift = true
-    row._scripts.OnClick(row, "LeftButton")
-    eq(calls[#calls], "insert:|cffffd000|Henchant:2152|h[配方2152]|h|r", "Shift-click: link in chat")
-    shift = false
-    row._scripts.OnEnter(row)
-    ok(ns.Recipes.actions.whisper:IsShown(), "密語 shown on hover (online crafter)")
-    ok(ns.Recipes.actions.open:IsShown(), "打開 shown on hover (my recipe)")
-    wow.click(ns.Recipes.actions.whisper)
-    eq(calls[#calls], "tell:" .. PEER .. ":可以幫我做|cffffd000|Henchant:2152|h[配方2152]|h|r嗎？", "whisper opened, not sent")
-    eq(#v1Sent(), #v1Sent(), "nothing sent by the toolkit")
-    wow.click(ns.Recipes.actions.open)
-    eq(calls[#calls], "open:2152", "opens my own recipe")
-    row._scripts.OnLeave(row)
-    ok(not ns.Recipes.actions.whisper:IsShown(), "hidden when the cursor leaves")
-    -- 2149: only mine, nobody else online -> no 密語.
-    local mine
-    for _, r in ipairs(ns.Recipes.rowFrames()) do if r:IsShown() and r.data.id == 2149 then mine = r end end
-    mine._scripts.OnEnter(mine)
-    ok(not ns.Recipes.actions.whisper:IsShown(), "no online crafter but me: no 密語")
+    local function rowOf(id)
+        for _, r in ipairs(ns.Recipes.rowFrames()) do if r:IsShown() and r.data and r.data.id == id then return r end end
+    end
+    local mine, theirs = rowOf(2152), rowOf(2153)
+    ok(mine and theirs, "rows")
+    eq(ns.Recipes.actions, nil, "no hover buttons any more")
+    -- Click.
+    eq(ns.Recipes.click(mine, "LeftButton"), "open", "my recipe: opened in my profession window")
+    eq(calls[#calls], "open:2152", "OpenRecipe")
+    eq(ns.Recipes.click(theirs, "LeftButton"), "detail", "someone else's: pinned")
+    eq(pinned, "enchant:2153", "pinned link")
+    C_TradeSkillUI.OpenRecipe = function() error("blocked") end
+    pinned = nil
+    eq(ns.Recipes.click(mine, "LeftButton"), "detail", "open fails: pinned instead")
+    eq(pinned, "enchant:2152", "pinned link")
     wow.enterCombat()
-    eq(ns.Recipes.openOwn(2149), false, "not in combat")
-    mine._scripts.OnEnter(mine)
-    ok(not ns.Recipes.actions.open:IsShown(), "no 打開 in combat")
+    pinned = nil
+    eq(ns.Recipes.click(mine, "LeftButton"), "detail", "in combat: pinned, never opened")
     wow.leaveCombat()
+    shift = true
+    eq(ns.Recipes.click(theirs, "LeftButton"), "link", "Shift-click")
+    eq(calls[#calls], "insert:|cffffd000|Henchant:2153|h[配方2153]|h|r", "link in chat")
+    shift = false
+    -- Right-click: one 密語 line per online crafter (not me, not offline).
+    eq(ns.Recipes.click(theirs, "RightButton"), "menu", "menu")
+    local menu = _G[ns.Framework.MENU_NAME]
+    ok(menu and menu:IsShown(), "menu shown")
+    ok(menu.gfOpaque, "menu is opaque")
+    local items = {}
+    for _, b in ipairs(menu.items) do if b:IsShown() then items[#items + 1] = b:GetText() end end
+    eq(table.concat(items, "|"), "密語 測試乙", "only the online crafter")
+    wow.click(menu.items[1])
+    eq(calls[#calls], "tell:" .. PEER .. ":可以幫我做|cffffd000|Henchant:2153|h[配方2153]|h|r嗎？", "whisper opened")
+    ok(not menu:IsShown(), "closed after the pick")
+    local onlyMine = rowOf(2149)
+    eq(ns.Recipes.click(onlyMine, "RightButton"), "none", "nobody else online: no menu")
+    -- The row stays shown while hovered and after the cursor leaves (0.9.4 hid it).
+    theirs._scripts.OnEnter(theirs)
+    ok(theirs:IsShown(), "shown while hovered")
+    theirs._scripts.OnLeave(theirs)
+    ok(theirs:IsShown(), "still shown after the cursor leaves")
+    ns.Recipes.refresh()
+    ok(rowOf(2153), "still shown after a redraw")
+    eq(theirs.name:GetText() ~= "", true, "text kept")
     -- Without the newer functions: the spell link, and the chat box opened.
     C_TradeSkillUI.GetRecipeLink = nil
     C_Spell.GetSpellLink = function(id) return "|Hspell:" .. id .. "|h[x]|h" end
@@ -3991,6 +4007,75 @@ test("D19 recipe actions: detail, Shift-click link, whisper an online crafter, o
     eq(ns.Recipes.showDetail(2149), false, "no pinned tooltip in this client: nothing happens")
     ChatEdit_InsertLink, ChatFrame_SendTellWithMessage, ChatFrame_OpenChat, IsShiftKeyDown = nil, nil, nil, nil
     eq(#wow.state.blocked, 0, "nothing blocked")
+end)
+
+test("D20 recipe filter line: 搜尋, 專業, 會做的人, 只看在線 on one line; no tabs", function()
+    local ns = shareLogin({ tradeSkill = leatherWindow() })
+    wow.fire("TRADE_SKILL_SHOW")
+    shareFrom(ns, PEER, (rMsg(ns, A_PEER, 164, wow.state.now - 600, { 2660, 2661 })))
+    ns.Framework.open("recipes")
+    local R = ns.Recipes
+    local function y(w) return w._points[1][5] end
+    eq(y(R.searchBox), -44, "search on the filter line")
+    eq(y(R.skillChoice), -44, "專業 on the filter line")
+    eq(y(R.whoChoice), -44, "會做的人 on the filter line")
+    eq(y(R.onlineCheck), -44, "只看在線 on the filter line")
+    local texts = table.concat(wow.allTexts(), "\n")
+    for _, want in ipairs({ "搜尋", "專業", "會做的人", "只看在線" }) do ok(texts:find(want, 1, true), "label " .. want) end
+    ok(R.skillChoice:GetText():find("鍛造", 1, true), "first profession chosen: " .. R.skillChoice:GetText())
+    local opts = {}
+    for _, o in ipairs(R.skillOptions()) do opts[#opts + 1] = o.text end
+    eq(table.concat(opts, ","), "鍛造,製皮", "professions with recipes")
+    R.skillChoice.choose(165)
+    eq(R.state.skill, 165, "picked")
+    ok(R.skillChoice:GetText():find("製皮", 1, true), "button shows it")
+    ok(texts:find("個配方", 1, true), "count")
+    -- No tab buttons above the list any more.
+    for _, t in ipairs(wow.allTexts()) do ok(t ~= "鍛造" or false, "no tab labelled 鍛造") end
+end)
+
+test("D20 popups: 同步與診斷 and export are opaque, framed and above the toolkit window", function()
+    wow.reset()
+    local ns = wow.login(ADDON_DIR)
+    ns.Framework.open("roster")
+    ns.Diag.open()
+    local d = _G[ns.Diag.WINDOW_NAME]
+    ok(d.gfOpaque, "diag: own opaque background")
+    eq(d.gfOpaque._color and d.gfOpaque._color[4] or d.gfOpaque._colorTexture[4], 0.97, "diag: nearly solid")
+    eq(d._strata, "FULLSCREEN_DIALOG", "diag above the toolkit window (DIALOG)")
+    ns.UI.startExport("tsv")
+    local e = _G.GreenFangToolkit_ExportWindow
+    ok(e.gfOpaque, "export: opaque")
+    eq(e._strata, "FULLSCREEN_DIALOG", "export above the toolkit window")
+    ok(_G[ns.Framework.WINDOW_NAME].gfOpaque, "toolkit window: opaque too")
+    wow.click(ns.UI.classChoice)
+    ok(ns.UI.classChoice.menu.gfOpaque, "filter list: opaque")
+    eq(ns.UI.classChoice.menu._strata, "FULLSCREEN_DIALOG", "filter list on top")
+end)
+
+test("D20 roster filter line: labels and boxes do not overlap", function()
+    wow.reset()
+    local ns = wow.login(ADDON_DIR)
+    ns.Framework.open("roster")
+    -- Left edge and width of each control on the line, in order.
+    local function x(w) return w._points[1][4] end
+    local list = {
+        { "搜尋", x(ns.UI.searchBox), ns.UI.searchBox._w },
+        { "專業", x(ns.UI.skillChoice), ns.UI.skillChoice._w },
+        { "職業", x(ns.UI.classChoice), ns.UI.classChoice._w },
+        { "在線", x(ns.UI.onlineCheck), 24 + 60 },
+        { "等級", x(ns.UI.levelLabel), 30 },
+        { "等級框", x(ns.UI.levelBox), ns.UI.levelBox._w },
+        { "以上", x(ns.UI.levelSuffix), 26 },
+        { "清除", x(ns.UI.clearButton), ns.UI.clearButton._w },
+    }
+    for i = 2, #list do
+        local prev, cur = list[i - 1], list[i]
+        -- Input boxes draw their border about 6 px outside their edges.
+        ok(prev[2] + prev[3] + 6 <= cur[2], prev[1] .. " ends before " .. cur[1] .. " starts")
+    end
+    ok(ns.UI.levelBox._w >= 40, "level box wide enough for two digits")
+    ok(list[#list][2] + list[#list][3] <= 1000 - 20, "fits in the page")
 end)
 
 test("fixture: generated sample is up to date and free of zone/online in the outbox", function()

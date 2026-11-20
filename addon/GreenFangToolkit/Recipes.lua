@@ -327,12 +327,18 @@ function Recipes.crafterText(list)
     return text
 end
 
+-- Online crafters other than this character (online first already).
+function Recipes.onlineCrafters(list)
+    local out = {}
+    for _, m in ipairs(list or {}) do
+        if m.online and not m.self then out[#out + 1] = m end
+    end
+    return out
+end
+
 -- First online crafter other than this character, or nil.
 function Recipes.onlineCrafter(list)
-    for _, m in ipairs(list or {}) do
-        if m.online and not m.self then return m end
-    end
-    return nil
+    return Recipes.onlineCrafters(list)[1]
 end
 
 ---------------------------------------------------------------------------
@@ -386,10 +392,11 @@ function Recipes.showDetail(id)
     return ok
 end
 
--- 「密語」: open a whisper to an online crafter, with the recipe in it. The
--- player still presses Enter; nothing is sent by the toolkit.
-function Recipes.whisper(data)
-    local m = data and Recipes.onlineCrafter(data.crafters)
+-- 「密語」: open a whisper to an online crafter (m, or the first one), with
+-- the recipe in it. The player still presses Enter; nothing is sent by the
+-- toolkit.
+function Recipes.whisper(data, m)
+    m = m or (data and Recipes.onlineCrafter(data.crafters))
     if not m then return false end
     local link = Recipes.link(data.id) or data.name
     local withText = chatUtil("SendTellWithMessage", "ChatFrame_SendTellWithMessage")
@@ -398,8 +405,9 @@ function Recipes.whisper(data)
     return tell ~= nil and pcall(tell, m.name) or false
 end
 
--- 「打開」: this character's own recipe in its profession window. Only out of
--- combat; the client may still refuse (then nothing happens).
+-- This character's own recipe in its profession window (click on a row,
+-- GF-001-D20). Only out of combat; false when the function is missing or
+-- fails, and the caller then shows the pinned recipe instead.
 function Recipes.openOwn(id)
     if ns.inCombat() then return false end
     local t = T()
@@ -411,68 +419,42 @@ end
 -- 「配方」 page
 ---------------------------------------------------------------------------
 
-local ROW_HEIGHT, MAX_TABS = 22, 9
+local ROW_HEIGHT = 22
 local panel, scroll, content, search, emptyLine, filterLine, clearFilter
-local tabs, rowWidgets = {}, {}
+local rowWidgets = {}
 local shownRows = {} -- all rows of the current list; only those in view have frames
+local lastIndex = {} -- the index the page last drew (option lists use it)
 local current = { skill = nil, guid = nil, query = "", online = false, who = nil }
 Recipes.state = current
 
-local function professionName(skill) return ns.Data.skillName(nil, skill) or ("專業 " .. skill) end
-
--- 「密語」 and 「打開」: one pair for the whole page, shown on the row under
--- the cursor (a page can have hundreds of rows).
-local actions = {}
-Recipes.actions = actions
-
-local function hideActions()
-    for _, b in pairs(actions) do b:Hide() end
-    actions.row = nil
+local function professionName(skill)
+    if not skill then return nil end
+    return ns.Data.skillName(nil, skill) or ("專業 " .. skill)
 end
 
-local function overActions()
-    for _, key in ipairs({ "whisper", "open" }) do
-        local b = actions[key]
-        if b and b:IsShown() and b.IsMouseOver and b:IsMouseOver() then return true end
+-- Right-click: 「密語 名字」 for each online crafter (GF-001-D20).
+function Recipes.whisperItems(data)
+    local items = {}
+    for _, m in ipairs(Recipes.onlineCrafters(data and data.crafters)) do
+        items[#items + 1] = { text = "密語 " .. ns.shortName(m.name), fn = function() Recipes.whisper(data, m) end }
     end
-    return false
+    return items
 end
 
-function Recipes.showActions(row)
+-- A click on a row (GF-001-D20): Shift = link in chat; my own recipe =
+-- open it in my profession window, else (or when that does not work) the
+-- recipe pinned; right button = whisper menu.
+function Recipes.click(row, button)
     local data = row and row.data
-    if not (data and actions.whisper) then return end
-    actions.row = row
-    local x = -6
-    for _, key in ipairs({ "open", "whisper" }) do
-        local b = actions[key]
-        local want = (key == "whisper" and Recipes.onlineCrafter(data.crafters) ~= nil)
-            or (key == "open" and data.mine and not ns.inCombat())
-        if want then
-            b:ClearAllPoints()
-            b:SetPoint("RIGHT", row, "RIGHT", x, 0)
-            if b.SetFrameLevel and row.GetFrameLevel then
-                pcall(b.SetFrameLevel, b, (ns.num((row:GetFrameLevel())) or 1) + 3)
-            end
-            b.data = data
-            b:Show()
-            x = x - 54
-        else
-            b:Hide()
-        end
+    if not data then return "none" end
+    if button == "RightButton" then
+        return ns.showMenu(row, Recipes.whisperItems(data)) and "menu" or "none"
     end
-end
-
-local function actionButton(text, fn)
-    local b = ns.createFrame("Button", nil, content, "UIPanelButtonTemplate")
-    b:SetSize(50, 20)
-    b:SetText(text)
-    b:SetScript("OnClick", function(self) fn(self.data) end)
-    b:SetScript("OnLeave", function()
-        local row = actions.row
-        if not (row and row.IsMouseOver and row:IsMouseOver()) then hideActions() end
-    end)
-    b:Hide()
-    return b
+    if type(IsShiftKeyDown) == "function" and IsShiftKeyDown() then
+        return Recipes.insertLink(data.id) and "link" or "none"
+    end
+    if data.mine and Recipes.openOwn(data.id) then return "open" end
+    return Recipes.showDetail(data.id) and "detail" or "none"
 end
 
 local function newRow(i)
@@ -480,6 +462,10 @@ local function newRow(i)
     row:SetSize(930, ROW_HEIGHT)
     row.bg = row:CreateTexture(nil, "BACKGROUND")
     row.bg:SetAllPoints()
+    -- Hover: a light highlight under the text; the row stays readable.
+    if row.SetHighlightTexture then
+        row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+    end
     row.name = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     row.name:SetPoint("LEFT", row, "LEFT", 8, 0)
     row.name:SetWidth(420)
@@ -487,11 +473,11 @@ local function newRow(i)
     row.name:SetWordWrap(false)
     row.who = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     row.who:SetPoint("LEFT", row, "LEFT", 440, 0)
-    row.who:SetWidth(370) -- room on the right for 「密語」「打開」
+    row.who:SetWidth(480)
     row.who:SetJustifyH("LEFT")
     row.who:SetWordWrap(false)
     row:EnableMouse(true)
-    if row.RegisterForClicks then row:RegisterForClicks("LeftButtonUp") end
+    if row.RegisterForClicks then row:RegisterForClicks("LeftButtonUp", "RightButtonUp") end
     row:SetScript("OnEnter", function(self)
         local data = self.data
         if not data then return end
@@ -509,31 +495,10 @@ local function newRow(i)
         end
         GameTooltip:Show()
     end)
-    row:HookScript("OnEnter", Recipes.showActions)
-    row:SetScript("OnLeave", function()
-        GameTooltip:Hide()
-        if not overActions() then hideActions() end
-    end)
-    -- Click: the recipe's tooltip pinned; Shift-click: link it in chat.
-    row:SetScript("OnClick", function(self)
-        local data = self.data
-        if not data then return end
-        if type(IsShiftKeyDown) == "function" and IsShiftKeyDown() then
-            Recipes.insertLink(data.id)
-        else
-            Recipes.showDetail(data.id)
-        end
-    end)
+    row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    row:SetScript("OnClick", function(self, button) Recipes.click(self, button) end)
     rowWidgets[i] = row
     return row
-end
-
-local function newTab(i)
-    local b = ns.createFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    b:SetSize(100, 24)
-    b:SetPoint("TOPLEFT", panel, "TOPLEFT", 20 + (i - 1) * 104, -40)
-    tabs[i] = b
-    return b
 end
 
 function Recipes.professionsInIndex(index)
@@ -547,6 +512,27 @@ function Recipes.professionsInIndex(index)
     return list
 end
 
+-- Professions on the page: the ones in the index (only the member's own
+-- when the page is filtered to one member).
+function Recipes.pageSkills(index)
+    local skills = Recipes.professionsInIndex(index)
+    if not current.guid then return skills end
+    local mine = {}
+    for _, s in ipairs(skills) do
+        for _, c in ipairs(index[s].crafters) do if c.guid == current.guid then mine[#mine + 1] = s; break end end
+    end
+    return mine
+end
+
+function Recipes.skillOptions()
+    local list = {}
+    for _, s in ipairs(Recipes.pageSkills(lastIndex)) do
+        list[#list + 1] = { value = s, text = professionName(s) }
+    end
+    if #list == 0 then list[1] = { value = nil, text = "專業" } end
+    return list
+end
+
 -- Fill the pooled rows with the recipes in view (GF-001-D14).
 function Recipes.layoutRows()
     if not scroll then return end
@@ -555,7 +541,6 @@ function Recipes.layoutRows()
     if h <= 0 then h = 400 end
     local count = math.ceil(h / ROW_HEIGHT) + 1
     local first = math.max(1, math.floor(offset / ROW_HEIGHT) + 1)
-    hideActions()
     for k = 1, math.max(count, #rowWidgets) do
         local i = first + k - 1
         local data = k <= count and shownRows[i] or nil
@@ -587,7 +572,6 @@ function Recipes.refresh()
         if ns.Framework.isModuleShown("recipes") then Recipes.refresh() end
     end)
     if not index then
-        for _, b in ipairs(tabs) do b:Hide() end
         shownRows = {}
         content:SetHeight(1)
         Recipes.layoutRows()
@@ -596,32 +580,14 @@ function Recipes.refresh()
         clearFilter:Hide()
         return
     end
-    local skills = Recipes.professionsInIndex(index)
-    if current.guid then
-        -- Filtered to one member: only professions that member shared.
-        local mine = {}
-        for _, s in ipairs(skills) do
-            for _, c in ipairs(index[s].crafters) do if c.guid == current.guid then mine[#mine + 1] = s; break end end
-        end
-        skills = mine
-    end
+    lastIndex = index
+    local skills = Recipes.pageSkills(index)
     local found = false
     for _, s in ipairs(skills) do if s == current.skill then found = true end end
     if not found then current.skill = skills[1] end
-    for i = 1, math.max(#skills, #tabs) do
-        local s = skills[i]
-        local b = tabs[i] or (i <= MAX_TABS and s and newTab(i)) or nil
-        if b then
-            if s and i <= MAX_TABS then
-                b:SetText(professionName(s))
-                b:SetScript("OnClick", function() current.skill = s; Recipes.refresh() end)
-                if b.SetEnabled then b:SetEnabled(s ~= current.skill) end
-                b.skill = s
-                b:Show()
-            else
-                b:Hide()
-            end
-        end
+    if Recipes.skillChoice then
+        Recipes.skillChoice.value = current.skill
+        Recipes.skillChoice.refreshText()
     end
     local opts = { online = current.online, who = current.who }
     local rows = current.skill and Recipes.rows(index, current.skill, current.query, current.guid, opts) or {}
@@ -663,50 +629,60 @@ Recipes.WHO_OPTIONS = {
     { value = "others", text = "只看別人的" },
 }
 
+-- GF-001-D20 layout: one filter line at the top, like the roster's:
+-- 搜尋 [box]  專業 [▼]  會做的人 [▼]  [ ] 只看在線   N 個配方
+local FILTER_Y = -44
+
+local function label(p, text, x)
+    local l = p:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    l:SetPoint("TOPLEFT", p, "TOPLEFT", x, FILTER_Y - 6)
+    l:SetText(text)
+    return l
+end
+
 local function build(p)
-    panel = p
-    local label = p:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    label:SetPoint("TOPLEFT", p, "TOPLEFT", 22, -80)
-    label:SetText("搜尋")
+    label(p, "搜尋", 22)
     search = ns.createFrame("EditBox", nil, p, "InputBoxTemplate")
-    search:SetSize(220, 24)
-    search:SetPoint("TOPLEFT", p, "TOPLEFT", 70, -74)
+    search:SetSize(180, 24)
+    search:SetPoint("TOPLEFT", p, "TOPLEFT", 62, FILTER_Y)
     search:SetAutoFocus(false)
     search:SetMaxLetters(60)
     search:SetScript("OnTextChanged", function(self) current.query = str(self:GetText()); Recipes.refresh() end)
     search:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     Recipes.searchBox = search
-    Recipes.whoChoice = ns.choiceButton(p, 110, 304, -74, function() return Recipes.WHO_OPTIONS end,
+    label(p, "專業", 262)
+    Recipes.skillChoice = ns.choiceButton(p, 120, 300, FILTER_Y, Recipes.skillOptions,
+        function(value) if value then current.skill = value end; Recipes.refresh() end, nil, professionName)
+    label(p, "會做的人", 440)
+    Recipes.whoChoice = ns.choiceButton(p, 110, 500, FILTER_Y, function() return Recipes.WHO_OPTIONS end,
         function(value) current.who = value; Recipes.refresh() end, "所有人")
-    Recipes.onlineCheck = ns.checkBox(p, "只看在線", 424, -74,
-        function(on) current.online = on; Recipes.refresh() end)
+    Recipes.onlineCheck = ns.checkBox(p, "只看在線", 628, FILTER_Y, function(on) current.online = on; Recipes.refresh() end)
     filterLine = p:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    filterLine:SetPoint("TOPLEFT", p, "TOPLEFT", 530, -80)
+    filterLine:SetPoint("TOPLEFT", p, "TOPLEFT", 724, FILTER_Y - 5)
     filterLine:SetJustifyH("LEFT")
     clearFilter = ns.createFrame("Button", nil, p, "UIPanelButtonTemplate")
-    clearFilter:SetSize(110, 22)
-    clearFilter:SetPoint("TOPLEFT", p, "TOPLEFT", 680, -75)
+    clearFilter:SetSize(100, 22)
+    clearFilter:SetPoint("TOPLEFT", p, "TOPLEFT", 840, FILTER_Y - 1)
     clearFilter:SetText("看全部的人")
     clearFilter:SetScript("OnClick", function() current.guid = nil; Recipes.refresh() end)
     clearFilter:Hide()
     Recipes.clearFilterButton = clearFilter
     local header = p:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    header:SetPoint("TOPLEFT", p, "TOPLEFT", 28, -108)
+    header:SetPoint("TOPLEFT", p, "TOPLEFT", 28, -82)
     header:SetText("配方")
     local header2 = p:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    header2:SetPoint("TOPLEFT", p, "TOPLEFT", 460, -108)
+    header2:SetPoint("TOPLEFT", p, "TOPLEFT", 460, -82)
     header2:SetText("會做的人")
     scroll = ns.createFrame("ScrollFrame", nil, p, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 20, -126)
+    scroll:SetPoint("TOPLEFT", 20, -100)
     scroll:SetPoint("BOTTOMRIGHT", -40, 24)
     content = CreateFrame("Frame", nil, scroll)
     content:SetSize(930, 1)
     scroll:SetScrollChild(content)
-    actions.whisper = actionButton("密語", function(d) Recipes.whisper(d) end)
-    actions.open = actionButton("打開", function(d) if d then Recipes.openOwn(d.id) end end)
     scroll:HookScript("OnVerticalScroll", function() Recipes.layoutRows() end)
     emptyLine = p:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    emptyLine:SetPoint("TOP", p, "TOP", 0, -170)
+    emptyLine:SetPoint("TOP", p, "TOP", 0, -150)
+    panel = p -- last: refresh() needs every widget above
 end
 
 ns.Framework.register({

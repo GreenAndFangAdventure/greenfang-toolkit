@@ -107,6 +107,52 @@ end
 
 -- CreateFrame with a Blizzard template; if the template is missing on this
 -- client, build a plain frame instead of failing to load.
+-- An opaque dark background and a thin border drawn by the toolkit itself
+-- (GF-001-D20). The client's BasicFrameTemplateWithInset can come out see-
+-- through, so 同步與診斷 was unreadable over the roster. Also keeps the
+-- template's close button inside the frame. Safe to call twice.
+ns.OPAQUE_COLOR = { 0.05, 0.07, 0.06, 0.97 }
+ns.BORDER_COLOR = { 0.32, 0.52, 0.42, 1 }
+function ns.makeOpaque(f, inset)
+    if not f or f.gfOpaque then return f end
+    inset = inset or 2
+    local bg = f:CreateTexture(nil, "BACKGROUND", nil, -8)
+    bg:SetPoint("TOPLEFT", f, "TOPLEFT", inset, -inset)
+    bg:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -inset, inset)
+    local c = ns.OPAQUE_COLOR
+    bg:SetColorTexture(c[1], c[2], c[3], c[4])
+    local b = ns.BORDER_COLOR
+    local edges = {
+        { "TOPLEFT", "TOPRIGHT", nil, 1 }, { "BOTTOMLEFT", "BOTTOMRIGHT", nil, 1 },
+        { "TOPLEFT", "BOTTOMLEFT", 1, nil }, { "TOPRIGHT", "BOTTOMRIGHT", 1, nil },
+    }
+    for _, e in ipairs(edges) do
+        local t = f:CreateTexture(nil, "BORDER")
+        t:SetPoint(e[1], f, e[1], 0, 0)
+        t:SetPoint(e[2], f, e[2], 0, 0)
+        if e[3] then t:SetWidth(e[3]) else t:SetHeight(e[4]) end
+        t:SetColorTexture(b[1], b[2], b[3], b[4])
+    end
+    local close = f.CloseButton
+    if type(close) == "table" and close.ClearAllPoints then
+        close:ClearAllPoints()
+        close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -3, -3)
+    end
+    f.gfOpaque = bg
+    return f
+end
+
+-- A popup window above the toolkit window: opaque, framed, raised on show.
+function ns.popupWindow(name, w, h)
+    local f = ns.createFrame("Frame", name, UIParent, "BasicFrameTemplateWithInset")
+    f:SetSize(w, h)
+    f:SetFrameStrata("FULLSCREEN_DIALOG")
+    if f.SetToplevel then f:SetToplevel(true) end
+    ns.makeOpaque(f)
+    if f.HookScript then f:HookScript("OnShow", function(self) if self.Raise then self:Raise() end end) end
+    return f
+end
+
 function ns.createFrame(kind, name, parent, template)
     if template then
         local ok, frame = pcall(CreateFrame, kind, name, parent, template)

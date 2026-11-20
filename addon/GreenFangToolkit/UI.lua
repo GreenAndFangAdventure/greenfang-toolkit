@@ -759,31 +759,34 @@ local function build(p)
     summaryLine:SetWidth(940)
     summaryLine:SetJustifyH("LEFT")
     UI.updateButton = button(f, "更新名冊", 115, 26, 20, -80, manualUpdate)
-    local searchLabel = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    searchLabel:SetPoint("TOPLEFT", 160, -87)
-    searchLabel:SetText("搜尋")
+    -- GF-001-D20: one filter line with room between every control:
+    -- [更新名冊] 搜尋 [box]  [專業 ▼]  [職業 ▼]  [ ] 只看在線  等級 [  ] 以上  [清除]
+    local function label(text, x)
+        local l = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        l:SetPoint("TOPLEFT", f, "TOPLEFT", x, -87)
+        l:SetText(text)
+        return l
+    end
+    label("搜尋", 150)
     searchBox = ns.createFrame("EditBox", nil, f, "InputBoxTemplate")
-    searchBox:SetSize(170, 24)
-    searchBox:SetPoint("TOPLEFT", 200, -80)
+    searchBox:SetSize(150, 24)
+    searchBox:SetPoint("TOPLEFT", f, "TOPLEFT", 186, -80)
     searchBox:SetAutoFocus(false)
     searchBox:SetMaxLetters(100)
     searchBox:SetScript("OnTextChanged", function() UI.refresh(true) end)
     searchBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     UI.searchBox = searchBox
-    -- GF-001-D19 filters, on the same line: profession, class, online, level.
-    UI.skillChoice = ns.choiceButton(f, 110, 382, -80, UI.professionOptions,
+    UI.skillChoice = ns.choiceButton(f, 110, 352, -80, UI.professionOptions,
         function(value) UI.filters.skill = value; UI.refresh(true) end, "全部專業",
         function(id) return ns.Data.skillName(nil, id) end)
-    UI.classChoice = ns.choiceButton(f, 100, 498, -80, UI.classOptions,
+    UI.classChoice = ns.choiceButton(f, 100, 474, -80, UI.classOptions,
         function(value) UI.filters.class = value; UI.refresh(true) end, "全部職業")
-    UI.onlineCheck = ns.checkBox(f, "只看在線", 606, -80,
+    UI.onlineCheck = ns.checkBox(f, "只看在線", 588, -80,
         function(on) UI.filters.online = on; UI.refresh(true) end)
-    local levelLabel = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    levelLabel:SetPoint("TOPLEFT", 696, -87)
-    levelLabel:SetText("等級至少")
+    UI.levelLabel = label("等級", 684)
     UI.levelBox = ns.createFrame("EditBox", nil, f, "InputBoxTemplate")
-    UI.levelBox:SetSize(34, 24)
-    UI.levelBox:SetPoint("TOPLEFT", 752, -80)
+    UI.levelBox:SetSize(40, 24)
+    UI.levelBox:SetPoint("TOPLEFT", f, "TOPLEFT", 724, -80)
     UI.levelBox:SetAutoFocus(false)
     UI.levelBox:SetMaxLetters(2)
     if UI.levelBox.SetNumeric then UI.levelBox:SetNumeric(true) end
@@ -793,7 +796,8 @@ local function build(p)
         UI.refresh(true)
     end)
     UI.levelBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    UI.clearButton = button(f, "清除", 60, 25, 800, -80, UI.clearFilters)
+    UI.levelSuffix = label("以上", 776)
+    UI.clearButton = button(f, "清除", 60, 25, 816, -80, UI.clearFilters)
     rosterControls = { UI.updateButton, searchBox, UI.clearButton, UI.skillChoice, UI.classChoice,
         UI.onlineCheck, UI.levelBox }
     local header = CreateFrame("Frame", nil, f)
@@ -872,10 +876,8 @@ end
 
 local function createExport()
     if exportWindow then return end
-    local f = ns.createFrame("Frame", "GreenFangToolkit_ExportWindow", UIParent, "BasicFrameTemplateWithInset")
-    f:SetSize(920, 560)
+    local f = ns.popupWindow("GreenFangToolkit_ExportWindow", 920, 560)
     f:SetPoint("CENTER", 0, 10)
-    f:SetFrameStrata("FULLSCREEN_DIALOG")
     f:SetMovable(true)
     f:EnableMouse(true)
     f:RegisterForDrag("LeftButton")

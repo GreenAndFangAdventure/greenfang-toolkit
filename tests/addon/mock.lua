@@ -46,6 +46,8 @@ local function fixedWidthOf(self)
 end
 local function setWidth(self, w) self._fixedWidth = w end
 local function setAlpha(self, a) self._alpha = a end
+local function setFrameStrata(self, v) self._strata = v end
+local function setColorTexture(self, r, g, b, a) self._color = { r, g, b, a } end
 local function getStringWidth(self)
     local w, fixed = textWidth(self._text), fixedWidthOf(self)
     if fixed and w > fixed then return fixed end
@@ -84,6 +86,7 @@ local function newObject(kind, name)
     function methods.RegisterForClicks(self, ...) self._clicks = { ... } end
     methods.SetWidth, methods.GetStringWidth, methods.IsTruncated = setWidth, getStringWidth, isTruncated
     methods.SetAlpha = setAlpha
+    methods.SetFrameStrata, methods.SetColorTexture = setFrameStrata, setColorTexture
     function methods.SetVerticalScroll(self, v)
         self._vscroll = v
         if self._scripts.OnVerticalScroll then self._scripts.OnVerticalScroll(self, v) end

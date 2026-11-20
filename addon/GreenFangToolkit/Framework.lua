@@ -121,6 +121,7 @@ local function createWindow()
     f:SetSize(F.NAV_WIDTH + F.PANEL_WIDTH + 10, F.PANEL_HEIGHT)
     f:SetPoint("CENTER")
     f:SetFrameStrata("DIALOG")
+    ns.makeOpaque(f) -- GF-001-D20: never see-through
     f:SetMovable(true)
     f:EnableMouse(true)
     f:RegisterForDrag("LeftButton")
@@ -394,10 +395,9 @@ function ns.choiceButton(parent, w, x, y, options, onChoose, allText, label)
     b.options, b.value = options, nil
     local menu = CreateFrame("Frame", nil, b)
     menu:SetFrameStrata("FULLSCREEN_DIALOG")
+    if menu.SetFrameLevel then menu:SetFrameLevel(100) end
     menu:SetPoint("TOPLEFT", b, "BOTTOMLEFT", 0, -2)
-    local bg = menu:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetColorTexture(0.05, 0.07, 0.06, 0.96)
+    ns.makeOpaque(menu, 0)
     menu:EnableMouse(true)
     menu:Hide()
     menu.items = {}
@@ -472,4 +472,59 @@ function ns.checkBox(parent, text, x, y, onChange)
         onChange(c.checked)
     end)
     return c
+end
+
+-- A small menu at the cursor (GF-001-D20: right-click on a recipe).
+-- items = { { text = "...", fn = function() end }, ... }. Opaque, above the
+-- toolkit window; a pick or Esc closes it.
+F.MENU_NAME = "GreenFangToolkit_Menu"
+local popup
+
+function ns.showMenu(owner, items)
+    closeMenu()
+    if type(items) ~= "table" or #items == 0 then return nil end
+    if not popup then
+        popup = CreateFrame("Frame", F.MENU_NAME, UIParent)
+        popup:SetFrameStrata("FULLSCREEN_DIALOG")
+        if popup.SetFrameLevel then popup:SetFrameLevel(100) end
+        if popup.SetClampedToScreen then popup:SetClampedToScreen(true) end
+        ns.makeOpaque(popup, 0)
+        popup:EnableMouse(true)
+        popup.items = {}
+        if UISpecialFrames then table.insert(UISpecialFrames, F.MENU_NAME) end
+    end
+    local w = 160
+    for i, item in ipairs(items) do
+        local b = popup.items[i]
+        if not b then
+            b = CreateFrame("Button", nil, popup)
+            b:SetSize(w - 8, 20)
+            b:SetPoint("TOPLEFT", popup, "TOPLEFT", 4, -4 - (i - 1) * 20)
+            pcall(b.SetNormalFontObject, b, "GameFontHighlightSmall")
+            b:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+            popup.items[i] = b
+        end
+        b:SetText(item.text)
+        local fn = item.fn
+        b:SetScript("OnClick", function() closeMenu(); fn() end)
+        b:Show()
+    end
+    for i = #items + 1, #popup.items do popup.items[i]:Hide() end
+    popup:SetSize(w, #items * 20 + 8)
+    popup:ClearAllPoints()
+    local x, y = nil, nil
+    if type(GetCursorPosition) == "function" then
+        local cx, cy = GetCursorPosition()
+        local scale = ns.num((UIParent:GetEffectiveScale())) or 1
+        if ns.num(cx) and ns.num(cy) and scale > 0 then x, y = cx / scale, cy / scale end
+    end
+    if x and y then
+        popup:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
+    else
+        popup:SetPoint("TOPLEFT", owner or UIParent, "BOTTOMLEFT", 0, 0)
+    end
+    popup.owner = owner
+    popup:Show()
+    openMenu = popup
+    return popup
 end

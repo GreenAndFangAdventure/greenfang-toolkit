@@ -81,10 +81,9 @@ end
 
 local function create()
     if window then return window end
-    local f = ns.createFrame("Frame", Diag.WINDOW_NAME, UIParent, "BasicFrameTemplateWithInset")
-    f:SetSize(640, 470)
+    -- GF-001-D20: opaque and above the toolkit window (was see-through).
+    local f = ns.popupWindow(Diag.WINDOW_NAME, 640, 470)
     f:SetPoint("CENTER", 0, 20)
-    f:SetFrameStrata("DIALOG")
     f:SetMovable(true)
     f:EnableMouse(true)
     f:RegisterForDrag("LeftButton")
