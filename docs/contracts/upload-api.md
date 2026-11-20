@@ -1,10 +1,17 @@
-# 契約：GF Sync ↔ 網站上傳 API（v1.1）
+# 契約：GF Sync ↔ 網站上傳 API（v1.2）
 
 - 版本：
   - v1（2026-11-17 claude-pm 依 Q-005 與實作結果定稿）
   - **v1.1（2026-11-20 claude-addon，D-014）**：新 kind `member.share`、`recipe.names`、`character.self.recipes`、`capturedAtServer`、`reason: "unknown_kind"`、撤回、上線順序。依 claude-sync 審查修正後定稿
   - **v1.1（2026-11-20 claude-addon，D-015）**：`withdrawn` 只剩 `recipes`（放棄專業）；工具箱沒有同步開關
   - **v1.1（2026-11-20 claude-addon，GF-001-D14，AddOn 0.10.0）**：格式不變。補充：大公會時的筆數、配方 `ids` 分批（§2「數量」、§3 第 6 點）
+  - **v1.2（2026-11-20 claude-addon，GF-001-D17，claude-pm 指派）**：新增以下四項，都是新增，舊的用戶端照舊能用：
+    - HTTP 426 `client_too_old`（§2a）
+    - 單筆 `reason: "addon_too_old"`（§2 的 reason 表）
+    - 請求層級的 `client.addonVersion`（§2）
+    - GF Sync 的更新清單端點 `GET /api/sync/gfsync-manifest.json`（§7）
+
+    依據：GF Sync 的 `docs/UPDATE_MANIFEST.md` §2
 - 實作位置：網站 repo `green-and-fang-site`，位於 `functions/api/sync/*`（D-002）。PR 送到 `dev`
 - 資料表一律用 `migrations/00xx_*.sql` 建立，不在執行時用 `CREATE TABLE IF NOT EXISTS` 建表
 
@@ -14,7 +21,7 @@
 
 | 端點 | 說明 |
 | --- | --- |
-| `POST /api/sync/device/start` | 請求 `{label, clientVersion}`：`label` 是電腦名稱，會顯示在配對頁上。回傳 `{deviceCode, userCode, verifyUrl, interval, expiresIn}`。`userCode` 是 8 碼，10 分鐘內有效。`verifyUrl` 必須和 API 同一個 scheme 與 host，否則用戶端會改開 `<base>/pages/sync-pair?code=<userCode>` |
+| `POST /api/sync/device/start` | 請求 `{label, clientVersion}`：`label` 是電腦名稱，會顯示在配對頁上。回傳 `{deviceCode, userCode, verifyUrl, interval, expiresIn}`；GF Sync 太舊時回 426（§2a）。`userCode` 是 8 碼，10 分鐘內有效。`verifyUrl` 必須和 API 同一個 scheme 與 host，否則用戶端會改開 `<base>/pages/sync-pair?code=<userCode>` |
 | `GET /pages/sync-pair?code=XXXX` | 網站頁面：需要 Discord 登入，按「允許這台電腦同步」 |
 | `POST /api/sync/device/poll` | `{deviceCode}` → 還沒核准：200 `{pending:true, interval}`；核准：200 `{token, deviceId}`，token 只回傳這一次；被拒絕：403 `{error:'denied'}`；過期或無效：4xx；太頻繁：429，附 `Retry-After` |
 | `GET /pages/sync-devices` | 玩家查看自己配對過的裝置，可以撤銷 |
@@ -27,9 +34,17 @@
 `POST /api/sync/upload`，Header `Authorization: Bearer <token>`
 
 ```json
-{ "client": { "name": "GFSync", "version": "0.1.0" },
+{ "client": { "name": "GFSync", "version": "0.2.0", "addonVersion": "0.10.0" },
   "items": [ <SavedVariables outbox entry，原樣轉成 JSON（member.share 由 GF Sync 白名單重建）> ] }
 ```
+
+- `client.version`：GF Sync 的版本，網站用它判斷 426（§2a）。
+- **`client.addonVersion`**（v1.2，可選）：寫出這一批資料的工具箱版本。
+  - 來源：GF Sync 從 SavedVariables 最上層的 `addonVersion`（`GreenFangToolkitDB.addonVersion`，savedvariables §1）**原樣複製**，不做任何轉換。
+  - **一次請求只放同一個 SavedVariables 檔案的資料**。同一台電腦有多個帳號（多個 `WTF/Account/*`）時，每個檔案的 `addonVersion` 可能不同，GF Sync 要分開送。
+  - 網站用它判斷單筆的 `addon_too_old`（下面的 reason 表）。比較規則同 §2a。
+  - 沒有這個欄位（舊版 GF Sync），或版本看不懂（例如開發版的 `"dev"`）時，網站**不要**回 `addon_too_old`，當成可以接受。
+  - 工具箱不需要改：`addonVersion` 一直都在 SavedVariables 裡，outbox 的每一筆不帶版本。
 
 - 單次上限：1MB、50 筆。每台裝置每小時最多 60 次。
 - **數量**（AddOn 0.10.0）：1,000 人的公會，一台電腦第一次可能有一千多筆 `member.share`（約 20 批），之後每次登出只有變動的成員。一次登出的 `member.share` 合計最多帶 50,000 個配方 ID（約 1 MB 的 JSON 以內），其餘的清單分到之後的登出。
@@ -44,15 +59,71 @@
   | `unknown_subject` | `member.share` 的 subject 在網站名冊找不到 | 記成已回覆 |
   | `future` | 時間比伺服器晚 10 分鐘以上 | 記成已回覆 |
   | **`unknown_kind`** | 網站還不認得這種 kind（例如舊版網站收到 `member.share`） | **不記成已回覆**，24 小時後再試 |
+  | **`addon_too_old`**（v1.2） | 寫出這筆資料的工具箱版本（`client.addonVersion`）比網站接受的最低版本舊 | **不記成已回覆**，24 小時後再試（和 `unknown_kind` 一樣），並提示玩家更新工具箱 |
   | 其他 | 格式錯誤等 | 記成已回覆 |
+
+  - `unknown_kind` 和 `addon_too_old` 都是「暫時不收」：網站**不要記住**這些 id 的狀態，之後同一個 id 送來時要能照一般規則接受（不是回 `duplicate`）。
+  - `addon_too_old` 是單筆的結果，HTTP 狀態照樣是 200。同一批裡可以有的被接受、有的回 `addon_too_old`（例如網站只擋某些 kind）。
+  - v0.1.0 的 GF Sync 不認得 `addon_too_old`，會把那一筆記成已回覆、不再送。太舊的工具箱寫的資料丟掉是可以接受的；這和 GF Sync 本身太舊不同，後者一定要用 426（§2a）。
 
 - 錯誤碼：
   - 401／403：token 無效或已撤銷。用戶端要刪掉 token，並提示重新配對
+  - 426：GF Sync 太舊（§2a）
   - 429：超過頻率上限，附 `Retry-After`（秒）
   - 400／413：整批內容有問題或太大。用戶端可以拆半重送，單筆仍失敗就不再重送
 - `results` 裡沒有列出的 id，用戶端之後可以重送，伺服器會回 `duplicate`
 - Lua 的空表格 `{}` 轉成 JSON 時是空陣列 `[]`。AddOn 依 savedvariables §2a 不寫空表格的鍵，網站收到 `[]` 時也要當成「空」處理，不要回錯誤
 - **冪等**：同一個 `id` 第二次送來時回 `duplicate`，不會重複寫入，所以 GF Sync 可以放心重試。內容改變時 AddOn 一定會換 `id`（savedvariables §2a 第 2 點）
+
+## 2a. GF Sync 太舊：HTTP 426 `client_too_old`（v1.2）
+
+網站要停止接受某個版本以下的 GF Sync 時，**只能回 426**，不能用其他狀態碼。
+
+**為什麼只能用 426：** v0.1.0 已經在玩家電腦上，行為改不了。它遇到各種回應時會這樣處理：
+
+| 網站回應 | v0.1.0 會怎樣 |
+|---|---|
+| 400、413 | 把一批切半重送，切到 1 筆還失敗就把那筆記成已回覆，**資料不見** |
+| 200 加 `rejected` | 記成已回覆，**資料不見** |
+| 401、403 | **刪掉配對 token**，要求玩家重新配對 |
+| **426** | 當成伺服器錯誤，退避之後重試，**資料留在電腦上** |
+
+**適用的端點：**
+
+| 端點 | 判斷用的版本 |
+|---|---|
+| `POST /api/sync/upload` | body 的 `client.version` |
+| `POST /api/sync/device/start` | body 的 `clientVersion` |
+
+- **`POST /api/sync/device/poll` 絕不回 426**：舊版會把它當成配對失敗，顯示錯的訊息。擋住 start 就夠了，沒有 start 就不會有 poll。
+- 版本比較：`x.y.z` 三段都當整數比；`x.y.z-標籤` 比 `x.y.z` 舊（`0.2.0-beta1` < `0.2.0`）。
+- 沒有版本，或版本看不懂時，**不要擋**，當成可以接受。
+
+**回應：**
+
+```http
+HTTP/1.1 426 Upgrade Required
+Content-Type: application/json; charset=utf-8
+
+{"error":"client_too_old","minVersion":"0.2.0","download":"https://<網站網域>/pages/sync"}
+```
+
+| 欄位 | 說明 |
+|---|---|
+| `error` | 固定 `"client_too_old"` |
+| `minVersion` | 網站接受的最低 GF Sync 版本，`x.y.z` |
+| `download` | GF Sync 的下載頁。**必須和 API 同一個 scheme 與 host**，否則 GF Sync 改開 GitHub 的 Release 頁。路徑由網站決定 |
+
+- 426 不在 `results` 裡，整批都沒有處理。網站不要記住這一批的任何 id。
+- 網站可以不把 426 算進每小時 60 次的上限。
+- 新版 GF Sync 遇到 426 時：
+  - 不把任何一筆記成已回覆，停止上傳 6 小時
+  - 提示玩家更新，並立刻檢查更新
+  - 配對時遇到 426 也一樣，不開瀏覽器
+- 上線方式：
+  1. 先只**記錄**會被擋的版本，不擋，觀察一段時間
+  2. 確認大家都更新之後，才開始回 426
+  3. 上線順序照舊：網站 → GF Sync → AddOn（§5）
 
 ## 3. 伺服器驗證（上傳內容一律視為「待查證」）
 
@@ -100,3 +171,20 @@ AddOn 0.9 的第 1～3 段不寫新 kind，可以先上線。
 - `member_field_values(character_id, field, value_json, recorded_at, hash, source, via, uploaded_by_device, updated_at)`，`field` 例如 `level`、`professions`、`location`、`recipes:164`
 - `member_withdrawals(character_id, field, withdrawn_at)`
 - `recipe_names(recipe_id, locale, name, first_seen_at)`
+
+## 7. GF Sync 的更新清單：`GET /api/sync/gfsync-manifest.json`（v1.2）
+
+詳細格式和 GF Sync 怎麼核對，見 GF Sync repo 的 `docs/UPDATE_MANIFEST.md`。網站這邊要做的：
+
+- **不用登入、不用 token**。
+- 內容：**最新一個已發布（不是草稿）的 GF Sync Release 附件 `gfsync-manifest.json`，位元組完全一樣**。
+  - 不要重新排版，不要改換行，不要加 BOM，也不要轉碼
+  - GF Sync 會用同一個 Release 的 `SHA256SUMS.txt` 核對 SHA-256，改一個位元組就不會被採用
+- `Content-Type: application/json`。可以快取，建議 `Cache-Control: max-age=3600`。
+- 還沒有任何清單時回 **404**，GF Sync 會改去 GitHub 拿。其他錯誤（5xx）GF Sync 會等下一次再試。
+- 怎麼取得由網站決定，例如：
+  - 定時抓 `https://github.com/GreenAndFangAdventure/gf-sync/releases/latest/download/gfsync-manifest.json` 存起來
+  - 或者 owner 發布後手動上傳
+- 網站可以**晚一點**才換成新版本（例如分批推送或暫緩），但**不能改內容**。
+- 這個端點不受 426 影響（§2a 只適用 upload 和 device/start）：太舊的 GF Sync 正需要它來找新版。
+- 工具箱的 `addon-manifest.json` 照同樣的原則原樣提供，格式見 `docs/contracts/addon-manifest.md`。
