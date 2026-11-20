@@ -1,0 +1,34 @@
+# BigWigs packager (https://github.com/BigWigsMods/packager), GF-001-D16.
+# One zip, GreenFangToolkit-<version>.zip, with a single GreenFangToolkit/ folder:
+# used for CurseForge, the guild site, GF Sync and manual installs alike.
+# The same file works in this repo (addon/GreenFangToolkit) and in the public
+# repo GreenAndFangAdventure/greenfang-toolkit (same layout).
+package-as: GreenFangToolkit
+enable-nolib-creation: no
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
+move-folders:
+  GreenFangToolkit/addon/GreenFangToolkit: GreenFangToolkit
+
+ignore:
+  - .github
+  - .gitattributes
+  - .gitignore
+  - addon/GFGuildRoster
+  - api
+  - assets
+  - bot
+  - collab
+  - docs
+  - handoff
+  - scripts
+  - site
+  - sync
+  - tests
+  - AGENTS.md
+  - CLAUDE.md
+  - README.md
+  - LICENSE

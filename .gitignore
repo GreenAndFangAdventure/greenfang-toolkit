@@ -1,0 +1,29 @@
+# 機密
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+.dev.vars
+
+# 遊戲真實資料（測試請用去識別化樣本放 tests/fixtures）
+WTF/
+SavedVariables/
+*.lua.bak
+
+# 建置產物
+node_modules/
+dist/
+.wrangler/
+__pycache__/
+*.pyc
+*.zip
+
+# 編輯器／系統
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.claude/settings.local.json
+.backup/
+release/

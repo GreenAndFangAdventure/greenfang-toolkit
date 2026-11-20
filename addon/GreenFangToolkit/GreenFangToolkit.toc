@@ -1,0 +1,29 @@
+## Interface: 16001
+## Title: 綠皮冒險工具箱
+## Notes: 綠皮與獠牙冒險事務所｜公會名冊、睡袋路線；可搭配 GF Sync 補充公會網站資料
+## Author: 綠皮與獠牙冒險事務所
+## Version: 0.10.0
+## IconTexture: Interface\Icons\INV_Misc_Bag_10
+## SavedVariables: GreenFangToolkitDB
+## OptionalDeps: GFGuildRoster
+## X-License: MIT
+## X-Website: https://green-and-fang-site.pages.dev
+
+Config.lua
+Core.lua
+Data.lua
+Icons.lua
+Professions.lua
+Roster.lua
+Sync.lua
+Comm.lua
+Share.lua
+Export.lua
+Framework.lua
+UI.lua
+Character.lua
+Recipes.lua
+Diag.lua
+SleepingBagData.lua
+SleepingBag.lua
+Init.lua

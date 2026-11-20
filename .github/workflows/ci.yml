@@ -1,0 +1,30 @@
+# Tests and leak scan on every push and pull request (GF-001-D16).
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+    tags-ignore: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tests (Lua 5.1 via lupa)
+        run: |
+          python -m pip install --disable-pip-version-check lupa==2.8
+          python tests/addon/run_lupa.py
+      - name: Version check
+        run: python scripts/release_checks.py version
+      - name: Leak scan
+        run: python scripts/release_checks.py scan
+      - name: Zip and manifest (dry run)
+        run: python scripts/build_release.py --out dist

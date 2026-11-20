@@ -1,0 +1,3 @@
+*.patch -text
+*.bundle binary
+*.lua text eol=lf

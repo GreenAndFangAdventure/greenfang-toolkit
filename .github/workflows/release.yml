@@ -1,0 +1,101 @@
+# Release of 綠皮冒險工具箱 (GreenFangToolkit), GF-001-D16.
+# Push a tag v<x.y.z> (or v<x.y.z>-beta1 / -alpha1) on main:
+#   tests -> version and leak checks -> packager zip -> manifest + SHA256SUMS
+#   -> CurseForge upload (only when enabled) -> DRAFT GitHub Release.
+# The owner publishes the draft; that is the deployment consent.
+# Contract for the manifest: docs/contracts/addon-manifest.md.
+#
+# CurseForge stays off until both exist:
+#   - repo secret   CF_API_TOKEN       (made by the owner on CurseForge)
+#   - TOC line      ## X-Curse-Project-ID: <id>
+# and the repo variable CURSEFORGE_UPLOAD is set to "true".
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Tests (Lua 5.1 via lupa)
+        run: |
+          python -m pip install --disable-pip-version-check lupa==2.8
+          python tests/addon/run_lupa.py
+
+      - name: Version check (tag = TOC Version, CHANGELOG has the section)
+        run: python scripts/release_checks.py version --tag "$GITHUB_REF_NAME"
+
+      - name: Leak scan
+        run: python scripts/release_checks.py scan --report scan-report.md
+
+      - name: Upload scan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-report
+          path: scan-report.md
+          if-no-files-found: ignore
+
+      - name: CurseForge enabled?
+        id: cf
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_SWITCH: ${{ vars.CURSEFORGE_UPLOAD }}
+        run: |
+          if [ "$CF_SWITCH" = "true" ] && [ -n "$CF_API_TOKEN" ] && grep -q '^## X-Curse-Project-ID: *[0-9]' addon/GreenFangToolkit/GreenFangToolkit.toc; then
+            echo "upload=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "upload=false" >> "$GITHUB_OUTPUT"
+            echo "CurseForge upload is off (needs CF_API_TOKEN, X-Curse-Project-ID and vars.CURSEFORGE_UPLOAD=true)"
+          fi
+
+      # -d: do not upload anywhere. Only the zip in .release/ is made.
+      - name: Package (no upload)
+        if: steps.cf.outputs.upload != 'true'
+        uses: BigWigsMods/packager@v2
+        with:
+          args: -d -n "{package-name}-{project-version}"
+
+      # CF_API_TOKEN only: the packager uploads to CurseForge and nowhere else
+      # (no GitHub, WoWInterface or Wago token is given to it).
+      - name: Package and upload to CurseForge
+        if: steps.cf.outputs.upload == 'true'
+        uses: BigWigsMods/packager@v2
+        with:
+          args: -n "{package-name}-{project-version}"
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      - name: Manifest and SHA256SUMS
+        run: |
+          zip=$(ls .release/GreenFangToolkit-*.zip | head -n 1)
+          python scripts/build_release.py --zip "$zip" --tag "$GITHUB_REF_NAME" --out dist
+          cat dist/addon-manifest.json
+
+      - name: Draft GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pre=""
+          case "$GITHUB_REF_NAME" in *alpha*|*beta*) pre="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" --draft $pre \
+            --title "綠皮冒險工具箱 $GITHUB_REF_NAME" \
+            --notes-file dist/RELEASE_NOTES.md \
+            dist/GreenFangToolkit-*.zip dist/addon-manifest.json dist/SHA256SUMS.txt
