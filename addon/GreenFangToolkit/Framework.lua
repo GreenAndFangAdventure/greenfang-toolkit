@@ -528,3 +528,108 @@ function ns.showMenu(owner, items)
     openMenu = popup
     return popup
 end
+
+-- A button with a list of check boxes (GF-001-D22: the recipe page's 專業 and
+-- 會做的人). options() returns { { value, text, icon? } }; 全選 and 全不選
+-- come first. b.selected is a set { [value] = true }, or nil = everything.
+-- summary(selected, options) gives the button text; onChange() after a click.
+F.CHECK_TEXTURE = "Interface\\Buttons\\UI-CheckBox-Check"
+
+function ns.multiChoiceButton(parent, w, x, y, options, onChange, summary)
+    local b = ns.createFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    b:SetSize(w, 24)
+    b:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+    b.options, b.selected = options, nil
+    local menu = CreateFrame("Frame", nil, b)
+    menu:SetFrameStrata("FULLSCREEN_DIALOG")
+    if menu.SetFrameLevel then menu:SetFrameLevel(100) end
+    menu:SetPoint("TOPLEFT", b, "BOTTOMLEFT", 0, -2)
+    ns.makeOpaque(menu, 0)
+    menu:EnableMouse(true)
+    menu:Hide()
+    menu.items = {}
+    b.menu = menu
+    local ROW, WIDTH = 20, math.max(w + 40, 170)
+
+    function b.isOn(value) return b.selected == nil or b.selected[value] == true end
+    function b.count()
+        local n = 0
+        for _, o in ipairs(b.options()) do if b.isOn(o.value) then n = n + 1 end end
+        return n
+    end
+    function b.refreshText() b:SetText(summary(b) .. " ▼") end
+    local function changed()
+        -- Everything ticked is the same as "everything" (nil), so options
+        -- added later (a new profession) are included.
+        if b.selected and b.count() == #b.options() then b.selected = nil end
+        b.refreshText()
+        if menu:IsShown() then b.drawItems() end
+        onChange()
+    end
+    function b.selectAll() b.selected = nil; changed() end
+    function b.selectNone() b.selected = {}; changed() end
+    function b.toggle(value)
+        if b.selected == nil then
+            b.selected = {}
+            for _, o in ipairs(b.options()) do b.selected[o.value] = true end
+        end
+        b.selected[value] = (not b.selected[value]) or nil
+        changed()
+    end
+    function b.setOnly(value) b.selected = { [value] = true }; changed() end
+
+    local function item(i)
+        local it = menu.items[i]
+        if it then return it end
+        it = CreateFrame("Button", nil, menu)
+        it:SetSize(WIDTH - 8, ROW)
+        it:SetPoint("TOPLEFT", menu, "TOPLEFT", 4, -4 - (i - 1) * ROW)
+        it:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+        it.check = it:CreateTexture(nil, "ARTWORK")
+        it.check:SetSize(16, 16)
+        it.check:SetPoint("LEFT", it, "LEFT", 2, 0)
+        it.icon = it:CreateTexture(nil, "ARTWORK")
+        it.icon:SetSize(16, 16)
+        it.icon:SetPoint("LEFT", it, "LEFT", 22, 0)
+        it.label = it:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        it.label:SetJustifyH("LEFT")
+        menu.items[i] = it
+        return it
+    end
+
+    function b.drawItems()
+        local list = b.options()
+        local entries = { { text = "全選", fn = b.selectAll }, { text = "全不選", fn = b.selectNone } }
+        for _, o in ipairs(list) do
+            local value = o.value
+            entries[#entries + 1] = { text = o.text, icon = o.icon, on = b.isOn(value), fn = function() b.toggle(value) end }
+        end
+        for i, e in ipairs(entries) do
+            local it = item(i)
+            it.value = list[i - 2] and list[i - 2].value or nil
+            it.label:SetText(e.text)
+            it.label:ClearAllPoints()
+            local hasIcon = e.icon and ns.Icons.set(it.icon, e.icon)
+            if hasIcon then it.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93); it.icon:Show() else it.icon:Hide() end
+            it.label:SetPoint("LEFT", it, "LEFT", hasIcon and 42 or (e.on ~= nil and 22 or 6), 0)
+            if e.on and ns.Icons.set(it.check, F.CHECK_TEXTURE) then it.check:Show() else it.check:Hide() end
+            it.isOption = e.on ~= nil
+            it.checked = e.on == true
+            it:SetScript("OnClick", e.fn) -- the list stays open: tick several
+            it:Show()
+        end
+        for i = #entries + 1, #menu.items do menu.items[i]:Hide() end
+        menu:SetSize(WIDTH, #entries * ROW + 8)
+    end
+
+    b:SetScript("OnClick", function()
+        if menu:IsShown() then closeMenu(); return end
+        closeMenu()
+        b.drawItems()
+        menu:Show()
+        openMenu = menu
+    end)
+    b:HookScript("OnHide", function() if openMenu == menu then closeMenu() end end)
+    b.refreshText()
+    return b
+end

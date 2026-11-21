@@ -414,6 +414,7 @@ function Recipes.rows(index, skill, query, onlyGuid, opts)
     local rows = {}
     if not p then return rows end
     opts = opts or {}
+    if opts.who == "none" then return rows end
     local q = ns.keyName(query)
     for id, who in pairs(p.recipes) do
         local list, mine = {}, false
@@ -427,7 +428,7 @@ function Recipes.rows(index, skill, query, onlyGuid, opts)
         if #list > 0 and (opts.who ~= "mine" or mine) then
             local name = Recipes.name(id)
             if q == "" or ns.keyName(name):find(q, 1, true) then
-                rows[#rows + 1] = { id = id, name = name, crafters = list, mine = mine } -- already online first
+                rows[#rows + 1] = { id = id, name = name, crafters = list, mine = mine, skill = skill } -- online first
             end
         end
     end
@@ -436,6 +437,21 @@ function Recipes.rows(index, skill, query, onlyGuid, opts)
         return a.id < b.id
     end)
     return rows
+end
+
+-- Rows of several professions in one list, by name (GF-001-D22).
+function Recipes.rowsFor(index, skills, query, onlyGuid, opts)
+    local out = {}
+    for _, skill in ipairs(skills) do
+        for _, r in ipairs(Recipes.rows(index, skill, query, onlyGuid, opts)) do out[#out + 1] = r end
+    end
+    if #skills > 1 then
+        table.sort(out, function(a, b)
+            if a.name ~= b.name then return a.name < b.name end
+            return a.id < b.id
+        end)
+    end
+    return out
 end
 
 -- "測試甲、測試乙 +2" (online first, at most 3 names).
@@ -544,7 +560,7 @@ local panel, scroll, content, search, emptyLine, filterLine, clearFilter
 local rowWidgets = {}
 local shownRows = {} -- all rows of the current list; only those in view have frames
 local lastIndex = {} -- the index the page last drew (option lists use it)
-local current = { skill = nil, guid = nil, query = "", online = false, who = nil }
+local current = { skills = {}, guid = nil, query = "", online = false }
 Recipes.state = current
 
 local function professionName(skill)
@@ -650,10 +666,54 @@ end
 function Recipes.skillOptions()
     local list = {}
     for _, s in ipairs(Recipes.pageSkills(lastIndex)) do
-        list[#list + 1] = { value = s, text = professionName(s) }
+        list[#list + 1] = { value = s, text = professionName(s), icon = ns.Icons.professionIcon(s) }
     end
-    if #list == 0 then list[1] = { value = nil, text = "專業" } end
     return list
+end
+
+-- The ticked professions among those on the page (all by default).
+function Recipes.selectedSkills(skills)
+    local b = Recipes.skillChoice
+    if not b then return skills end
+    local out = {}
+    for _, s in ipairs(skills) do if b.isOn(s) then out[#out + 1] = s end end
+    return out
+end
+
+-- "全部專業" / "烹飪" / "3 個專業" / "沒有選專業"
+function Recipes.skillSummary(b)
+    local list = b.options()
+    if b.selected == nil then return "全部專業" end
+    local on = {}
+    for _, o in ipairs(list) do if b.isOn(o.value) then on[#on + 1] = o end end
+    if #on == 0 then return "沒有選專業" end
+    if #on == #list then return "全部專業" end
+    if #on == 1 then return on[1].text end
+    return #on .. " 個專業"
+end
+
+Recipes.WHO_OPTIONS = {
+    { value = "me", text = "我" },
+    { value = "others", text = "別人" },
+}
+
+-- 會做的人 as rows() wants it: nil (both), "mine", "others" or "none".
+function Recipes.whoFilter()
+    local b = Recipes.whoChoice
+    if not b or b.selected == nil then return nil end
+    local me, others = b.isOn("me"), b.isOn("others")
+    if me and others then return nil end
+    if me then return "mine" end
+    if others then return "others" end
+    return "none"
+end
+
+function Recipes.whoSummary()
+    local w = Recipes.whoFilter()
+    if w == "mine" then return "只看我的" end
+    if w == "others" then return "只看別人的" end
+    if w == "none" then return "沒有選" end
+    return "所有人"
 end
 
 -- Fill the pooled rows with the recipes in view (GF-001-D14).
@@ -674,7 +734,7 @@ function Recipes.layoutRows()
                 row:ClearAllPoints()
                 row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -(i - 1) * ROW_HEIGHT)
                 row.bg:SetColorTexture(0.17, 0.2, 0.18, i % 2 == 0 and 0.35 or 0.09)
-                Recipes.setIcon(row.icon, data.id, current.skill)
+                Recipes.setIcon(row.icon, data.id, data.skill)
                 row.name:SetText(data.name)
                 row.who:SetText(Recipes.crafterText(data.crafters))
                 local online = data.crafters[1] and data.crafters[1].online
@@ -687,6 +747,8 @@ function Recipes.layoutRows()
     end
 end
 function Recipes.rowFrames() return rowWidgets end
+-- All rows of the current list (offline tests).
+function Recipes.shownRows() return shownRows end
 
 Recipes.BUILDING_TEXT = "配方整理中，請稍候。"
 
@@ -706,21 +768,20 @@ function Recipes.refresh()
     end
     lastIndex = index
     local skills = Recipes.pageSkills(index)
-    local found = false
-    for _, s in ipairs(skills) do if s == current.skill then found = true end end
-    if not found then current.skill = skills[1] end
-    if Recipes.skillChoice then
-        Recipes.skillChoice.value = current.skill
-        Recipes.skillChoice.refreshText()
-    end
-    local opts = { online = current.online, who = current.who }
-    local rows = current.skill and Recipes.rows(index, current.skill, current.query, current.guid, opts) or {}
+    local chosen = Recipes.selectedSkills(skills)
+    current.skills = chosen
+    if Recipes.skillChoice then Recipes.skillChoice.refreshText() end
+    if Recipes.whoChoice then Recipes.whoChoice.refreshText() end
+    local opts = { online = current.online, who = Recipes.whoFilter() }
+    local rows = Recipes.rowsFor(index, chosen, current.query, current.guid, opts)
     shownRows = rows
     content:SetHeight(math.max(1, #rows * ROW_HEIGHT))
     Recipes.layoutRows()
-    local filtered = current.query ~= "" or current.online or current.who ~= nil
+    local filtered = current.query ~= "" or current.online or opts.who ~= nil
     if #skills == 0 then
         emptyLine:SetText(current.guid and "這位成員還沒有分享配方。" or "還沒有人分享配方。")
+    elseif #chosen == 0 then
+        emptyLine:SetText("沒有選專業。")
     elseif #rows == 0 then
         emptyLine:SetText(filtered and "找不到符合的配方。" or "這個專業還沒有配方資料。")
     else
@@ -734,24 +795,19 @@ function Recipes.refresh()
         filterLine:SetText("只看：" .. ns.shortName(name or "?"))
         clearFilter:Show()
     else
-        filterLine:SetText(current.skill and string.format("%d 個配方", #rows) or "")
+        filterLine:SetText(#chosen > 0 and string.format("%d 個配方", #rows) or "")
         clearFilter:Hide()
     end
 end
 
--- Open the page, optionally on one member (GUID) and one profession.
+-- Open the page, optionally on one member (GUID) and one profession (then
+-- only that one is ticked).
 function Recipes.show(guid, skill)
     current.guid = guid
-    if skill then current.skill = skill end
     ns.Framework.open("recipes")
+    if skill and Recipes.skillChoice then Recipes.skillChoice.selected = { [skill] = true } end
     Recipes.refresh()
 end
-
-Recipes.WHO_OPTIONS = {
-    { value = nil, text = "所有人" },
-    { value = "mine", text = "只看我的" },
-    { value = "others", text = "只看別人的" },
-}
 
 -- GF-001-D20 layout: one filter line at the top, like the roster's:
 -- 搜尋 [box]  專業 [▼]  會做的人 [▼]  [ ] 只看在線   N 個配方
@@ -775,11 +831,12 @@ local function build(p)
     search:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     Recipes.searchBox = search
     label(p, "專業", 262)
-    Recipes.skillChoice = ns.choiceButton(p, 120, 300, FILTER_Y, Recipes.skillOptions,
-        function(value) if value then current.skill = value end; Recipes.refresh() end, nil, professionName)
+    -- GF-001-D22: check boxes (several professions at once), with icons.
+    Recipes.skillChoice = ns.multiChoiceButton(p, 120, 300, FILTER_Y, Recipes.skillOptions,
+        function() Recipes.refresh() end, Recipes.skillSummary)
     label(p, "會做的人", 440)
-    Recipes.whoChoice = ns.choiceButton(p, 110, 500, FILTER_Y, function() return Recipes.WHO_OPTIONS end,
-        function(value) current.who = value; Recipes.refresh() end, "所有人")
+    Recipes.whoChoice = ns.multiChoiceButton(p, 110, 500, FILTER_Y, function() return Recipes.WHO_OPTIONS end,
+        function() Recipes.refresh() end, Recipes.whoSummary)
     Recipes.onlineCheck = ns.checkBox(p, "只看在線", 628, FILTER_Y, function(on) current.online = on; Recipes.refresh() end)
     filterLine = p:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     filterLine:SetPoint("TOPLEFT", p, "TOPLEFT", 724, FILTER_Y - 5)

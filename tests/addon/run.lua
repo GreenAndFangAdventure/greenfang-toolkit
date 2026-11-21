@@ -2596,17 +2596,16 @@ test("D10 recipe page: tabs per profession, rows, filter by member, empty text",
     shareFrom(ns, PEER, (rMsg(ns, A_THIRD, 197, t, { 3115 })))
     wow.advance(1.2) -- the page redraws at most once a second
     ok(has(texts(), "粗製磨刀石"), "recipe listed")
-    eq(ns.Recipes.state.skill, 164, "first profession selected")
+    eq(table.concat(ns.Recipes.state.skills, ","), "164,197", "every profession ticked (D22)")
     ns.Recipes.show("Player-0000-0000000C")
-    eq(ns.Recipes.state.skill, 197, "member's own profession")
+    eq(table.concat(ns.Recipes.state.skills, ","), "197", "member's own profession")
     ok(has(texts(), "只看：測試丙"), "filter shown")
     ok(ns.Recipes.clearFilterButton:IsShown(), "clear button")
     wow.click(ns.Recipes.clearFilterButton)
     eq(ns.Recipes.state.guid, nil, "filter cleared")
     ns.Recipes.searchBox:SetText("鎖甲")
     ns.Recipes.searchBox._scripts.OnTextChanged(ns.Recipes.searchBox)
-    ns.Recipes.state.skill = 164
-    ns.Recipes.refresh()
+    ns.Recipes.skillChoice.setOnly(164)
     eq(#ns.Recipes.rows(ns.Recipes.index(), 164, ns.Recipes.state.query, nil), 1, "search applied")
     ok(panel, "panel exists")
 end)
@@ -3454,8 +3453,7 @@ test("D14 recipe page: index built over several frames with 整理中, then only
     ok(not has(texts(), ns.Recipes.BUILDING_TEXT), "list shown")
     local frames = ns.Recipes.rowFrames()
     ok(#frames > 0 and #frames <= 10, "frames only for the rows in view: " .. #frames)
-    local index = ns.Recipes.index()
-    local rows = ns.Recipes.rows(index, ns.Recipes.state.skill, "", nil)
+    local rows = ns.Recipes.shownRows() -- D22: every ticked profession in one list
     ok(#rows > 100, "many recipes: " .. #rows)
     eq(frames[1].data.id, rows[1].id, "first row")
     -- New data later: the finished list stays on screen while a new one is built.
@@ -3923,13 +3921,13 @@ test("D19 recipe filters: only mine / only others, only online crafters, search"
     end
     -- On the page.
     ns.Recipes.show(nil, 165)
-    ns.Recipes.whoChoice.choose("mine")
+    ns.Recipes.whoChoice.toggle("others") -- only 我 left
     local shown = 0
     for _, r in ipairs(ns.Recipes.rowFrames()) do if r:IsShown() then shown = shown + 1 end end
     eq(shown, 2, "page: only mine")
     wow.click(ns.Recipes.onlineCheck)
     eq(ns.Recipes.state.online, true, "online check")
-    ns.Recipes.whoChoice.choose(nil)
+    ns.Recipes.whoChoice.selectAll()
     wow.click(ns.Recipes.onlineCheck)
     shown = 0
     for _, r in ipairs(ns.Recipes.rowFrames()) do if r:IsShown() then shown = shown + 1 end end
@@ -4022,12 +4020,12 @@ test("D20 recipe filter line: 搜尋, 專業, 會做的人, 只看在線 on one 
     eq(y(R.onlineCheck), -44, "只看在線 on the filter line")
     local texts = table.concat(wow.allTexts(), "\n")
     for _, want in ipairs({ "搜尋", "專業", "會做的人", "只看在線" }) do ok(texts:find(want, 1, true), "label " .. want) end
-    ok(R.skillChoice:GetText():find("鍛造", 1, true), "first profession chosen: " .. R.skillChoice:GetText())
+    ok(R.skillChoice:GetText():find("全部專業", 1, true), "all ticked at first: " .. R.skillChoice:GetText())
     local opts = {}
     for _, o in ipairs(R.skillOptions()) do opts[#opts + 1] = o.text end
     eq(table.concat(opts, ","), "鍛造,製皮", "professions with recipes")
-    R.skillChoice.choose(165)
-    eq(R.state.skill, 165, "picked")
+    R.skillChoice.setOnly(165)
+    eq(table.concat(R.state.skills, ","), "165", "picked")
     ok(R.skillChoice:GetText():find("製皮", 1, true), "button shows it")
     ok(texts:find("個配方", 1, true), "count")
     -- No tab buttons above the list any more.
@@ -4091,7 +4089,7 @@ end
 
 local function shownRecipeIDs(ns)
     local list = {}
-    for _, r in ipairs(ns.Recipes.rowFrames()) do if r:IsShown() and r.data then list[#list + 1] = r.data.id end end
+    for _, r in ipairs(ns.Recipes.shownRows()) do list[#list + 1] = r.id end
     table.sort(list)
     return table.concat(list, ",")
 end
@@ -4126,12 +4124,12 @@ test("D21 recipe page: 專業 = 烹飪 lists only cooking, also from members on 
     shareFrom(ns, PEER, (rMsg(ns, A_PEER, 185, wow.state.now - 600, { 2538, 2657, 3275, 4444 })))
     shareFrom(ns, PEER, (rMsg(ns, A_PEER, 129, wow.state.now - 600, { 3275 })))
     ns.Recipes.show(nil, 185)
-    ns.Recipes.skillChoice.choose(185)
+    ns.Recipes.skillChoice.setOnly(185)
     -- 4444: the client does not say which profession -> kept.
     eq(shownRecipeIDs(ns), "818,2538,2540,4444", "cooking only (and the unknown one)")
     local texts = table.concat(wow.allTexts(), "\n")
     ok(texts:find("4 個配方", 1, true), "count matches the list")
-    ns.Recipes.skillChoice.choose(129)
+    ns.Recipes.skillChoice.setOnly(129)
     eq(shownRecipeIDs(ns), "3275", "first aid")
     ok(table.concat(wow.allTexts(), "\n"):find("1 個配方", 1, true), "count for first aid")
     local opts = {}
@@ -4190,6 +4188,115 @@ test("D21 recipe icons: crafted item, else spell icon, else the profession's; ca
     local tex = CreateFrame("Frame"):CreateTexture()
     eq(ns.Recipes.setIcon(tex, 2153, 165), "Interface\\Icons\\Trade_LeatherWorking", "unknown: the profession icon")
     C_Item = nil
+end)
+
+---------------------------------------------------------------------------
+-- GF-001-D22: multi-select 專業 and 會做的人 on the recipe page
+---------------------------------------------------------------------------
+
+local function recipeIDs(ns)
+    local list = {}
+    for _, r in ipairs(ns.Recipes.shownRows()) do list[#list + 1] = r.id end
+    table.sort(list)
+    return table.concat(list, ",")
+end
+
+local function multiPage()
+    local ns = shareLogin({ tradeSkill = mixedCookingWindow() }) -- mine: cooking 818, 2538, 2540
+    wow.fire("TRADE_SKILL_SHOW")
+    shareFrom(ns, PEER, (rMsg(ns, A_PEER, 129, wow.state.now - 600, { 3275 })))         -- first aid
+    shareFrom(ns, PEER, (rMsg(ns, A_PEER, 186, wow.state.now - 600, { 2657, 2659 })))   -- smelting
+    shareFrom(ns, PEER, (rMsg(ns, A_PEER, 185, wow.state.now - 600, { 2538 })))          -- cooking
+    ns.Framework.open("recipes")
+    return ns
+end
+
+test("D22 recipe 專業: all by default, tick several, 全選 / 全不選, button summary, count", function()
+    local ns = multiPage()
+    local b = ns.Recipes.skillChoice
+    eq(b:GetText(), "全部專業 ▼", "all ticked at first")
+    eq(recipeIDs(ns), "818,2538,2540,2657,2659,3275", "every profession in one list")
+    ok(table.concat(wow.allTexts(), "\n"):find("6 個配方", 1, true), "count")
+    b.toggle(186)
+    eq(b:GetText(), "2 個專業 ▼", "two left")
+    eq(recipeIDs(ns), "818,2538,2540,3275", "smelting unticked: gone")
+    b.toggle(129)
+    eq(b:GetText(), "烹飪 ▼", "one left: its name")
+    eq(recipeIDs(ns), "818,2538,2540", "cooking only")
+    ok(table.concat(wow.allTexts(), "\n"):find("3 個配方", 1, true), "count follows")
+    b.selectNone()
+    eq(b:GetText(), "沒有選專業 ▼", "none")
+    eq(recipeIDs(ns), "", "nothing listed")
+    ok(table.concat(wow.allTexts(), "\n"):find("沒有選專業。", 1, true), "says so")
+    b.toggle(129); b.toggle(185); b.toggle(186)
+    eq(b:GetText(), "全部專業 ▼", "all ticked again = 全部專業")
+    eq(b.selected, nil, "stored as everything (a new profession is included)")
+    b.selectNone(); b.selectAll()
+    eq(recipeIDs(ns), "818,2538,2540,2657,2659,3275", "全選")
+    -- Rows of several professions are sorted by name, each with its own icon fallback.
+    local skills = {}
+    for _, r in ipairs(ns.Recipes.shownRows()) do skills[r.id] = r.skill end
+    eq(skills[3275], 129, "row knows its profession"); eq(skills[2657], 186, "smelting row")
+end)
+
+test("D22 recipe 專業 list: check boxes with icons, 全選 and 全不選 first, stays open", function()
+    local ns = multiPage()
+    local b = ns.Recipes.skillChoice
+    wow.click(b)
+    ok(b.menu:IsShown(), "list open")
+    ok(b.menu.gfOpaque, "opaque")
+    local items = {}
+    for _, it in ipairs(b.menu.items) do
+        if it:IsShown() then
+            items[#items + 1] = it.label:GetText() .. (it.isOption and (it.checked and "[x]" or "[ ]") or "")
+                .. (it.icon:IsShown() and "+icon" or "")
+        end
+    end
+    eq(table.concat(items, "|"), "全選|全不選|採礦[x]+icon|急救[x]+icon|烹飪[x]+icon", "entries (primary first)")
+    eq(b.menu.items[4].icon._texture, "Interface\\Icons\\Spell_Holy_SealOfSacrifice", "first aid icon")
+    eq(b.menu.items[3].check._texture, "Interface\\Buttons\\UI-CheckBox-Check", "check mark")
+    wow.click(b.menu.items[5]) -- 烹飪
+    ok(b.menu:IsShown(), "still open: tick several")
+    ok(not b.menu.items[5].check:IsShown(), "unticked")
+    eq(b:GetText(), "2 個專業 ▼", "button follows")
+    wow.click(b.menu.items[2]) -- 全不選
+    eq(b:GetText(), "沒有選專業 ▼", "全不選")
+    wow.click(b.menu.items[1]) -- 全選
+    eq(b:GetText(), "全部專業 ▼", "全選")
+    wow.click(b)
+    ok(not b.menu:IsShown(), "button again: closed")
+end)
+
+test("D22 recipe 會做的人: 我 and 別人 as two check boxes", function()
+    local ns = multiPage()
+    local w = ns.Recipes.whoChoice
+    eq(w:GetText(), "所有人 ▼", "both at first")
+    w.toggle("others")
+    eq(w:GetText(), "只看我的 ▼", "only me")
+    eq(recipeIDs(ns), "818,2538,2540", "my recipes")
+    w.toggle("me"); w.toggle("others")
+    eq(w:GetText(), "只看別人的 ▼", "only others")
+    eq(recipeIDs(ns), "2538,2657,2659,3275", "the others' recipes")
+    w.toggle("others")
+    eq(w:GetText(), "沒有選 ▼", "neither")
+    eq(recipeIDs(ns), "", "nothing")
+    w.selectAll()
+    eq(recipeIDs(ns), "818,2538,2540,2657,2659,3275", "everyone")
+    -- Together with 專業 and 只看在線.
+    ns.Recipes.skillChoice.setOnly(185)
+    w.toggle("me") -- only others
+    eq(recipeIDs(ns), "2538", "others' cooking")
+end)
+
+test("D22 recipe page: a long list only has frames for the rows in view", function()
+    local ns = multiPage()
+    local ids = {}
+    for i = 1, 300 do ids[i] = 20000 + i end
+    shareFrom(ns, PEER, (rMsg(ns, A_PEER, 164, wow.state.now - 500, ids)))
+    wow.advance(1.2)
+    ns.Recipes.refresh()
+    eq(#ns.Recipes.shownRows(), 306, "every recipe in the list")
+    ok(#ns.Recipes.rowFrames() < 40, "few frames: " .. #ns.Recipes.rowFrames())
 end)
 
 test("fixture: generated sample is up to date and free of zone/online in the outbox", function()
