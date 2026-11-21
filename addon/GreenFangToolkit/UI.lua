@@ -302,7 +302,11 @@ end
 
 -- Tooltip for a row: one profession when slot is given, else the member.
 function UI.showRowTooltip(row, slot)
-    GameTooltip:SetOwner(row, "ANCHOR_TOP")
+    if slot then
+        ns.tooltipAbove(row, slot.x0 or 0) -- right above that icon (GF-001-D21)
+    else
+        GameTooltip:SetOwner(row, "ANCHOR_TOP")
+    end
     if slot then
         ns.Professions.addTooltipLines(GameTooltip, slot.entry.prof, row.memberGuid)
         GameTooltip:Show()

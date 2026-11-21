@@ -2,7 +2,7 @@
 
 - 查證：claude-addon 2026-11-20
 - 方法：只讀公開資料，沒有進遊戲。來源和 `forever-api-16001.md` 相同，主要是 FA（[zmarotrix/ForeverAPI](https://github.com/zmarotrix/ForeverAPI)，客戶端 1.60.1 的傾印）
-- 狀態：全部**未實機驗證**，要照 `tests/addon/MANUAL.md` §3p、§3q 在遊戲裡確認
+- 狀態：全部**未實機驗證**，要照 `tests/addon/MANUAL.md` §3p、§3q、§3r 在遊戲裡確認
 
 ## 結論
 
@@ -28,3 +28,16 @@
 - 沒有在線、會做的人（自己不算）時，右鍵沒有選單
 - 不另外加說明文字：Shift＋點、右鍵選單都是遊戲內通用的做法
 - **需要技能、分類的篩選**：做不到，理由同上（分享的資料只有配方 ID）
+
+## 專業篩選和圖示（GF-001-D21，0.9.6 起）
+
+- **0.9.5 的錯誤**：選「烹飪」卻列出急救和熔煉的配方。原因不在畫面：自己的專業視窗打開時，`C_TradeSkillUI.GetAllRecipeIDs()` 也列出角色**其他專業**學會的配方（推測，從 owner 的截圖判斷：混進來的都是 owner 自己的專業），工具箱把它們全部記在當時打開的專業下面，也分享給別人
+- **修正**：每個配方都問客戶端它屬於哪個專業，讀專業視窗時和整理配方頁時都會問（0.9.0～0.9.5 分享出去的清單也是混的）
+  1. `C_TradeSkillUI.GetProfessionInfoByRecipeID(id)` 的 `parentProfessionID` 或 `professionID`（FA：已查證存在）
+  2. 沒有的話 `C_TradeSkillUI.GetTradeSkillLineForRecipe(id)`（FA：存在，沒有說明文件）
+  3. 再沒有的話 `C_TradeSkillUI.IsRecipeInSkillLine(id, 專業)`（FA：已查證存在）
+  - 客戶端說不出來的配方照樣保留。結果記在快取裡
+  - 自己存過的混合清單，下次打開那個專業視窗時改成乾淨的；有篩選時也一樣
+  - **未實機驗證**：這三個函式對別人的配方 ID 是否也有答案。沒有的話，別人的舊清單要等對方升級到 0.9.6、打開專業視窗後才會變乾淨
+- **圖示**：依序用做出來的物品圖示（`GetRecipeSchematic(id, false).outputItemID` → `C_Item.GetItemIconByID`，沒有的話 `GetItemIcon`）、專業視窗給的 `icon`、配方法術的圖示（`C_Spell.GetSpellTexture`），都沒有時用專業圖示。找到的才記在快取裡（物品資料可能晚一點才載入）
+

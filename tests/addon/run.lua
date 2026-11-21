@@ -4078,6 +4078,120 @@ test("D20 roster filter line: labels and boxes do not overlap", function()
     ok(list[#list][2] + list[#list][3] <= 1000 - 20, "fits in the page")
 end)
 
+---------------------------------------------------------------------------
+-- GF-001-D21: profession filter, tooltip position, recipe icons
+---------------------------------------------------------------------------
+
+-- Cooking window that, like Forever, also lists first aid and smelting.
+local function mixedCookingWindow()
+    return { skillLine = 185,
+        recipes = { [2538] = true, [2540] = true, [818] = true, [3275] = true, [2657] = true, [2659] = true },
+        recipeSkills = { [2538] = 185, [2540] = 185, [818] = 185, [3275] = 129, [2657] = 186, [2659] = 186 } }
+end
+
+local function shownRecipeIDs(ns)
+    local list = {}
+    for _, r in ipairs(ns.Recipes.rowFrames()) do if r:IsShown() and r.data then list[#list + 1] = r.data.id end end
+    table.sort(list)
+    return table.concat(list, ",")
+end
+
+test("D21 recipes: a cooking window storing first aid and smelting keeps only cooking", function()
+    local ns = shareLogin({ tradeSkill = mixedCookingWindow() })
+    wow.fire("TRADE_SKILL_SHOW")
+    eq(table.concat(ns.Share.decodeValue("R185", ns.Share.get(A_SELF, "R185").v), ","), "818,2538,2540",
+        "only cooking stored")
+    eq(ns.Recipes.skillOfRecipe(3275), 129, "first aid recipe known as first aid")
+    eq(ns.Recipes.inSkill(2657, 185), false, "smelting is not cooking")
+    eq(ns.Recipes.inSkill(99999, 185), nil, "unknown recipe: cannot tell")
+end)
+
+test("D21 recipes: a mixed list saved by 0.9.5 is cleaned at the next read", function()
+    local ns = shareLogin({ tradeSkill = mixedCookingWindow() })
+    ns.Share.ownRecord("R185", ns.Share.encodeValue("R185", { 818, 2538, 2540, 2657, 2659, 3275 }))
+    eq(ns.Recipes.scan(), "stored", "rewritten")
+    eq(table.concat(ns.Share.decodeValue("R185", ns.Share.get(A_SELF, "R185").v), ","), "818,2538,2540", "clean")
+    -- With a window filter the saved list stays, but cleaned too.
+    ns.Share.ownRecord("R185", ns.Share.encodeValue("R185", { 818, 2538, 2540, 2657, 3275 }))
+    wow.state.tradeSkill.recipes = { [818] = true }
+    eq(ns.Recipes.scan(), "filtered", "window filter")
+    eq(table.concat(ns.Share.decodeValue("R185", ns.Share.get(A_SELF, "R185").v), ","), "818,2538,2540",
+        "saved list kept without the mixed-in recipes")
+end)
+
+test("D21 recipe page: 專業 = 烹飪 lists only cooking, also from members on 0.9.5; count matches", function()
+    local ns = shareLogin({ tradeSkill = mixedCookingWindow() })
+    wow.fire("TRADE_SKILL_SHOW")
+    -- A member on 0.9.5 shared a mixed R185 and a first aid list.
+    shareFrom(ns, PEER, (rMsg(ns, A_PEER, 185, wow.state.now - 600, { 2538, 2657, 3275, 4444 })))
+    shareFrom(ns, PEER, (rMsg(ns, A_PEER, 129, wow.state.now - 600, { 3275 })))
+    ns.Recipes.show(nil, 185)
+    ns.Recipes.skillChoice.choose(185)
+    -- 4444: the client does not say which profession -> kept.
+    eq(shownRecipeIDs(ns), "818,2538,2540,4444", "cooking only (and the unknown one)")
+    local texts = table.concat(wow.allTexts(), "\n")
+    ok(texts:find("4 個配方", 1, true), "count matches the list")
+    ns.Recipes.skillChoice.choose(129)
+    eq(shownRecipeIDs(ns), "3275", "first aid")
+    ok(table.concat(wow.allTexts(), "\n"):find("1 個配方", 1, true), "count for first aid")
+    local opts = {}
+    for _, o in ipairs(ns.Recipes.skillOptions()) do opts[#opts + 1] = o.text end
+    eq(table.concat(opts, ","), "急救,烹飪", "no mining entry made from mixed-in recipes")
+end)
+
+test("D21 tooltips: recipe tooltip next to the row's name; roster icon tooltip over the icon", function()
+    local ns = shareLogin({ tradeSkill = leatherWindow(), player = crafter() })
+    wow.fire("TRADE_SKILL_SHOW")
+    ns.Recipes.show(nil, 165)
+    local row
+    for _, r in ipairs(ns.Recipes.rowFrames()) do if r:IsShown() then row = r; break end end
+    row._scripts.OnEnter(row)
+    eq(GameTooltip._anchor, "ANCHOR_NONE", "not the default (screen corner) anchor")
+    local pt = GameTooltip._points[1]
+    eq(pt[1] .. ">" .. pt[3], "BOTTOMLEFT>TOPLEFT", "just above the row")
+    eq(pt[2], row, "on the hovered row")
+    eq(pt[4], 300, "next to the name, towards the middle")
+    sendFrom(ns, PEER, peerData())
+    ns.Framework.open("roster")
+    local peer = rowFor(ns, PEER)
+    local slot = peer.profSlots[2]
+    ns.UI.showRowTooltip(peer, slot)
+    eq(GameTooltip._points[1][4], slot.x0, "icon tooltip over that icon")
+    ns.UI.showRowTooltip(peer, nil)
+    eq(GameTooltip._anchor, "ANCHOR_TOP", "member tooltip above the row's middle")
+end)
+
+test("D21 recipe icons: crafted item, else spell icon, else the profession's; cached", function()
+    local ns = shareLogin({ tradeSkill = leatherWindow() })
+    wow.fire("TRADE_SKILL_SHOW")              -- 2149, 2152
+    local schematics = 0
+    C_TradeSkillUI.GetRecipeSchematic = function(id)
+        schematics = schematics + 1
+        if id == 2152 then return { outputItemID = 2304 } end
+        return {}
+    end
+    C_Item = { GetItemIconByID = function(item) return item == 2304 and 133611 or nil end }
+    C_Spell.GetSpellTexture = function(id) return id == 2149 and 132539 or nil end
+    eq(ns.Recipes.icon(2152), 133611, "crafted item's icon")
+    eq(ns.Recipes.icon(2149), 132539, "spell icon when there is no item")
+    eq(ns.Recipes.icon(2152), 133611, "again")
+    eq(schematics, 2, "cached: asked once per recipe")
+    eq(ns.Recipes.icon(2153), nil, "unknown")
+    ns.Recipes.show(nil, 165)
+    local icons = {}
+    for _, r in ipairs(ns.Recipes.rowFrames()) do
+        if r:IsShown() and r.data then
+            icons[#icons + 1] = r.data.id .. "=" .. tostring(r.icon:IsShown() and r.icon._texture)
+            eq(r.icon._w, 20, "20 px like the roster icons")
+        end
+    end
+    table.sort(icons)
+    eq(table.concat(icons, ","), "2149=132539,2152=133611", "icons on the rows")
+    local tex = CreateFrame("Frame"):CreateTexture()
+    eq(ns.Recipes.setIcon(tex, 2153, 165), "Interface\\Icons\\Trade_LeatherWorking", "unknown: the profession icon")
+    C_Item = nil
+end)
+
 test("fixture: generated sample is up to date and free of zone/online in the outbox", function()
     local db = buildFixture()
     local header = "-- 去識別化的 GreenFangToolkitDB（schemaVersion 2）樣本，給 GF Sync 測試用。\n"

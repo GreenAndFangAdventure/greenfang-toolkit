@@ -142,6 +142,15 @@ function ns.makeOpaque(f, inset)
     return f
 end
 
+-- GameTooltip just above owner, x px from its left edge (GF-001-D21: a
+-- recipe tooltip anchored to the far right of a 930 px row ended up in the
+-- screen corner). The client keeps GameTooltip on screen.
+function ns.tooltipAbove(owner, x)
+    GameTooltip:SetOwner(owner, "ANCHOR_NONE")
+    GameTooltip:ClearAllPoints()
+    GameTooltip:SetPoint("BOTTOMLEFT", owner, "TOPLEFT", x or 0, 2)
+end
+
 -- A popup window above the toolkit window: opaque, framed, raised on show.
 function ns.popupWindow(name, w, h)
     local f = ns.createFrame("Frame", name, UIParent, "BasicFrameTemplateWithInset")

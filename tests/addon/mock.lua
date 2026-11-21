@@ -364,7 +364,7 @@ function wow.installGlobals()
     allObjects = {}
     GameTooltip = newObject("GameTooltip", "GameTooltip")
     GameTooltip._lines = {}
-    GameTooltip.SetOwner = function(self, owner) self._owner = owner; self._lines = {} end
+    GameTooltip.SetOwner = function(self, owner, anchor) self._owner = owner; self._anchor = anchor; self._points = {}; self._lines = {} end
     GameTooltip.GetOwner = function(self) return self._owner end
     GameTooltip.ClearLines = function(self) self._lines = {} end
     GameTooltip.AddLine = function(self, text, r, g, b)
@@ -567,6 +567,14 @@ function wow.installGlobals()
             IsTradeSkillGuild = function() return ts.guild == true end,
             IsTradeSkillGuildMember = function() return ts.guildMember == true end,
         }
+        -- GF-001-D21: like Forever, GetAllRecipeIDs may list other
+        -- professions' recipes; ts.recipeSkills = { [id] = skillLineID }.
+        if ts.recipeSkills then
+            C_TradeSkillUI.GetProfessionInfoByRecipeID = function(id)
+                local skill = ts.recipeSkills[id]
+                return skill and { professionID = skill, parentProfessionID = skill } or nil
+            end
+        end
     end
     GetPlayerInfoByGUID = function(guid)
         if guid == "Player-0000-0000000D" then return "獵人", "HUNTER", "食人妖", "Troll", 2, "測試丁", "" end

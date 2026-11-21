@@ -48,6 +48,75 @@ function Recipes.openSkillLine()
     return nil
 end
 
+---------------------------------------------------------------------------
+-- Which profession a recipe belongs to (GF-001-D21)
+---------------------------------------------------------------------------
+-- 0.9.5 in game: with 專業 = 烹飪 the page listed first aid and smelting
+-- recipes too. GetAllRecipeIDs() in the open window also returns recipes of
+-- the character's other professions, and every learned one was stored under
+-- the open profession. Each recipe is now checked, when reading the window
+-- and when building the page (records shared by 0.9.0 to 0.9.5 carry the
+-- mixed lists). Unknown (the client does not say) = keep.
+
+local recipeSkillCache = {}
+
+local function craftOf(...)
+    for i = 1, select("#", ...) do
+        local id = ns.num((select(i, ...)))
+        if id and Recipes.CRAFTS[id] then return id end
+    end
+    return nil
+end
+
+-- skillLineID of a recipe, or nil when the client does not say.
+function Recipes.skillOfRecipe(id)
+    local cached = recipeSkillCache[id]
+    if cached then return cached end
+    local t = T()
+    if type(t) ~= "table" then return nil end
+    local skill
+    if type(t.GetProfessionInfoByRecipeID) == "function" then
+        local info = ns.call(t.GetProfessionInfoByRecipeID, id)
+        if type(info) == "table" then skill = craftOf(info.parentProfessionID, info.professionID) end
+    end
+    if not skill and type(t.GetTradeSkillLineForRecipe) == "function" then
+        local ok, a, _, c = pcall(t.GetTradeSkillLineForRecipe, id)
+        if ok then skill = craftOf(c, a) end
+    end
+    if skill then recipeSkillCache[id] = skill end
+    return skill
+end
+
+-- true / false when the client can tell whether recipe id is in skill; nil
+-- when it cannot.
+function Recipes.inSkill(id, skill)
+    local known = Recipes.skillOfRecipe(id)
+    if known then return known == skill end
+    local t = T()
+    if type(t) == "table" and type(t.IsRecipeInSkillLine) == "function" then
+        local r = ns.call(t.IsRecipeInSkillLine, id, skill)
+        if type(r) == "boolean" then return r end
+    end
+    return nil
+end
+
+-- Can this client tell at all? (Checked once per index build.)
+function Recipes.canTellSkill()
+    local t = T()
+    return type(t) == "table" and (type(t.GetProfessionInfoByRecipeID) == "function"
+        or type(t.GetTradeSkillLineForRecipe) == "function" or type(t.IsRecipeInSkillLine) == "function")
+end
+
+-- ids without the ones the client says belong to another profession.
+function Recipes.onlySkill(ids, skill)
+    if not Recipes.canTellSkill() then return ids end
+    local out = {}
+    for _, id in ipairs(ids) do
+        if Recipes.inSkill(id, skill) ~= false then out[#out + 1] = id end
+    end
+    return out
+end
+
 -- Learned recipe IDs in the open window (sorted), or nil when not readable.
 function Recipes.readOpen()
     local t = T()
@@ -85,13 +154,20 @@ function Recipes.scan()
     local ids = Recipes.readOpen()
     if not ids then return "no-api" end
     if #ids == 0 then return "empty" end -- not loaded yet
+    ids = Recipes.onlySkill(ids, skill) -- D21: not the other professions' recipes
+    if #ids == 0 then return "empty" end
     local a = Share.selfAuthor()
     if not a or not Share.store() then return "unknown" end
     local g = "R" .. skill
     local old = Share.get(a, g)
     local oldIDs = old and Share.decodeValue(g, old.v) or nil
+    -- A list saved by 0.9.5 or older may hold other professions' recipes.
+    local savedCount = oldIDs and #oldIDs or 0
+    if oldIDs then oldIDs = Recipes.onlySkill(oldIDs, skill) end
     if oldIDs and #ids < #oldIDs and isSubset(ids, oldIDs) then
         skippedFiltered[skill] = true
+        -- Keep the saved list, but without the mixed-in recipes.
+        if #oldIDs < savedCount then Share.ownRecord(g, Share.encodeValue(g, oldIDs)) end
         return "filtered"
     end
     if oldIDs then
@@ -151,6 +227,49 @@ function Recipes.knownName(id)
     return nil
 end
 
+-- Icon of a recipe (GF-001-D21): the crafted item's icon, else the one the
+-- profession window gives, else the recipe spell's. nil when the client
+-- knows none yet (not cached then: item data may arrive later).
+local iconCache = {}
+function Recipes.icon(id)
+    local cached = iconCache[id]
+    if cached then return cached end
+    local icon
+    local t = T()
+    if type(t) == "table" and type(t.GetRecipeSchematic) == "function" then
+        local sc = ns.call(t.GetRecipeSchematic, id, false)
+        local item = type(sc) == "table" and ns.num(sc.outputItemID) or nil
+        if item then
+            if C_Item and type(C_Item.GetItemIconByID) == "function" then icon = ns.call(C_Item.GetItemIconByID, item) end
+            if not icon and type(GetItemIcon) == "function" then icon = ns.call(GetItemIcon, item) end
+        end
+    end
+    if not icon and type(t) == "table" and type(t.GetRecipeInfo) == "function" then
+        local info = ns.call(t.GetRecipeInfo, id)
+        icon = type(info) == "table" and info.icon or nil
+    end
+    if not icon and C_Spell and type(C_Spell.GetSpellTexture) == "function" then
+        icon = ns.call(C_Spell.GetSpellTexture, id)
+    end
+    if type(icon) ~= "number" and type(icon) ~= "string" then icon = nil end
+    if icon == "" or icon == 0 then icon = nil end
+    if icon then iconCache[id] = icon end
+    return icon
+end
+
+-- Put the recipe's icon on tex, or the profession's; hidden when neither.
+function Recipes.setIcon(tex, id, skill)
+    for _, path in ipairs({ Recipes.icon(id) or false, ns.Icons.professionIcon(skill) or false }) do
+        if path and ns.Icons.set(tex, path) then
+            tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+            tex:Show()
+            return path
+        end
+    end
+    tex:Hide()
+    return nil
+end
+
 -- "3 天前" / "5 小時前" / "12 分鐘前" / "剛剛" from a server time.
 function Recipes.agoText(t)
     if type(t) ~= "number" then return "時間不明" end
@@ -193,7 +312,7 @@ local function startBuild(snap)
         return x.key < y.key
     end)
     return { version = Share.version, snap = snap, ordered = ordered, pos = 1, out = {},
-        selfGuid = ns.Data.player().guid }
+        selfGuid = ns.Data.player().guid, check = Recipes.canTellSkill() }
 end
 
 -- Work on the build until about budget entries were added. True when done.
@@ -207,6 +326,7 @@ local function work(b, budget)
         for g, rec in pairs(recs or {}) do
             local skill = tonumber(g:match("^R(%d+)$"))
             local ids = skill and Share.decoded(a, g)
+            if ids and b.check then ids = Recipes.onlySkill(ids, skill) end -- D21
             if ids and #ids > 0 then
                 local p = b.out[skill] or { crafters = {}, recipes = {} }
                 b.out[skill] = p
@@ -419,7 +539,7 @@ end
 -- 「配方」 page
 ---------------------------------------------------------------------------
 
-local ROW_HEIGHT = 22
+local ROW_HEIGHT, RECIPE_ICON, RECIPE_TIP_X = 22, 20, 300
 local panel, scroll, content, search, emptyLine, filterLine, clearFilter
 local rowWidgets = {}
 local shownRows = {} -- all rows of the current list; only those in view have frames
@@ -466,9 +586,12 @@ local function newRow(i)
     if row.SetHighlightTexture then
         row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
     end
+    row.icon = row:CreateTexture(nil, "ARTWORK")
+    row.icon:SetSize(RECIPE_ICON, RECIPE_ICON)
+    row.icon:SetPoint("LEFT", row, "LEFT", 6, 0)
     row.name = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    row.name:SetPoint("LEFT", row, "LEFT", 8, 0)
-    row.name:SetWidth(420)
+    row.name:SetPoint("LEFT", row, "LEFT", 32, 0)
+    row.name:SetWidth(396)
     row.name:SetJustifyH("LEFT")
     row.name:SetWordWrap(false)
     row.who = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -481,7 +604,7 @@ local function newRow(i)
     row:SetScript("OnEnter", function(self)
         local data = self.data
         if not data then return end
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        ns.tooltipAbove(self, RECIPE_TIP_X) -- next to the name, not the screen corner
         local shown = false
         if type(GameTooltip.SetSpellByID) == "function" then
             shown = pcall(GameTooltip.SetSpellByID, GameTooltip, data.id)
@@ -551,6 +674,7 @@ function Recipes.layoutRows()
                 row:ClearAllPoints()
                 row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -(i - 1) * ROW_HEIGHT)
                 row.bg:SetColorTexture(0.17, 0.2, 0.18, i % 2 == 0 and 0.35 or 0.09)
+                Recipes.setIcon(row.icon, data.id, current.skill)
                 row.name:SetText(data.name)
                 row.who:SetText(Recipes.crafterText(data.crafters))
                 local online = data.crafters[1] and data.crafters[1].online
@@ -668,7 +792,7 @@ local function build(p)
     clearFilter:Hide()
     Recipes.clearFilterButton = clearFilter
     local header = p:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    header:SetPoint("TOPLEFT", p, "TOPLEFT", 28, -82)
+    header:SetPoint("TOPLEFT", p, "TOPLEFT", 52, -82)
     header:SetText("配方")
     local header2 = p:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
     header2:SetPoint("TOPLEFT", p, "TOPLEFT", 460, -82)
