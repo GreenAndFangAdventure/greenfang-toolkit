@@ -3667,7 +3667,8 @@ test("16001: GetProfessionInfo errors -> empty, no Lua error", function()
     local list = ns.Data.ownProfessionsDetailed()
     eq(#list, 0, "nothing read")
     wow.fire("PLAYER_LOGIN"); wow.advance(10)
-    eq(#entriesOf("character.self")[1].payload.professions, 0, "entry still written")
+    -- GF-001-D23: listed but unreadable is not "none": the field is left out.
+    eq(entriesOf("character.self")[1].payload.professions, nil, "entry still written, professions left out")
 end)
 
 test("16001: secret values become nil/empty, never stored", function()
@@ -4297,6 +4298,143 @@ test("D22 recipe page: a long list only has frames for the rows in view", functi
     ns.Recipes.refresh()
     eq(#ns.Recipes.shownRows(), 306, "every recipe in the list")
     ok(#ns.Recipes.rowFrames() < 40, "few frames: " .. #ns.Recipes.rowFrames())
+end)
+
+---------------------------------------------------------------------------
+-- GF-001-D23: never an empty realm in the outbox (invalid_realm since 2026-11-21)
+---------------------------------------------------------------------------
+
+local function noRealmPlayer(realm)
+    local p = wow.defaultPlayer()
+    p.realm = realm or ""
+    return p
+end
+
+local function realmsIn(kind)
+    local list = {}
+    for _, e in ipairs(entriesOf(kind)) do
+        list[#list + 1] = tostring(e.game and e.game.realm) .. "/" .. tostring(e.uploader and e.uploader.realm)
+    end
+    return table.concat(list, ",")
+end
+
+test("D23 realm: GetRealmName empty and nothing remembered -> no entry at all, 同步與診斷 says so", function()
+    wow.reset({ player = noRealmPlayer("") })
+    local ns = wow.login(ADDON_DIR)
+    wow.advance(30)
+    wow.fire("GUILD_ROSTER_UPDATE"); wow.advance(5)
+    eq(#entriesOf("character.self"), 0, "no character.self with an empty realm")
+    eq(#entriesOf("roster.snapshot"), 0, "no roster.snapshot with an empty realm")
+    local _, why = ns.Sync.recordSelf(true, { allowNoGuild = true })
+    eq(why, "waiting-realm", "waiting for the realm")
+    ok(ns.Diag.versionText():find("伺服器 不明（暫停寫入上傳資料）", 1, true), "diag: " .. ns.Diag.versionText())
+    wow.logout()
+    for _, e in ipairs(outbox()) do
+        ok(e.game.realm ~= "" and e.uploader.realm ~= "", "never an empty realm in the outbox")
+    end
+end)
+
+test("D23 realm: a secret GetRealmName counts as empty", function()
+    wow.reset({ secrets = { ["測試伺服器"] = true } })
+    local ns = wow.login(ADDON_DIR)
+    wow.advance(30)
+    eq(#entriesOf("character.self"), 0, "nothing written")
+    eq(ns.realm(), "", "unknown")
+end)
+
+test("D23 realm: remembered from an earlier login when GetRealmName goes empty", function()
+    wow.reset()
+    local ns = wow.login(ADDON_DIR)
+    wow.advance(30)
+    eq(GreenFangToolkitDB.settings.realms["Player-0000-0000000A"], "測試伺服器", "remembered per character")
+    local saved = GreenFangToolkitDB
+    GreenFangToolkitDB.sync.outbox = {}
+    wow.reset({ player = noRealmPlayer("") })
+    ns = wow.login(ADDON_DIR, { GreenFangToolkitDB = saved })
+    wow.advance(30)
+    eq(realmsIn("character.self"), "測試伺服器/測試伺服器", "the remembered realm")
+    eq(ns.realmSource, "saved", "source")
+    ok(ns.Diag.versionText():find("伺服器 「測試伺服器」（存檔記住的）", 1, true), "diag: " .. ns.Diag.versionText())
+end)
+
+test("D23 realm: seeded from realms already in the SavedVariables; old empty entries repaired", function()
+    wow.reset()
+    wow.login(ADDON_DIR)
+    wow.advance(30)
+    wow.fire("GUILD_ROSTER_UPDATE"); wow.advance(5)
+    local saved = GreenFangToolkitDB
+    saved.settings.realms = nil -- a 0.9.6 file: no remembered realm
+    -- 0.9.5/0.9.6 queued entries with an empty realm; the roster snapshot still has it.
+    for _, e in ipairs(saved.sync.outbox) do e.game.realm = ""; e.uploader.realm = "" end
+    wow.reset({ player = noRealmPlayer("") })
+    local ns = wow.login(ADDON_DIR, { GreenFangToolkitDB = saved })
+    wow.advance(30)
+    wow.fire("GUILD_ROSTER_UPDATE"); wow.advance(5)
+    eq(realmsIn("character.self"), "測試伺服器/測試伺服器", "realm from the saved roster snapshot")
+    for _, e in ipairs(outbox()) do
+        eq(e.game.realm .. "/" .. e.uploader.realm, "測試伺服器/測試伺服器", "every queued entry repaired: " .. e.kind)
+    end
+end)
+
+test("D23 realm: GetNormalizedRealmName when nothing else; never a remembered realm it contradicts", function()
+    wow.reset({ player = noRealmPlayer("") })
+    GetNormalizedRealmName = function() return "測試伺服器2" end
+    local ns = wow.login(ADDON_DIR)
+    wow.advance(30)
+    eq(realmsIn("character.self"), "測試伺服器2/測試伺服器2", "normalized name")
+    -- Once a roster snapshot holds it, it is also "saved"; the value is what counts.
+    ok(ns.realmSource == "GetNormalizedRealmName" or ns.realmSource == "saved", "source: " .. ns.realmSource)
+    GreenFangToolkitDB.settings.realms["Player-0000-0000000A"] = "Other Realm"
+    eq(ns.realm(), "測試伺服器2", "remembered realm of another name is not used")
+    GreenFangToolkitDB.settings.realms["Player-0000-0000000A"] = "測試 伺服器2"
+    eq(ns.realm(), "測試 伺服器2", "the same realm with spaces wins over the normalized one")
+    GetNormalizedRealmName = nil
+end)
+
+test("D23 professions: unreadable names are not 'no professions'", function()
+    -- Names the client keeps secret: listed by GetProfessions, unreadable.
+    wow.reset({ player = crafter() })
+    local ns = wow.login(ADDON_DIR)
+    wow.advance(30)
+    eq(#entriesOf("character.self")[1].payload.professions, 5, "read normally")
+    for _, row in pairs(wow.state.player.professions) do wow.state.secrets[row[1]] = true end
+    ns.Sync.recordSelf(true)
+    eq(ns.Data.unreadableProfessions, 5, "five unreadable")
+    eq(#entriesOf("character.self")[1].payload.professions, 5, "last known professions kept")
+    -- None known before: the field is left out, never {}.
+    GreenFangToolkitDB.sync.outbox = {}
+    ns.Sync.recordSelf(true)
+    eq(entriesOf("character.self")[1].payload.professions, nil, "left out")
+    -- Really no professions: {} as before.
+    wow.reset()
+    wow.state.player.professions, wow.state.player.professionIndexes = {}, {}
+    wow.login(ADDON_DIR)
+    wow.advance(30)
+    local list = entriesOf("character.self")[1].payload.professions
+    eq(type(list) == "table" and #list, 0, "no professions: empty list")
+end)
+
+test("D23 shared data kept under an empty realm by 0.9.5/0.9.6 is merged back", function()
+    local ns = shareLogin()
+    shareFrom(ns, PEER, (rMsg(ns, A_PEER, 164, wow.state.now - 600, { 2660 })))
+    local saved = GreenFangToolkitDB
+    local guild = ns.Data.player().guild
+    local realKey = ns.guildKey("測試伺服器", guild)
+    ok(saved.share.guilds[realKey], "store under realm|guild")
+    -- What 0.9.6 did with an empty realm: a second store under "|guild".
+    saved.share.guilds["|" .. guild] = { rec = {
+        [A_PEER] = { R164 = { t = wow.state.now - 60, h = "x", v = "newer" } },
+        [A_THIRD] = { R197 = { t = wow.state.now - 60, h = "y", v = "only here" } },
+    }, tomb = {}, gone = {} }
+    saved.share.guilds[realKey].rec[A_PEER].R164.t = wow.state.now - 600
+    wow.reset()
+    ns = wow.login(ADDON_DIR, { GreenFangToolkitDB = saved })
+    ns.Share.rand = function(a) return a end
+    wow.advance(25)
+    ok(ns.Share.store(), "store")
+    eq(GreenFangToolkitDB.share.guilds["|" .. guild], nil, "the empty-realm store is gone")
+    eq(ns.Share.get(A_PEER, "R164").v, "newer", "newer record wins")
+    eq(ns.Share.get(A_THIRD, "R197").v, "only here", "records only there are kept")
 end)
 
 test("fixture: generated sample is up to date and free of zone/online in the outbox", function()

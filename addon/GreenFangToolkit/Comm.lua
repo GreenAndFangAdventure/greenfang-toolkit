@@ -214,7 +214,7 @@ end
 -- Receiving
 ---------------------------------------------------------------------------
 
-local function realmNoSpace() return (str((ns.call(GetRealmName))):gsub("%s", "")) end
+local function realmNoSpace() return (ns.realm():gsub("%s", "")) end
 
 -- "Name-Realm" for a sender that may come without a realm.
 local function fullName(sender)
@@ -228,7 +228,7 @@ local function isSelf(sender)
     if own == "" then return false end
     local s = keyName(fullName(sender))
     return s == keyName(own .. "-" .. realmNoSpace())
-        or s == keyName(own .. "-" .. str((ns.call(GetRealmName))))
+        or s == keyName(own .. "-" .. ns.realm())
 end
 
 -- The roster member the sender is, or nil (not in the target guild's roster).

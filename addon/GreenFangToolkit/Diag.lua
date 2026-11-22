@@ -47,8 +47,13 @@ end
 function Diag.versionText()
     local server = ns.num((ns.call(GetServerTime)))
     local skew = server and (server - ns.now()) or nil
-    return string.format("工具箱 %s｜介面 %s｜伺服器時間和本機差 %s",
-        ns.VERSION, tostring(ns.Data.interface()), skew and (skew .. " 秒") or "不明")
+    -- GF-001-D23: the realm the outbox gets, and where it came from.
+    local realm = ns.realm()
+    local from = ({ GetRealmName = "遊戲", saved = "存檔記住的", GetNormalizedRealmName = "遊戲（無空格）" })[ns.realmSource]
+    return string.format("工具箱 %s｜介面 %s｜伺服器 %s｜伺服器時間和本機差 %s",
+        ns.VERSION, tostring(ns.Data.interface()),
+        realm ~= "" and string.format("「%s」（%s）", realm, from or "?") or "不明（暫停寫入上傳資料）",
+        skew and (skew .. " 秒") or "不明")
 end
 
 Diag.SITE_NOTE = "GF Sync 會在你下線後讀取存檔並上傳。公會網站的名冊主要由 Blizzard API 自動更新，GF Sync 只是補充來源：沒有安裝或關閉同步，網站照樣會更新。"

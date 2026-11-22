@@ -126,9 +126,34 @@ local function enforceCap()
     end
 end
 
+-- GF-001-D23: entries queued with an empty realm (0.9.x since 2026-11-21)
+-- get the realm now known, when they are this guild's. Returns how many.
+function Sync.repairRealms(realm, guild)
+    local s = state()
+    realm = str(realm)
+    if not s or type(s.outbox) ~= "table" or realm == "" then return 0 end
+    local fixed = 0
+    for _, e in ipairs(s.outbox) do
+        if type(e) == "table" and type(e.uploader) == "table" and e.uploader.guild == guild then
+            local changed = false
+            if str(e.uploader.realm) == "" then e.uploader.realm = realm; changed = true end
+            if type(e.game) == "table" and str(e.game.realm) == "" then e.game.realm = realm; changed = true end
+            if changed then fixed = fixed + 1 end
+        end
+    end
+    return fixed
+end
+
 -- Remove matching entries, append the new one, then enforce the cap.
 local function put(entry, matches)
     local outbox = state().outbox
+    -- Once per session and realm: new entries never have an empty realm.
+    local u = entry.uploader
+    local key = u and (str(u.realm) .. "|" .. str(u.guild))
+    if key and key ~= Sync.repairedFor then
+        Sync.repairRealms(u.realm, u.guild)
+        if str(u.realm) ~= "" then Sync.repairedFor = key end
+    end
     for i = #outbox, 1, -1 do
         local e = outbox[i]
         if type(e) ~= "table" or matches(e) then table.remove(outbox, i) end
@@ -227,6 +252,7 @@ function Sync.recordSelf(force, opts)
         return nil, "no-guild"
     end
     if not ns.isTargetGuild(p.guild, p.realm) then return nil, "other-guild" end
+    if p.realm == "" then Sync.pendingSelf = true; return nil, "waiting-realm" end -- GF-001-D23
     local professions = {}
     for i, prof in ipairs((ns.Data.ownProfessionsDetailed())) do
         -- Contract fields only (the icon is for the in-game window).
@@ -245,6 +271,12 @@ function Sync.recordSelf(force, opts)
     local existing = Sync.find("character.self", function(e)
         return type(e.uploader) == "table" and e.uploader.guid == p.guid
     end)
+    -- GF-001-D23: professions listed but unreadable -> not "none". Keep the
+    -- last known ones, or leave the field out (the site keeps what it has).
+    if #professions == 0 and (ns.Data.unreadableProfessions or 0) > 0 then
+        local before = existing and type(existing.payload) == "table" and existing.payload.professions
+        payload.professions = (type(before) == "table" and #before > 0) and ns.copy(before) or nil
+    end
     if not force and existing and same(existing.payload, payload)
         and same(existing.uploader, uploaderBlock(p)) then
         return nil, "unchanged"
@@ -287,6 +319,7 @@ function Sync.recordRoster(snapshot)
     if not ns.isTargetGuild(snapshot.guild, snapshot.realm) then return nil, "other-guild" end
     local p = Sync.player()
     if not p.guid or p.guild ~= snapshot.guild then return nil, "no-guild" end
+    if p.realm == "" then return nil, "waiting-realm" end -- GF-001-D23
     local members = {}
     for i, m in ipairs(snapshot.members) do members[i] = Sync.publicMember(m) end
     local entry = makeEntry("roster.snapshot", p, snapshot.capturedAt or ns.now(), {
@@ -425,6 +458,7 @@ function Sync.recordShares()
     local p = Sync.player()
     if not p.guid then return 0, "no-guid" end
     if not ns.isTargetGuild(p.guild, p.realm) then return 0, "other-guild" end
+    if p.realm == "" then return 0, "waiting-realm" end -- GF-001-D23
     local s, snap = Share.store(), ns.Roster.current()
     if not s or not snap then return 0, "no-data" end
     local nowServer = Share.serverNow()
@@ -530,6 +564,7 @@ function Sync.recordRecipeNames()
     local p = Sync.player()
     if not p.guid then return nil, "no-guid" end
     if not ns.isTargetGuild(p.guild, p.realm) then return nil, "other-guild" end
+    if p.realm == "" then return nil, "waiting-realm" end -- GF-001-D23
     local s = Share.store()
     if not s or not ns.Recipes then return nil, "no-data" end
     local seen = ns.db.share.seenIDs

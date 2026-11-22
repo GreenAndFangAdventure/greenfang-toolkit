@@ -97,10 +97,16 @@ local function profession(name, skillLine, rank, maxRank, icon)
 end
 Data.skillLineIDFor = skillLineIDFor
 
+-- Professions the client listed but whose name could not be read (secret
+-- or empty) on the last read (GF-001-D23): then an empty list is not "no
+-- professions" and must not be uploaded as such.
+Data.unreadableProfessions = 0
+
 local function fromProfessionsAPI()
     if type(GetProfessions) ~= "function" or type(GetProfessionInfo) ~= "function" then return nil end
     local packed = { pcall(GetProfessions) }
     if not packed[1] then return nil end
+    Data.unreadableProfessions = 0
     local result, seen = {}, {}
     for i = 2, table.maxn(packed) do
         local index = ns.num(packed[i])
@@ -108,7 +114,11 @@ local function fromProfessionsAPI()
             seen[index] = true
             local ok, name, icon, rank, maxRank, _, _, skillLine = pcall(GetProfessionInfo, index)
             local p = ok and profession(name, skillLine, rank, maxRank, icon)
-            if p then result[#result + 1] = p end
+            if p then
+                result[#result + 1] = p
+            else
+                Data.unreadableProfessions = Data.unreadableProfessions + 1
+            end
         end
     end
     return result
@@ -185,7 +195,7 @@ function Data.player()
     local guid = ns.str((ns.call(UnitGUID, "player")))
     p.guid = guid ~= "" and guid or nil
     p.name = ns.str((ns.call(UnitName, "player")))
-    p.realm = ns.str((ns.call(GetRealmName)))
+    p.realm = ns.realm() -- GF-001-D23: never "" when the realm can be known
     p.faction = ns.str((ns.call(UnitFactionGroup, "player")))
     p.level = ns.num((ns.call(UnitLevel, "player")))
     local className, classToken = ns.call(UnitClass, "player")

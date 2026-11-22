@@ -44,6 +44,83 @@ function ns.num(v)
     return nil
 end
 
+---------------------------------------------------------------------------
+-- Realm of the logged-in character (GF-001-D23)
+---------------------------------------------------------------------------
+-- Since 2026-11-21 the site rejected every upload as invalid_realm: the
+-- outbox had game.realm = "" and uploader.realm = "". The toolkit's code
+-- had not changed since 0.9.2; GetRealmName() started giving "" (or a secret
+-- value, which ns.str turns into ""). Order:
+--   1. GetRealmName() (with spaces, what the site knows); remembered per
+--      character in settings.realms (GF Sync never reads settings)
+--   2. the remembered one, while GetNormalizedRealmName() agrees with it
+--      (or is empty too); seeded from realms already in the SavedVariables
+--   3. GetNormalizedRealmName() (no spaces)
+--   4. "" = unknown: nothing is written to the outbox (Sync)
+ns.realmSource = "unknown"
+
+local function noSpace(s) return (ns.str(s):gsub("%s", "")) end
+
+local function playerGuid() return ns.str((ns.call(UnitGUID, "player"))) end
+
+local function realmStore()
+    local s = ns.db and ns.db.settings
+    if type(s) ~= "table" then return nil end
+    if type(s.realms) ~= "table" then s.realms = {} end
+    return s.realms
+end
+
+-- A realm already in the SavedVariables for this character (or its guild).
+local function seedRealm(guid)
+    local db = ns.db
+    if type(db) ~= "table" then return nil end
+    for _, e in ipairs(type(db.sync) == "table" and type(db.sync.outbox) == "table" and db.sync.outbox or {}) do
+        local u = type(e) == "table" and e.uploader
+        if type(u) == "table" and u.guid == guid and ns.str(u.realm) ~= "" then return u.realm end
+    end
+    local guild = ns.str((ns.call(GetGuildInfo, "player")))
+    local snaps = type(db.roster) == "table" and db.roster.snapshots
+    for _, s in pairs(type(snaps) == "table" and snaps or {}) do
+        if type(s) == "table" and ns.str(s.realm) ~= "" and (guild == "" or s.guild == guild) then return s.realm end
+    end
+    return nil
+end
+
+-- A known realm is reused for the rest of the second: the player's data is
+-- read many times in a row (logout writes one entry per guild member).
+local lastRealm, lastAt = nil, nil
+
+function ns.realm()
+    local now = time and time() or 0
+    if lastRealm and lastAt == now then return lastRealm end
+    local guid = playerGuid()
+    local store = realmStore()
+    local r = ns.str((ns.call(GetRealmName)))
+    if r ~= "" then
+        if store and guid ~= "" then store[guid] = r end
+        ns.realmSource = "GetRealmName"
+        lastRealm, lastAt = r, now
+        return r
+    end
+    lastRealm = nil
+    local saved = store and guid ~= "" and ns.str(store[guid]) or ""
+    if saved == "" and guid ~= "" then
+        saved = ns.str(seedRealm(guid))
+        if saved ~= "" and store then store[guid] = saved end
+    end
+    local norm = ns.str((ns.call(GetNormalizedRealmName)))
+    if saved ~= "" and (norm == "" or noSpace(saved) == norm) then
+        ns.realmSource = "saved"
+        return saved
+    end
+    if norm ~= "" then
+        ns.realmSource = "GetNormalizedRealmName"
+        return norm
+    end
+    ns.realmSource = "unknown"
+    return ""
+end
+
 -- Call a game function that may not exist on this client. Returns its results,
 -- or nothing when the function is missing or raises an error.
 function ns.call(fn, ...)
@@ -246,7 +323,7 @@ function ns.guildState()
         if ns.isInGuild() then return "loading", nil end
         return "none", nil
     end
-    local realm = ns.str((ns.call(GetRealmName)))
+    local realm = ns.realm()
     if ns.isTargetGuild(guild, realm) then return "target", guild end
     return "other", guild
 end

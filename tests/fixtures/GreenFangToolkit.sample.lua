@@ -154,6 +154,10 @@ GreenFangToolkitDB = {
 	["settings"] = {
 		["minimapAngle"] = 123,
 		["minimapLayoutVersion"] = 2,
+		["realms"] = {
+			["Player-0000-0000000A"] = "測試伺服器",
+			["Player-0000-0000000F"] = "測試伺服器",
+		},
 		["sortAscending"] = false,
 		["sortKey"] = "level",
 	},
