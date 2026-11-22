@@ -86,6 +86,8 @@ local function uploaderBlock(p)
     return {
         guid = p.guid, name = p.name, realm = p.realm, faction = p.faction,
         guild = p.guild, guildRank = p.guildRank,
+        -- GF-001-D24: "名字 姓氏" as in the guild roster; left out while unknown.
+        fullName = p.fullName,
     }
 end
 
@@ -253,6 +255,9 @@ function Sync.recordSelf(force, opts)
     end
     if not ns.isTargetGuild(p.guild, p.realm) then return nil, "other-guild" end
     if p.realm == "" then Sync.pendingSelf = true; return nil, "waiting-realm" end -- GF-001-D23
+    -- GF-001-D24: the login entry waits a short while for the roster, so it
+    -- carries uploader.fullName; after that it is written without one.
+    if not p.fullName and opts and opts.waitFullName then return nil, "waiting-fullname" end
     local professions = {}
     for i, prof in ipairs((ns.Data.ownProfessionsDetailed())) do
         -- Contract fields only (the icon is for the in-game window).
@@ -363,7 +368,8 @@ local function field(r, value) return { value = value, recordedAt = r.t, via = v
 local function sharePayload(m, a, recs, tombs, realm, idsFor)
     local Share = ns.Share
     local payload = {
-        subject = { guid = m.guid, name = m.name, realm = m.name:match("^.-%-(.+)$") or realm },
+        subject = { guid = m.guid, name = m.name, realm = m.name:match("^.-%-(.+)$") or realm,
+            fullName = ns.Data.cleanFullName(m.name) ~= "" and ns.Data.cleanFullName(m.name) or nil }, -- GF-001-D24
     }
     if recs.B then
         local b = Share.decoded(a, "B")

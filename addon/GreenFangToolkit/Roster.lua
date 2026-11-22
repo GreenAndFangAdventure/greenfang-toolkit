@@ -210,6 +210,7 @@ function Roster.collect()
         for _, m in ipairs(members) do
             if ownGUID and m.guid == ownGUID then
                 ns.Sync.rememberGuild(ownGUID, guild, m.guildRank)
+                ns.Data.rememberFullName(ownGUID, m.name) -- GF-001-D24
             end
         end
         ns.Sync.rememberGuild(ownGUID, guild, nil)

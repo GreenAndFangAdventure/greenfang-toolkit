@@ -58,7 +58,7 @@ GreenFangToolkitDB = {
   capturedAt = 1763370000,        -- Unix 秒，遊戲客戶端的 time()
   capturedAtServer = 1763370004,  -- 0.9.0 起：GetServerTime()。網站比新舊、檢查「未來」時優先用這個；沒有時退回 capturedAt
   game = { world = "forever", interface = 16001, realm = "...", locale = "zhTW" },
-  uploader = { guid = "...", name = "...", realm = "...", faction = "Horde", guild = "...", guildRank = "..." },
+  uploader = { guid = "...", name = "...", fullName = "名字 姓氏", realm = "...", faction = "Horde", guild = "...", guildRank = "..." },
   payload = { ... },
 }
 ```
@@ -78,6 +78,8 @@ payload = {
 }
 ```
 
+- `uploader.fullName`（0.10.0 起，GF-001-D24）：角色全名「名字 姓氏」，跟遊戲內公會名冊顯示的一樣（中間是一般空白 U+0020），例如 `"測試甲 長姓氏"`。網站的名冊（Blizzard API）存的是全名，`uploader.name`（`UnitName`，只有名字）對不上。只用 GUID 在公會名冊裡找，**絕不猜**；名冊還沒載入、找不到就**不寫這個欄位**。登入的 `character.self` 會先等名冊（最多約 30 秒），讓第一筆就帶全名。`uploader.name` 不變
+- `member.share` 的 `payload.subject.fullName`（0.10.0，GF-001-D24）：名冊上這位成員的全名（去掉「-伺服器」）。網站先用 `guid`，沒有才用 `fullName`
 - `game.realm`、`uploader.realm`（0.9.7 起，GF-001-D23）：**一定不是空字串**。遊戲給不出伺服器名稱時（2026-11-21 起 `GetRealmName()` 會回傳空字串），AddOn 用這個角色上次記住的名稱（`settings.realms`，GF Sync 不讀），還是不知道就**不寫**這一筆。0.9.5、0.9.6 留下的空伺服器項目，知道名稱後會補上
 - `professions`（0.9.7 起）：遊戲列出了專業、但名稱讀不到時，不寫成 `{}`（那會變成「沒有專業」）：沿用上一筆的專業，沒有上一筆就**整個欄位不寫**。網站和 GF Sync 看到沒有這個欄位，要保留原本的專業資料。`{}` 只代表真的沒有專業
 - `recipes[*].recordedAt`：開專業視窗、讀到清單時的 `GetServerTime()`。`hash` 是 AddOn 對這份清單算的雜湊，用來判斷「內容一樣」。
@@ -118,7 +120,8 @@ payload = {
 
 ```lua
 payload = {
-  subject = { name = "測試乙-測試伺服器", realm = "測試伺服器", guid = "Player-0000-0000000B" }, -- guid 來自收到者的名冊，可能沒有
+  subject = { name = "測試乙-測試伺服器", realm = "測試伺服器", guid = "Player-0000-0000000B",
+              fullName = "測試乙 姓氏" }, -- guid、fullName 來自收到者的名冊，可能沒有（0.9.8 起有 fullName；0.10.0 不再寫 member.report）
   reportedAt = 1763373590,   -- 發送者觀察到這些資料的時間（Unix 秒）
   level = 61, classToken = "WARRIOR",
   professions = { { name = "採礦", skillLineID = 186, rank = 300, max = 300 }, ... }, -- 包括烹飪、釣魚、急救
@@ -139,7 +142,8 @@ payload = {
   capturedAt = ..., capturedAtServer = ...,
   game = {...}, uploader = {...},           -- uploader 規則同 character.self，必須在目標公會
   payload = {
-    subject = { guid = "Player-0000-0000000B", name = "測試乙-測試伺服器", realm = "測試伺服器" },
+    subject = { guid = "Player-0000-0000000B", name = "測試乙-測試伺服器", realm = "測試伺服器",
+                fullName = "測試乙" }, -- 0.10.0 起（GF-001-D24），名冊上的全名
     level      = { value = 61, recordedAt = 1763373590, via = "author" },
     classToken = { value = "WARRIOR", recordedAt = 1763373590, via = "author" },
     professions = { recordedAt = 1763373590, via = "relay",

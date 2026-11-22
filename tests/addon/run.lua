@@ -253,7 +253,10 @@ test("one entry per character and per guild across logins and rescans", function
     saved = wow.logout()
     local alt = wow.defaultPlayer()
     alt.guid, alt.name = "Player-0000-0000000F", "測試己"
-    wow.reset({ now = 1763390000, player = alt })
+    local roster = wow.defaultRoster() -- the alt is in the guild's roster too
+    roster[#roster + 1] = { name = "測試己-測試伺服器", rank = "會員", level = 10, class = "戰士",
+        classToken = "WARRIOR", zone = "奧格瑪", online = true, guid = alt.guid }
+    wow.reset({ now = 1763390000, player = alt, roster = roster })
     wow.login(ADDON_DIR, saved)
     eq(#entriesOf("character.self"), 2, "two characters -> two character.self")
     eq(#entriesOf("roster.snapshot"), 1, "same guild -> one roster.snapshot")
@@ -4435,6 +4438,106 @@ test("D23 shared data kept under an empty realm by 0.9.5/0.9.6 is merged back", 
     eq(GreenFangToolkitDB.share.guilds["|" .. guild], nil, "the empty-realm store is gone")
     eq(ns.Share.get(A_PEER, "R164").v, "newer", "newer record wins")
     eq(ns.Share.get(A_THIRD, "R197").v, "only here", "records only there are kept")
+end)
+
+-- GF-001-D24: uploader.fullName ("名字 姓氏") for the site's roster match.
+local function surnameRoster()
+    local roster = wow.defaultRoster()
+    roster[1].name = "測試甲 長姓氏"         -- own character, as the guild roster shows it
+    roster[3].name = "測試丙 長姓氏-測試伺服器"
+    return roster
+end
+
+test("D24 fullName: character.self and roster.snapshot carry the roster's full name; name unchanged", function()
+    wow.reset({ roster = surnameRoster() })
+    local ns = wow.login(ADDON_DIR)
+    local selfE = entriesOf("character.self")[1]
+    ok(selfE, "character.self")
+    eq(selfE.uploader.fullName, "測試甲 長姓氏", "character.self uploader.fullName")
+    eq(selfE.uploader.name, "測試甲", "uploader.name stays UnitName")
+    local snap = entriesOf("roster.snapshot")[1]
+    eq(snap.uploader.fullName, "測試甲 長姓氏", "roster.snapshot uploader.fullName")
+    eq(GreenFangToolkitDB.settings.fullNames["Player-0000-0000000A"], "測試甲 長姓氏", "remembered per character")
+    ok(ns.Diag.versionText():find("角色全名 「測試甲 長姓氏」", 1, true), "diag: " .. ns.Diag.versionText())
+end)
+
+test("D24 fullName: member.share uploader and subject carry the roster's full name", function()
+    local ns = shareLogin({ roster = surnameRoster() })
+    shareFrom(ns, PEER, (vMsg(ns, A_THIRD, "B", wow.state.now - 600, { level = 40, classToken = "MAGE" })))
+    eq(ns.Sync.recordShares(), 1, "one subject")
+    local e = entriesOf("member.share")[1]
+    eq(e.uploader.fullName, "測試甲 長姓氏", "uploader.fullName")
+    eq(e.uploader.name, "測試甲", "uploader.name unchanged")
+    eq(e.payload.subject.guid, "Player-0000-0000000C", "subject guid")
+    eq(e.payload.subject.fullName, "測試丙 長姓氏", "subject fullName, no -Realm")
+end)
+
+test("D24 fullName: the login entry waits for the roster, then carries the full name", function()
+    wow.reset({ roster = {} }) -- roster not loaded yet
+    local ns = wow.login(ADDON_DIR)
+    eq(#entriesOf("character.self"), 0, "no character.self without the full name yet")
+    eq(ns.Data.player().fullName, nil, "unknown, never guessed")
+    ok(ns.Diag.versionText():find("角色全名 未取得", 1, true), "diag: " .. ns.Diag.versionText())
+    wow.state.roster = surnameRoster()
+    wow.fire("GUILD_ROSTER_UPDATE")
+    wow.advance(2)
+    local list = entriesOf("character.self")
+    eq(#list, 1, "written once the roster is in")
+    eq(list[1].uploader.fullName, "測試甲 長姓氏", "with the full name")
+    eq(entriesOf("roster.snapshot")[1].uploader.fullName, "測試甲 長姓氏", "first snapshot has it too")
+end)
+
+test("D24 fullName: roster never loads -> written without fullName after the wait, no guess", function()
+    wow.reset({ roster = {} })
+    wow.login(ADDON_DIR)
+    wow.advance(25)
+    local list = entriesOf("character.self")
+    eq(#list, 1, "still one per login")
+    eq(list[1].uploader.fullName, nil, "field left out")
+    eq(list[1].uploader.name, "測試甲", "name as before")
+end)
+
+test("D24 fullName: a plain space between the parts; -Realm dropped; nothing else changed", function()
+    wow.reset({ secrets = { ["秘密 名字"] = true } })
+    local ns = wow.loadAddon(ADDON_DIR)
+    eq(ns.Data.cleanFullName("測試甲\194\160長姓氏"), "測試甲 長姓氏", "no-break space")
+    eq(ns.Data.cleanFullName("測試甲\227\128\128長姓氏"), "測試甲 長姓氏", "ideographic space")
+    eq(ns.Data.cleanFullName("測試甲 長姓氏-測試伺服器"), "測試甲 長姓氏", "no realm")
+    eq(ns.Data.cleanFullName("甲  乙"), "甲  乙", "inner spaces kept as they are")
+    eq(ns.Data.cleanFullName("秘密 名字"), "", "secret -> unknown")
+end)
+
+test("D24 fullName: remembered at the next login; upgrade writes fresh entries with new ids", function()
+    wow.reset({ roster = surnameRoster() })
+    wow.login(ADDON_DIR)
+    -- What 0.9.7 left: entries without fullName (rejected by the site).
+    for _, e in ipairs(GreenFangToolkitDB.sync.outbox) do e.uploader.fullName = nil end
+    local oldSelf = entriesOf("character.self")[1].id
+    local oldSnap = entriesOf("roster.snapshot")[1].id
+    local saved = wow.logout()
+    wow.reset({ now = wow.state.now + 3600, roster = {} }) -- roster slow this time
+    local ns = wow.loadAddon(ADDON_DIR, saved)
+    wow.fire("PLAYER_LOGIN")
+    wow.advance(6)
+    local selfE = entriesOf("character.self")[1]
+    ok(selfE.id ~= oldSelf, "new character.self id")
+    eq(selfE.uploader.fullName, "測試甲 長姓氏", "remembered full name used at once")
+    wow.state.roster = surnameRoster()
+    wow.fire("GUILD_ROSTER_UPDATE")
+    wow.advance(2)
+    local snap = entriesOf("roster.snapshot")[1]
+    ok(snap.id ~= oldSnap, "new roster.snapshot id")
+    eq(snap.uploader.fullName, "測試甲 長姓氏", "snapshot has it")
+    eq(#entriesOf("character.self"), 1, "one character.self")
+    eq(#entriesOf("roster.snapshot"), 1, "one roster.snapshot")
+end)
+
+test("D24 fullName: a member without a GUID gets no subject fullName", function()
+    wow.reset({ roster = surnameRoster() })
+    local ns = wow.login(ADDON_DIR)
+    eq(ns.Data.memberFullName(nil), nil, "no guid -> nil")
+    eq(ns.Data.memberFullName("Player-0000-00000099"), nil, "unknown guid -> nil")
+    eq(ns.Data.memberFullName("Player-0000-0000000C"), "測試丙 長姓氏", "known guid, no -Realm")
 end)
 
 test("fixture: generated sample is up to date and free of zone/online in the outbox", function()

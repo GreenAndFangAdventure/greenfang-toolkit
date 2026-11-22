@@ -491,6 +491,18 @@ python tests/addon/run_lupa.py         # 預期最後一行：N passed, 0 failed
 - □ `character.self` 的 `professions`：有專業的角色有內容；真的沒有專業的角色是空的（`{}`）；**不應該**在有專業的角色上看到空的
 - □ 公會成員分享的資料（名冊的專業、配方頁）和 0.9.6 一樣都在，沒有不見
 
+## 3t. 上傳被拒絕「character_not_in_roster」：角色全名（GF-001-D24，0.9.8 起；公開版 0.10.0）
+
+網站名冊（Blizzard API）存的是全名「名字 姓氏」，AddOn 原本只寫 `UnitName` 的名字，所以網站找不到上傳者。0.10.0 起每一筆都多一個 `uploader.fullName`。**網站的對應比對要等 GearBot 部署（DEV → MAIN）後才生效，在那之前上傳照樣會失敗，這是預期的。**未實機驗證。
+
+- □ 升級後登入，等約 10 秒（名冊載入），打開「同步與診斷」：版本那一行有 `角色全名 「名字 姓氏」`，和遊戲內公會名冊顯示的一樣（中間一個空白）
+  - 顯示 `未取得（名冊載入後補上）`：打開公會名冊等幾秒再看；一直不出現的話回報
+- □ 下線後看存檔 outbox：`character.self`、`roster.snapshot`、`member.share` 的 `uploader` 都有 `["fullName"] = "名字 姓氏"`，`["name"]` 仍是原本的名字
+- □ `character.self`、`roster.snapshot` 的 `id` 和升級前不一樣（新的一筆，GF Sync 會重新上傳）
+- □ 有收到公會成員資料時，`member.share` 的 `payload.subject` 有 `fullName`（和名冊上的名字一樣，沒有「-伺服器」）
+- □ 登入時公會名冊很慢的話：`character.self` 最多等約 30 秒；名冊一直沒來就照常寫、但**沒有** `fullName`（不猜）
+- □ GearBot 部署後：網站不再回 `character_not_in_roster`
+
 ## 3b. 睡袋路線（GF-008-A，0.6.0 起；部落角色）
 
 - □ 左側清單有「睡袋路線」；聯盟角色看不到這一項

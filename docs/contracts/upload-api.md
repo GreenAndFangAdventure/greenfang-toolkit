@@ -1,10 +1,11 @@
-# 契約：GF Sync ↔ 網站上傳 API（v1.1）
+# 契約：GF Sync ↔ 網站上傳 API（v1.3）
 
 - 版本：
   - v1（2026-11-17 claude-pm 依 Q-005 與實作結果定稿）
   - **v1.1（2026-11-20 claude-addon，D-014）**：新 kind `member.share`、`recipe.names`、`character.self.recipes`、`capturedAtServer`、`reason: "unknown_kind"`、撤回、上線順序。依 claude-sync 審查修正後定稿
   - **v1.1（2026-11-20 claude-addon，D-015）**：`withdrawn` 只剩 `recipes`（放棄專業）；工具箱沒有同步開關
   - **v1.1（2026-11-20 claude-addon，GF-001-D14，AddOn 0.10.0）**：格式不變。補充：大公會時的筆數、配方 `ids` 分批（§2「數量」、§3 第 6 點）
+  - **v1.3（2026-11-22 claude-addon，GF-001-D24，AddOn 0.9.8／0.10.0；與 GearBot 議定）**：新增選填欄位 `uploader.fullName`（每一種 kind）與 `member.share`／`member.report` 的 `payload.subject.fullName`：角色全名「名字 姓氏」，和網站名冊（Blizzard API）的寫法一樣。用來修正 `character_not_in_roster`（§3 第 2、6 點）。格式其餘不變
 - 實作位置：網站 repo `green-and-fang-site`，位於 `functions/api/sync/*`（D-002）。PR 送到 `dev`
 - 資料表一律用 `migrations/00xx_*.sql` 建立，不在執行時用 `CREATE TABLE IF NOT EXISTS` 建表
 
@@ -57,13 +58,16 @@
 ## 3. 伺服器驗證（上傳內容一律視為「待查證」）
 
 1. `game.world == "forever"`，`uploader.guild` 必須完全等於「綠皮與獠牙冒險事務所」，`realm` 必須和網站名冊的伺服器一致，否則回 `rejected`。**每一種 kind 都要有共通欄位**（`capturedAt`、`game`、`uploader`），`recipe.names` 也一樣。
-2. `character.self`：角色名稱必須和 Blizzard 名冊**完全一致且唯一**。可以補上 AddOn 才有的欄位（例如 Blizzard API 沒收錄的專業），但依照既有 `forever-roster.js` 的規則，**不能覆蓋較新的值或人工鎖定的欄位**。
+2. `character.self`：角色名稱必須和 Blizzard 名冊**完全一致且唯一**。
+   - **比對上傳者（v1.3，每一種 kind）**：先用 `uploader.guid`；沒有對到時用 `uploader.fullName`（「名字 姓氏」，中間是一般空白 U+0020，和名冊完全一致），最後才用 `uploader.name`。`uploader.name` 是遊戲 `UnitName` 的名字部分，**沒有姓氏**，單獨比對會對不到有姓氏的角色。
+   - `fullName` 只在 AddOn 用 GUID 在遊戲內公會名冊找到時才有，找不到就沒有這個欄位（不猜）。沒有這個欄位時照舊用 `name`。
+   - 網站部署這個比對之前收到的 `fullName` 會被忽略，上傳照樣失敗，這是預期的。可以補上 AddOn 才有的欄位（例如 Blizzard API 沒收錄的專業），但依照既有 `forever-roster.js` 的規則，**不能覆蓋較新的值或人工鎖定的欄位**。
    - `recipes[<skillLineID>]`（0.9.x 第 4 段起）：依每個專業的 `recordedAt` 比新舊。
 3. `roster.snapshot`：優先序最低，只用來填補缺漏，不覆蓋 API 資料或 `character.self` 的資料。
 4. **時間**：`capturedAtServer` 有數字時用它，沒有時用 `capturedAt`，不能比伺服器時間晚超過 10 分鐘，也就是不接受「未來」的資料。`member.share` 的欄位 `recordedAt` 比伺服器時間晚 10 分鐘以上時，只略過那個欄位，不讓整筆失敗。
 5. 某台裝置第一次上傳 `character.self` 時，記錄「這個 Discord 使用者聲稱擁有這個角色」。這只是記錄，不會因此給任何權限。正式的角色綁定沿用入會 BOT 的流程（規格 §2）。
 6. **`member.share`**（D-014）：
-   - `subject` 用 `guid` 對應角色；沒有的話用 `name`，規則和 `character.self` 一樣（完全一致而且唯一）。找不到就 `rejected`，`reason: "unknown_subject"`。
+   - `subject` 用 `guid` 對應角色；沒有的話用 `fullName`（v1.3，「名字 姓氏」），再沒有才用 `name`，規則和 `character.self` 一樣（完全一致而且唯一）。GF Sync 重建 `subject` 時要保留 `fullName`。找不到就 `rejected`，`reason: "unknown_subject"`。
    - **每個欄位各自比較** `recordedAt` 和網站目前那個欄位的時間，比較新而且非空才採用（D-008、D-014 第 3 點）。整筆比較新，不代表每個欄位都採用。和 `character.self`、Blizzard API 的比較也一律比欄位的時間。
    - 人工鎖定的欄位永遠不覆蓋（D-008）。
    - `recipes[<skillLineID>]`：

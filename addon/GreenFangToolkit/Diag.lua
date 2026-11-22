@@ -50,9 +50,11 @@ function Diag.versionText()
     -- GF-001-D23: the realm the outbox gets, and where it came from.
     local realm = ns.realm()
     local from = ({ GetRealmName = "遊戲", saved = "存檔記住的", GetNormalizedRealmName = "遊戲（無空格）" })[ns.realmSource]
-    return string.format("工具箱 %s｜介面 %s｜伺服器 %s｜伺服器時間和本機差 %s",
+    local full = ns.Data.fullName(ns.str((ns.call(UnitGUID, "player"))))
+    return string.format("工具箱 %s｜介面 %s｜伺服器 %s｜角色全名 %s｜伺服器時間和本機差 %s",
         ns.VERSION, tostring(ns.Data.interface()),
         realm ~= "" and string.format("「%s」（%s）", realm, from or "?") or "不明（暫停寫入上傳資料）",
+        full and string.format("「%s」", full) or "未取得（名冊載入後補上）",
         skew and (skew .. " 秒") or "不明")
 end
 

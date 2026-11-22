@@ -11,6 +11,8 @@ local GUILD_WAIT = 30
 -- PLAYER_GUILD_UPDATE this long after login with no guild = really left.
 local LEAVE_SETTLE = 30
 
+local recordSelfNow -- defined below
+
 local function collectSoon(delay)
     if scanQueued then return end
     scanQueued = true
@@ -19,6 +21,8 @@ local function collectSoon(delay)
         local ok, count = Roster.collect()
         if ok then
             UI.afterAutoScan(count)
+            -- GF-001-D24: the roster gives the full name; write the login entry now.
+            if not loginSelfRecorded then recordSelfNow() end
             -- Guild confirmed and roster loaded: share own data (D-011).
             Comm.broadcast(false)
             -- D-014 sharing: once per session, a while after login.
@@ -34,9 +38,10 @@ end
 -- final = true at the end of the guild wait and at logout: stop waiting for
 -- guild info (the session's guild is used whenever there is one). Only
 -- TARGET_GUILD characters are ever written (Sync.recordSelf).
-local function recordSelfNow(final)
+function recordSelfNow(final)
     local allowNoGuild = final or loginSelfRecorded or (ns.now() - loginAt >= GUILD_WAIT)
-    local entry, reason = Sync.recordSelf(not loginSelfRecorded, { allowNoGuild = allowNoGuild })
+    local entry, reason = Sync.recordSelf(not loginSelfRecorded,
+        { allowNoGuild = allowNoGuild, waitFullName = not allowNoGuild })
     if entry or reason == "unchanged" then loginSelfRecorded = true end
     return entry, reason
 end
@@ -149,6 +154,8 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
             local guid = ns.Data.player().guid
             if not ns.isInGuild() and ns.now() - loginAt >= LEAVE_SETTLE then Sync.forgetGuild(guid) end
             recordSelfNow()
+            -- GF-001-D24: guild info arrived; the scan gives the full name.
+            if not loginSelfRecorded and ns.isInGuild() then collectSoon(0.8) end
             if ns.Framework.isModuleShown("roster") then UI.refresh(true) end
         end)
     elseif event == "PLAYER_LEVEL_UP" or event == "SKILL_LINES_CHANGED" then
