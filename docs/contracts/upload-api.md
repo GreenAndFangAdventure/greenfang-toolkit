@@ -1,4 +1,4 @@
-# 契約：GF Sync ↔ 網站上傳 API（v1.3）
+# 契約：GF Sync ↔ 網站上傳 API（v1.4）
 
 - 版本：
   - v1（2026-11-17 claude-pm 依 Q-005 與實作結果定稿）
@@ -13,6 +13,7 @@
 
     依據：GF Sync 的 `docs/UPDATE_MANIFEST.md` §2
   - **v1.3（2026-11-22 claude-addon，GF-001-D24，AddOn 0.9.8／0.10.0；與 GearBot 議定）**：新增選填欄位 `uploader.fullName`（每一種 kind）與 `member.share`／`member.report` 的 `payload.subject.fullName`：角色全名「名字 姓氏」，和網站名冊（Blizzard API）的寫法一樣。用來修正 `character_not_in_roster`（§3 第 2、6 點）。格式其餘不變
+  - **v1.4（2026-11-23 claude-pm，GF-006-B，AddOn 0.11.0）**：`character.self` 和 `member.share` 的 payload 多一個選填欄位 `crafting`（製作服務與訂單，格式見 savedvariables §crafting）。網站的處理規則見 §3 第 10 點，上線順序見 §5。不是新的 kind，舊的用戶端照舊能用
 - 實作位置：網站 repo `green-and-fang-site`，位於 `functions/api/sync/*`（D-002）。PR 送到 `dev`
 - 資料表一律用 `migrations/00xx_*.sql` 建立，不在執行時用 `CREATE TABLE IF NOT EXISTS` 建表
 
@@ -155,6 +156,17 @@ Content-Type: application/json; charset=utf-8
 8. **`recipe.names`**：存成 `recipe_names(recipe_id, locale, name, first_seen_at)`。同一個 ID、同一個語系已經有名稱就不覆蓋。不需要驗證 subject。
 9. **隱私**：`member.share` 的 `location`（`{ value: { zone, subZone }, recordedAt, via }`）和 `character.self`、`member.report` 的 `location` 一樣可以接受；其他地方的 `zone`、`online`、`location` 照舊拒絕或忽略。
 
+10. **`crafting`**（v1.4，GF-006-B；savedvariables §crafting）：
+    - **歸屬**：`character.self` 的 `w`／`j` 必須屬於 `uploader`，`member.share` 的必須屬於 `subject`（`w.customer` 是本人；`j` 的本人是這張單的 `crafter`，公會單是 `lock` 或接單的人）。不屬於的那一半略過，不讓整筆失敗。
+    - **合併**：依訂單 `id` 存一份訂單，`w`、`j`（第 1.5 版起還有網站自己的那一份）各自依 `recordedAt` 比新舊，只採用比較新的那一半；整筆比較新不代表每一半都採用。和順序無關：同一半收到舊的就忽略。
+    - **狀態**：照規格 R-6.1～R-6.6 由各半算出（等接單、製作中、待驗收、成交、取消）。成交和取消要分開顯示；成交裡「客人確認或自動判斷」和「工匠結案」（`closedBy = "crafter"`、`closeHow = "timeout"`）也要分開。結案之後收到的非結案資料不能把訂單改回進行中。
+    - **製作服務**：`services` 依 `recordedAt` 整份比新舊。工匠服務頁：接單中（`active`）排前面；工錢分三種顯示：**沒有鍵＝沒填**、`0`＝免費、數字＝金額。`feeQuoted` 也一樣。
+    - **檢查**：GUID、訂單 `id` 的格式；列舉值只接受契約列出的；數字是非負整數；`qty` ≥ 1。不合格的那張單或那個專業略過。
+    - **隱私**：`crafting` 裡沒有名字和自由文字；顯示名字時用網站名冊依 GUID 對應。全公會成員都看得到訂單（規格 R-5.5），公開頁面不顯示。
+    - **時間**：公會單還沒有 `w.lock` 時，用各工匠 `j.acceptedAt` 最早的那位當作暫定的接單者（和遊戲同樣的規則，R-5.3）。`j.deliveredAt` 用來判斷待驗收的天數（14 天工匠結案、太久沒動）。`cst = "review"` 顯示成待驗收。
+    - **網站要自己檢查**：GF Sync 0.1.0 的 `character.self` 是原樣傳的，`crafting` 不會經過 GF Sync 的白名單（0.2.0 起才有）。所以上面的格式檢查網站一定要做，不能只靠 GF Sync。
+    - 第一版只顯示和通知，網站不能建立或修改訂單（規格 R-9.1）。
+
 ## 4. 撤回
 
 - 工具箱 0.9.1 起沒有同步開關（D-015）：裝了就會分享。想停止上傳，就暫停或解除安裝 GF Sync；不想被分享的成員不要安裝工具箱。已上傳的資料依規格 §4 的資料政策處理，屆時另行實作刪除端點。
@@ -169,6 +181,8 @@ Content-Type: application/json; charset=utf-8
 3. 最後 AddOn 才開始寫新 kind。
 
 AddOn 0.9 的第 1～3 段不寫新 kind，可以先上線。
+
+**`crafting`（v1.4）也照同樣的順序**：網站先能接受並忽略不認得的 `crafting` → GF Sync 的 `member.share` 白名單加上 `crafting` → AddOn 0.11.0 開始寫。`character.self.crafting` 不用等 GF Sync（GF Sync 0.1.0 起原樣傳），但網站要先準備好。網站還沒處理 `crafting` 時照常 `accepted`、忽略這個欄位即可。
 
 ## 6. 資料表（建議，GearBot 決定）
 
