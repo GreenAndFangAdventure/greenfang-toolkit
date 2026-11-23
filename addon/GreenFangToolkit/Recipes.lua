@@ -588,7 +588,7 @@ end
 -- 「配方」 page
 ---------------------------------------------------------------------------
 
-local ROW_HEIGHT, RECIPE_ICON, RECIPE_TIP_X = 30, 24, 300 -- GF-002-E: taller rows (a button on each)
+local ROW_HEIGHT, RECIPE_ICON, RECIPE_TIP_X = ns.PAGE_ROW, ns.ROW_ICON, 300 -- GF-002-F: 36 px rows, 28 px icons
 local panel, scroll, content, search, emptyLine, filterLine, clearFilter
 local rowWidgets = {}
 local shownRows = {} -- all rows of the current list; only those in view have frames
@@ -642,21 +642,21 @@ local function newRow(i)
     row.icon = row:CreateTexture(nil, "ARTWORK")
     row.icon:SetSize(RECIPE_ICON, RECIPE_ICON)
     row.icon:SetPoint("LEFT", row, "LEFT", 6, 0)
-    row.name = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    row.name:SetPoint("LEFT", row, "LEFT", 36, 0)
+    row.name = row:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
+    row.name:SetPoint("LEFT", row, "LEFT", 40, 0)
     row.name:SetWidth(300)
     row.name:SetJustifyH("LEFT")
     row.name:SetWordWrap(false)
-    row.who = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    row.who = row:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
     row.who:SetPoint("LEFT", row, "LEFT", Recipes.COL_WHO, 0)
     row.who:SetWidth(Recipes.COL_FEE - Recipes.COL_WHO - 12)
     row.who:SetJustifyH("LEFT")
     row.who:SetWordWrap(false)
     -- GF-002-E: 工錢 (the crafter's quote, R-4.4) and a visible 下單 / 我的工錢 button.
-    row.feeTex = row:CreateTexture(nil, "ARTWORK"); row.feeTex:SetSize(16, 16)
+    row.feeTex = row:CreateTexture(nil, "ARTWORK"); row.feeTex:SetSize(18, 18)
     row.feeTex:SetPoint("LEFT", row, "LEFT", Recipes.COL_FEE, 0)
-    row.fee = ns.freeText(row:CreateFontString(nil, "ARTWORK", "GameFontHighlight"))
-    row.fee:SetPoint("LEFT", row, "LEFT", Recipes.COL_FEE + 20, 0)
+    row.fee = ns.freeText(row:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
+    row.fee:SetPoint("LEFT", row, "LEFT", Recipes.COL_FEE + 22, 0)
     row.fee:SetJustifyH("LEFT")
     row.order = ns.OrdersUI.textButton(row, "我的工錢", function(self) Recipes.pressOrder(self:GetParent() or self.row) end, 104)
     row.order.row = row
@@ -897,12 +897,12 @@ local function label(p, text, x, y)
     l:SetText(text)
     return l
 end
-local FILTER_Y2 = FILTER_Y - 34
+local FILTER_Y2 = FILTER_Y - 38
 
 local function build(p)
     label(p, "搜尋", 22)
     search = ns.createFrame("EditBox", nil, p, "InputBoxTemplate")
-    search:SetSize(180, 24)
+    search:SetSize(180, 30)
     search:SetPoint("TOPLEFT", p, "TOPLEFT", 70, FILTER_Y)
     search:SetAutoFocus(false)
     search:SetMaxLetters(60)
@@ -922,30 +922,30 @@ local function build(p)
     label(p, "工錢", 170, FILTER_Y2)
     Recipes.feeChoice = ns.choiceButton(p, 130, 218, FILTER_Y2, function() return Recipes.FEE_OPTIONS end,
         function(v) current.fee = v; Recipes.refresh() end, "工錢不限")
-    filterLine = ns.freeText(p:CreateFontString(nil, "ARTWORK", "GameFontNormal"))
+    filterLine = ns.freeText(p:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
     filterLine:SetPoint("TOPLEFT", p, "TOPLEFT", 820, FILTER_Y - 5)
     filterLine:SetJustifyH("LEFT")
     clearFilter = ns.createFrame("Button", nil, p, "UIPanelButtonTemplate")
-    clearFilter:SetSize(110, 24)
+    clearFilter:SetSize(110, ns.BUTTON_H)
     clearFilter:SetPoint("TOPLEFT", p, "TOPLEFT", 940, FILTER_Y - 1)
     clearFilter:SetText("看全部的人")
     clearFilter:SetScript("OnClick", function() current.guid = nil; Recipes.refresh() end)
     clearFilter:Hide()
     Recipes.clearFilterButton = clearFilter
-    local HEAD_Y = -118
+    local HEAD_Y = -122
     for _, h in ipairs({ { "配方", 52 }, { "會做的人", 20 + Recipes.COL_WHO }, { "工錢", 20 + Recipes.COL_FEE } }) do
         local fs = ns.freeText(p:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
         fs:SetPoint("TOPLEFT", p, "TOPLEFT", h[2], HEAD_Y)
         fs:SetText(h[1])
     end
     scroll = ns.createFrame("ScrollFrame", nil, p, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 20, -138)
+    scroll:SetPoint("TOPLEFT", 20, -144)
     scroll:SetPoint("BOTTOMRIGHT", -40, 24)
     content = CreateFrame("Frame", nil, scroll)
     content:SetSize(Recipes.ROW_WIDTH, 1)
     scroll:SetScrollChild(content)
     scroll:HookScript("OnVerticalScroll", function() Recipes.layoutRows() end)
-    emptyLine = p:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    emptyLine = p:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
     emptyLine:SetPoint("TOP", p, "TOP", 0, -150)
     panel = p -- last: refresh() needs every widget above
 end

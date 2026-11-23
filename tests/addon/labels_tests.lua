@@ -103,7 +103,7 @@ return function(T)
         ns.AdventureUI.openTicket()
         local f = _G[ns.AdventureUI.TICKET_NAME]
         eq(table.concat(f.fields, ","), "目的地,時間,開始,時長,日期,人數,錄取,標籤,備註", "field names")
-        eq(f.startButton._shown, false, "開始 hidden for 現在")
+        eq(f.startButton._enabled, false, "開始 greyed for 現在 (GF-002-F: the row stays, no gap)")
         eq(f.dest:GetText(), "選擇目的地", "empty destination says so")
         eq(f.timeButtons.n.label._text .. f.timeButtons.t.label._text .. f.timeButtons.f.label._text, "現在今天之後", "time names")
         eq(f.direct.label._text .. "," .. f.consent.label._text, "直接錄取,團長同意", "admission names")
@@ -111,7 +111,7 @@ return function(T)
         ns.AdventureUI.openWorker()
         local w = _G[ns.AdventureUI.WORKER_NAME]
         eq(table.concat(w.fields, ","), "地城,任務,職責,副職責,時段", "worker field names")
-        eq(w.dungeons:GetText(), "選擇地城", "no dungeon yet"); eq(w.quests:GetText(), "選擇任務", "no quest yet (not x0)")
+        eq(w.addDungeon:GetText(), "＋地城", "no dungeon yet: only 「＋地城」 (GF-002-F)"); eq(w.quests:GetText(), "選擇任務", "no quest yet (not x0)")
         eq(w.mainRoles.d.label._text, "輸出", "role names"); ok(w.remove.label._text:find("移除", 1, true), "remove named")
         ns.Framework.open("orders")
         local pb = ns.OrdersUI.profButtons()[1]
@@ -152,7 +152,7 @@ return function(T)
         d.dungeon = "smg"
         U.pickTime(UIParent, "t")
         local f = _G[U.TICKET_NAME]
-        ok(f.startButton._shown and f.durButton._shown and not f.dayButton._shown, "開始 and 時長 rows")
+        ok(f.startButton._enabled ~= false and f.durButton._enabled ~= false and f.dayButton._enabled == false, "開始 and 時長 usable, 日期 greyed")
         for _, t in ipairs(U.quarterTimes(ns.Share.serverNow(), 8)) do
             local mm = tonumber(U.clock(t):match(":(%d%d)$"))
             ok(mm % 15 == 0, "quarter on the player's clock: " .. U.clock(t))
@@ -170,7 +170,7 @@ return function(T)
         wow.click(menu.items[3])
         eq(d.finish - d.start, 3 * 3600, "duration kept when the start changes")
         U.pickTime(UIParent, "f")
-        ok(f.dayButton._shown, "日期 row for 之後")
+        ok(f.dayButton._enabled ~= false, "日期 usable for 之後")
         eq(U.clock(d.start), "20:00", "evening by default")
         U.pickDay(UIParent)
         wow.click(menu.items[3]) -- two days ahead

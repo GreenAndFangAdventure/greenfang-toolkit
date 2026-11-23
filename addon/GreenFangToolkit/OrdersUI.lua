@@ -159,6 +159,13 @@ local function iconButton(parent, size, key, tip, onClick, label)
     b.badge:SetSize(math.floor(size / 2), math.floor(size / 2))
     b.badge:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", 2, -2)
     b.badge:Hide()
+    -- GF-002-F: chosen = a gold frame behind the icon, full colour, white name;
+    -- not chosen = grey icon, grey name (UI.setSelected).
+    b.sel = b:CreateTexture(nil, "BACKGROUND")
+    b.sel:SetPoint("TOPLEFT", b, "TOPLEFT", -3, 3)
+    b.sel:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", 3, -3)
+    b.sel:SetColorTexture(1, 0.78, 0.1, 0.9)
+    b.sel:Hide()
     if b.SetHighlightTexture then b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD") end
     if b.RegisterForClicks then b:RegisterForClicks("LeftButtonUp", "RightButtonUp") end
     b.tip = tip
@@ -177,13 +184,24 @@ local function iconButton(parent, size, key, tip, onClick, label)
 end
 UI.iconButton = iconButton
 
+function UI.setSelected(b, on)
+    b.selected = on and true or false
+    if on then b.sel:Show() else b.sel:Hide() end
+    if b.tex.SetDesaturated then b.tex:SetDesaturated(not on) end
+    b.tex:SetAlpha(on and 1 or 0.55)
+    if b.label then
+        b.label:SetAlpha(1)
+        if on then b.label:SetTextColor(1, 1, 1) else b.label:SetTextColor(0.6, 0.6, 0.6) end
+    end
+end
+
 -- GF-002-E: a text button as wide as its text (an icon markup counts as one).
-function UI.textButton(parent, text, onClick, minWidth)
+function UI.textButton(parent, text, onClick, minWidth, exactWidth)
     local b = ns.createFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    local w = math.max(minWidth or 0, ns.labelWidth(text) + 28)
-    b:SetSize(w, 26)
-    b.gfWidth = w
-    if b.SetNormalFontObject then pcall(b.SetNormalFontObject, b, "GameFontNormal") end
+    local w = exactWidth or math.max(minWidth or 0, ns.labelWidth(text) + 28)
+    b:SetSize(w, ns.BUTTON_H)
+    b.gfWidth, b.gfHeight = w, ns.BUTTON_H
+    if b.SetNormalFontObject then pcall(b.SetNormalFontObject, b, ns.FIELD_FONT) end
     b:SetText(text)
     if onClick then b:SetScript("OnClick", onClick) end
     return b
@@ -226,7 +244,7 @@ UI.showFee = showFee
 -- The orders page
 ---------------------------------------------------------------------------
 
-local ROW_HEIGHT = 30
+local ROW_HEIGHT = ns.PAGE_ROW -- GF-002-F: 36
 UI.ROW_WIDTH = 1030 -- GF-002-E: the wider window
 local panel, scroll, content, profBar
 local rowWidgets, shownRows, profButtons = {}, {}, {}
@@ -287,38 +305,38 @@ local function newRow(i)
     row:SetSize(UI.ROW_WIDTH, ROW_HEIGHT)
     row.bg = row:CreateTexture(nil, "BACKGROUND")
     row.bg:SetAllPoints()
-    row.att = row:CreateTexture(nil, "ARTWORK"); row.att:SetSize(16, 16); row.att:SetPoint("LEFT", row, "LEFT", 2, 0)
-    row.item = iconButton(row, 24, "unknown", nil)
-    row.item:SetPoint("LEFT", row, "LEFT", 22, 0)
+    row.att = row:CreateTexture(nil, "ARTWORK"); row.att:SetSize(18, 18); row.att:SetPoint("LEFT", row, "LEFT", 2, 0)
+    row.item = iconButton(row, 32, "unknown", nil)
+    row.item:SetPoint("LEFT", row, "LEFT", 24, 0)
     row.item:SetScript("OnEnter", function(self) itemTooltip(self, self:GetParent().view and self:GetParent().view.item) end)
     row.item.infoOnly = true -- GF-002-D: shows the item on hover, nothing to click
-    row.qty = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    row.qty:SetPoint("LEFT", row, "LEFT", 54, 0); row.qty:SetWidth(84); row.qty:SetJustifyH("LEFT")
-    row.cls = row:CreateTexture(nil, "ARTWORK"); row.cls:SetSize(18, 18); row.cls:SetPoint("LEFT", row, "LEFT", 140, 0)
-    row.who = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    row.who:SetPoint("LEFT", row, "LEFT", 162, 0); row.who:SetWidth(160); row.who:SetJustifyH("LEFT"); row.who:SetWordWrap(false)
+    row.qty = row:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
+    row.qty:SetPoint("LEFT", row, "LEFT", 62, 0); row.qty:SetWidth(84); row.qty:SetJustifyH("LEFT"); row.qty:SetWordWrap(false)
+    row.cls = row:CreateTexture(nil, "ARTWORK"); row.cls:SetSize(22, 22); row.cls:SetPoint("LEFT", row, "LEFT", 150, 0)
+    row.who = row:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
+    row.who:SetPoint("LEFT", row, "LEFT", 176, 0); row.who:SetWidth(130); row.who:SetJustifyH("LEFT"); row.who:SetWordWrap(false)
     row.mats = {}
     for k = 1, 5 do
-        local m = iconButton(row, 20, "unknown", nil)
-        m:SetPoint("LEFT", row, "LEFT", 330 + (k - 1) * 24, 0)
+        local m = iconButton(row, 26, "unknown", nil)
+        m:SetPoint("LEFT", row, "LEFT", 312 + (k - 1) * 28, 0)
         m:SetScript("OnEnter", function(self) itemTooltip(self, self.itemID) end)
         m.infoOnly = true
         row.mats[k] = m
     end
-    row.coin = row:CreateTexture(nil, "ARTWORK"); row.coin:SetSize(16, 16); row.coin:SetPoint("LEFT", row, "LEFT", 456, 0)
-    row.fee = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    row.fee:SetPoint("LEFT", row, "LEFT", 476, 0); row.fee:SetWidth(130); row.fee:SetJustifyH("LEFT"); row.fee:SetWordWrap(false)
-    row.state = iconButton(row, 24, "waiting", nil)
-    row.state:SetPoint("LEFT", row, "LEFT", 616, 0)
+    row.coin = row:CreateTexture(nil, "ARTWORK"); row.coin:SetSize(18, 18); row.coin:SetPoint("LEFT", row, "LEFT", 456, 0)
+    row.fee = row:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
+    row.fee:SetPoint("LEFT", row, "LEFT", 478, 0); row.fee:SetWidth(120); row.fee:SetJustifyH("LEFT"); row.fee:SetWordWrap(false)
+    row.state = iconButton(row, ns.ROW_ICON, "waiting", nil)
+    row.state:SetPoint("LEFT", row, "LEFT", 604, 0)
     row.buttons = {}
     -- GF-002-E: the buttons follow each other by their measured names.
-    UI.ROW_BUTTON_X = 716
+    UI.ROW_BUTTON_X = 700
     for k = 1, 3 do
-        local b = iconButton(row, 24, "deal", nil)
+        local b = iconButton(row, ns.ROW_ICON, "deal", nil)
         b:SetPoint("LEFT", row, "LEFT", UI.ROW_BUTTON_X, 0)
         row.buttons[k] = b
     end
-    row.head = row:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    row.head = row:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT)
     row.head:SetPoint("LEFT", row, "LEFT", 6, 0)
     rowWidgets[i] = row
     return row
@@ -450,14 +468,14 @@ local function refreshProfBar()
         local b = profButtons[i]
         if not b then
             -- GF-002-D: [icon] 接單／不接   [工錢] coin — a click on the icon toggles, on 工錢 edits.
-            b = iconButton(profBar, 30, "unknown", nil, nil, "不接")
+            b = iconButton(profBar, ns.ICON, "unknown", nil, nil, "不接")
             b:SetPoint("LEFT", profBar, "LEFT", UI.PROF_X + (i - 1) * UI.PROF_STEP, 0)
             b.feeButton = UI.textButton(profBar, "工錢")
             b.feeButton:SetPoint("LEFT", b, "RIGHT", 4 + ns.labelWidth("接單") + 8, 0)
-            b.feeTex = profBar:CreateTexture(nil, "ARTWORK"); b.feeTex:SetSize(14, 14)
+            b.feeTex = profBar:CreateTexture(nil, "ARTWORK"); b.feeTex:SetSize(18, 18)
             b.feeTex:SetPoint("LEFT", b.feeButton, "RIGHT", 4, 0)
-            b.feeText = ns.freeText(profBar:CreateFontString(nil, "ARTWORK", "GameFontHighlight"))
-            b.feeText:SetPoint("LEFT", b.feeButton, "RIGHT", 20, 0)
+            b.feeText = ns.freeText(profBar:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
+            b.feeText:SetPoint("LEFT", b.feeButton, "RIGHT", 26, 0)
             b.feeText:SetJustifyH("LEFT")
             profButtons[i] = b
         end
@@ -486,7 +504,7 @@ local function refreshProfBar()
     if UI.profField then if #skills > 0 then UI.profField:Show() else UI.profField:Hide() end end
 end
 UI.profButtons = function() return profButtons end
-UI.PROF_X, UI.PROF_STEP = 60, 230
+UI.PROF_X, UI.PROF_STEP = 60, 270
 
 function UI.refresh()
     UI.updateBadge()
@@ -501,30 +519,30 @@ end
 
 local function build(p)
     -- GF-002-E (owner: 「我看不出來如何下單」「工匠設定要按右鍵不明顯」): two plain buttons on top.
-    UI.orderButton = UI.textButton(p, ns.GameIcons.markup("order", 16) .. " ＋下單", function(self) UI.openPicker() end)
+    UI.orderButton = UI.textButton(p, ns.GameIcons.markup("order", 20) .. " ＋下單", function(self) UI.openPicker() end)
     UI.orderButton:SetPoint("TOPLEFT", p, "TOPLEFT", 24, -40)
-    UI.servicesButton = UI.textButton(p, ns.GameIcons.markup("services", 16) .. " 我的服務", function() UI.openServices() end)
+    UI.servicesButton = UI.textButton(p, ns.GameIcons.markup("services", 20) .. " 我的服務", function() UI.openServices() end)
     UI.servicesButton:SetPoint("LEFT", UI.orderButton, "RIGHT", 12, 0)
     profBar = CreateFrame("Frame", nil, p)
-    profBar:SetSize(1040, 36)
-    profBar:SetPoint("TOPLEFT", p, "TOPLEFT", 24, -76)
+    profBar:SetSize(1040, 40)
+    profBar:SetPoint("TOPLEFT", p, "TOPLEFT", 24, -80)
     UI.profField = ns.freeText(profBar:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
     UI.profField:SetPoint("LEFT", profBar, "LEFT", 0, 0)
     UI.profField:SetText("專業")
-    UI.emptyLine = p:CreateFontString(nil, "ARTWORK", "GameFontDisableLarge")
+    UI.emptyLine = p:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT)
     UI.emptyLine:SetPoint("TOP", p, "TOP", 0, -200)
     scroll = ns.createFrame("ScrollFrame", nil, p, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 20, -120)
-    scroll:SetPoint("BOTTOMRIGHT", -40, 44)
+    scroll:SetPoint("TOPLEFT", 20, -128)
+    scroll:SetPoint("BOTTOMRIGHT", -40, 52)
     content = CreateFrame("Frame", nil, scroll)
     content:SetSize(UI.ROW_WIDTH, 1)
     scroll:SetScrollChild(content)
     scroll:HookScript("OnVerticalScroll", function() UI.layoutRows() end)
-    UI.historyButton = iconButton(p, 26, "history", "歷史", function() UI.showHistory() end, "歷史")
-    UI.historyButton:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -230, 10)
+    UI.historyButton = iconButton(p, ns.ICON, "history", "歷史", function() UI.showHistory() end, "歷史")
+    UI.historyButton:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -250, 10)
     -- GF-006-C (R-9.4): paste a web order's import code.
-    UI.pasteButton = iconButton(p, 26, "paste", "匯入碼", function() UI.openPaste() end, "匯入")
-    UI.pasteButton:SetPoint("RIGHT", UI.historyButton, "LEFT", -(ns.labelWidth("匯入") + 24), 0)
+    UI.pasteButton = iconButton(p, ns.ICON, "paste", "匯入碼", function() UI.openPaste() end, "匯入")
+    UI.pasteButton:SetPoint("RIGHT", UI.historyButton, "LEFT", -(ns.labelWidth("匯入") + 28), 0)
     ns.Diag.smallButton(p, "BOTTOMRIGHT", -24, 10)
     panel = p
 end
@@ -547,20 +565,20 @@ local pastePopup
 
 function UI.openPaste()
     if not pastePopup then
-        local f = ns.popupWindow(UI.PASTE_NAME, 540, 210)
+        local f = ns.popupWindow(UI.PASTE_NAME, 620, 230)
         f:SetPoint("CENTER", 0, 80)
         f:EnableMouse(true)
         ns.exclusivePopup(f)
         if f.TitleText then f.TitleText:SetText("匯入") end
         UI.fieldLabel(f, "匯入碼", UI.FIELD_X, -50)
         local X = UI.controlX({ "匯入碼" })
-        f.icon = f:CreateTexture(nil, "ARTWORK"); f.icon:SetSize(26, 26)
-        f.icon:SetPoint("TOPLEFT", f, "TOPLEFT", X, -44)
+        f.icon = f:CreateTexture(nil, "ARTWORK"); f.icon:SetSize(ns.ICON, ns.ICON)
+        f.icon:SetPoint("TOPLEFT", f, "TOPLEFT", X, -42)
         Icons.set(f.icon, UI.ICON.paste)
         local box = ns.createFrame("EditBox", nil, f, "InputBoxTemplate")
-        box:SetSize(360, 26)
+        box:SetSize(400, 30)
         if box.SetFontObject then box:SetFontObject("ChatFontNormal") end
-        box:SetPoint("TOPLEFT", f, "TOPLEFT", X + 36, -44)
+        box:SetPoint("TOPLEFT", f, "TOPLEFT", X + 44, -44)
         box:SetAutoFocus(true)
         if box.SetMaxLetters then box:SetMaxLetters(0) end
         box:SetScript("OnEscapePressed", function(self) self:ClearFocus(); f:Hide() end)
@@ -715,14 +733,14 @@ local function moneyBoxes(parent, x, y, onChange)
     local boxes = {}
     for i, unit in ipairs({ "gold", "silver", "copper" }) do
         local e = ns.createFrame("EditBox", nil, parent, "InputBoxTemplate")
-        e:SetSize(i == 1 and 54 or 32, 24)
+        e:SetSize(i == 1 and 60 or 36, 30)
         if e.SetFontObject then e:SetFontObject("ChatFontNormal") end
-        e:SetPoint("TOPLEFT", parent, "TOPLEFT", x + (i - 1) * 76, y)
+        e:SetPoint("TOPLEFT", parent, "TOPLEFT", x + (i - 1) * 84, y)
         e:SetAutoFocus(false)
         if e.SetNumeric then e:SetNumeric(true) end
         e:SetMaxLetters(i == 1 and 5 or 2)
         local coin = parent:CreateTexture(nil, "ARTWORK")
-        coin:SetSize(14, 14)
+        coin:SetSize(18, 18)
         coin:SetPoint("LEFT", e, "RIGHT", 3, 0)
         Icons.set(coin, "Interface\\MoneyFrame\\UI-" .. (unit == "gold" and "Gold" or unit == "silver" and "Silver" or "Copper") .. "Icon")
         e:SetScript("OnTextChanged", function(_, user) if user ~= false then onChange() end end)
@@ -799,7 +817,7 @@ function UI.fieldLabel(parent, text, x, y)
 end
 
 -- Where the controls start: after the widest field name of the window.
-UI.FIELD_X, UI.ROW_STEP = 22, 48
+UI.FIELD_X, UI.ROW_STEP = 24, ns.WINDOW_ROW -- GF-002-F: 52
 function UI.controlX(names)
     local w = 0
     for _, n in ipairs(names) do w = math.max(w, ns.labelWidth(n)) end
@@ -809,7 +827,7 @@ end
 UI.ORDER_FIELDS = { "成品", "數量", "對象", "材料", "材料費", "工錢", "合計" }
 local function createPopup()
     if popup then return popup end
-    local f = ns.popupWindow(UI.POPUP_NAME, 580, 430)
+    local f = ns.popupWindow(UI.POPUP_NAME, 660, 500)
     f:SetPoint("CENTER", 0, 60)
     f:EnableMouse(true)
     ns.exclusivePopup(f)
@@ -817,14 +835,14 @@ local function createPopup()
     local X = UI.controlX(UI.ORDER_FIELDS) -- where the controls start, after the field names
     local function y(i) return -44 - (i - 1) * UI.ROW_STEP end
     UI.fieldLabel(f, "成品", UI.FIELD_X, y(1) - 8)
-    f.item = iconButton(f, 34, "unknown", nil, nil, "成品")
+    f.item = iconButton(f, ns.ICON, "unknown", nil, nil, "成品")
     f.item:SetPoint("TOPLEFT", f, "TOPLEFT", X, y(1))
     f.item:SetScript("OnEnter", function(self) itemTooltip(self, draft and draft.item) end)
-    UI.fieldLabel(f, "行情", 330, y(1) - 8)
-    f.marketIcon = f:CreateTexture(nil, "ARTWORK"); f.marketIcon:SetSize(16, 16)
-    f.marketIcon:SetPoint("TOPLEFT", f, "TOPLEFT", 330 + ns.labelWidth("行情") + 10, y(1) - 8)
+    UI.fieldLabel(f, "行情", 380, y(1) - 8)
+    f.marketIcon = f:CreateTexture(nil, "ARTWORK"); f.marketIcon:SetSize(20, 20)
+    f.marketIcon:SetPoint("TOPLEFT", f, "TOPLEFT", 380 + ns.labelWidth("行情") + 10, y(1) - 6)
     Icons.set(f.marketIcon, UI.ICON.gold)
-    f.market = ns.freeText(f:CreateFontString(nil, "ARTWORK", "GameFontHighlight"))
+    f.market = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
     f.market:SetPoint("LEFT", f.marketIcon, "RIGHT", 4, 0)
     -- Quantity: the game's previous / next page arrows (GF-002-C).
     UI.fieldLabel(f, "數量", UI.FIELD_X, y(2) - 8)
@@ -840,8 +858,8 @@ local function createPopup()
     f.plus:SetScript("OnClick", function() step(1) end)
     -- Guild order or a named crafter.
     UI.fieldLabel(f, "對象", UI.FIELD_X, y(3) - 8)
-    f.guild = iconButton(f, 28, "guild", "公會單", function() draft.crafter = "*"; UI.applyFee(draft); drawPopup() end, "公會單")
-    f.named = iconButton(f, 28, "unknown", "指定工匠", function(self) UI.pickCrafter(self) end, "指定工匠")
+    f.guild = iconButton(f, ns.ICON, "guild", "公會單", function() draft.crafter = "*"; UI.applyFee(draft); drawPopup() end, "公會單")
+    f.named = iconButton(f, ns.ICON, "unknown", "指定工匠", function(self) UI.pickCrafter(self) end, "指定工匠")
     UI.flow(f, { f.guild, f.named }, X, y(3), 28)
     f.namedActive = f:CreateTexture(nil, "OVERLAY"); f.namedActive:SetSize(14, 14)
     f.namedActive:SetPoint("TOPRIGHT", f.named, "TOPRIGHT", 4, 4)
@@ -849,26 +867,26 @@ local function createPopup()
     UI.fieldLabel(f, "材料", UI.FIELD_X, y(4) - 8)
     f.mats = {}
     for i = 1, 6 do
-        local b = iconButton(f, 28, "unknown", nil, function(self)
+        local b = iconButton(f, ns.ICON, "unknown", nil, function(self)
             draft.mats[self.itemID] = not draft.mats[self.itemID] or nil
             drawPopup()
         end, "x1")
-        b:SetPoint("TOPLEFT", f, "TOPLEFT", X + (i - 1) * 74, y(4))
+        b:SetPoint("TOPLEFT", f, "TOPLEFT", X + (i - 1) * 86, y(4))
         b:SetScript("OnEnter", function(self) itemTooltip(self, self.itemID) end)
         b.count = b.label
         f.mats[i] = b
     end
     UI.fieldLabel(f, "材料費", UI.FIELD_X, y(5) - 8)
-    f.matsIcon = f:CreateTexture(nil, "ARTWORK"); f.matsIcon:SetSize(18, 18)
+    f.matsIcon = f:CreateTexture(nil, "ARTWORK"); f.matsIcon:SetSize(22, 22)
     f.matsIcon:SetPoint("TOPLEFT", f, "TOPLEFT", X, y(5) - 6)
     Icons.set(f.matsIcon, UI.ICON.bag)
-    f.matsCost = ns.freeText(f:CreateFontString(nil, "ARTWORK", "GameFontHighlight"))
+    f.matsCost = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
     f.matsCost:SetPoint("LEFT", f.matsIcon, "RIGHT", 6, 0)
     UI.fieldLabel(f, "工錢", UI.FIELD_X, y(6) - 8)
-    f.feeIcon = f:CreateTexture(nil, "ARTWORK"); f.feeIcon:SetSize(18, 18)
+    f.feeIcon = f:CreateTexture(nil, "ARTWORK"); f.feeIcon:SetSize(22, 22)
     f.feeIcon:SetPoint("TOPLEFT", f, "TOPLEFT", X, y(6) - 6)
     Icons.setProfessionIcon(f.feeIcon, { skillLineID = 164 })
-    f.fee = UI.moneyBoxes(f, X + 40, y(6) - 4, function()
+    f.fee = UI.moneyBoxes(f, X + 54, y(6) - 2, function()
         if not draft then return end
         draft.fee, draft.feeEdited = f.fee.get() or 0, true
         popup.total:SetText(UI.totalText(UI.estimateOf(draft), draft.fee))
@@ -928,16 +946,16 @@ local feePopup, feeTarget
 function UI.editFee(target)
     feeTarget = target
     if not feePopup then
-        local f = ns.popupWindow(UI.FEE_NAME, 420, 170)
+        local f = ns.popupWindow(UI.FEE_NAME, 480, 200)
         f:SetPoint("CENTER", 0, 120)
         f:EnableMouse(true)
         ns.exclusivePopup(f)
         if f.TitleText then f.TitleText:SetText("工錢") end
         UI.fieldLabel(f, "工錢", UI.FIELD_X, -52)
         local X = UI.controlX({ "工錢" })
-        f.icon = f:CreateTexture(nil, "ARTWORK"); f.icon:SetSize(26, 26)
-        f.icon:SetPoint("TOPLEFT", f, "TOPLEFT", X, -46)
-        f.boxes = moneyBoxes(f, X + 40, -48, function() end)
+        f.icon = f:CreateTexture(nil, "ARTWORK"); f.icon:SetSize(ns.ICON, ns.ICON)
+        f.icon:SetPoint("TOPLEFT", f, "TOPLEFT", X, -44)
+        f.boxes = moneyBoxes(f, X + 46, -46, function() end)
         f.save = UI.textButton(f, ns.GameIcons.markup("yes", 16) .. " 確定", function() UI.saveFee(f.boxes.get()) end, 96)
         f.save:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -20, 16)
         f.free = UI.textButton(f, UI.tex("free", 16) .. " 免費", function() UI.saveFee(0) end, 96)
@@ -996,19 +1014,19 @@ function UI.drawServices()
     for i, skill in ipairs(skills) do
         local r = f.rows[i]
         if not r then
-            local y = -76 - (i - 1) * 44
+            local y = -84 - (i - 1) * ns.WINDOW_ROW
             r = {}
-            r.icon = f:CreateTexture(nil, "ARTWORK"); r.icon:SetSize(28, 28)
-            r.icon:SetPoint("TOPLEFT", f, "TOPLEFT", UI.FIELD_X, y + 4)
-            r.name = ns.freeText(f:CreateFontString(nil, "ARTWORK", "GameFontHighlight"))
-            r.name:SetPoint("TOPLEFT", f, "TOPLEFT", UI.FIELD_X + 36, y - 2)
+            r.icon = f:CreateTexture(nil, "ARTWORK"); r.icon:SetSize(ns.ICON, ns.ICON)
+            r.icon:SetPoint("TOPLEFT", f, "TOPLEFT", UI.FIELD_X, y + 6)
+            r.name = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
+            r.name:SetPoint("TOPLEFT", f, "TOPLEFT", UI.FIELD_X + 40, y - 2)
             r.active = ns.checkBox(f, "接單", f.colActive, y, function(on) O().setActive(r.skill, on); UI.refresh() end)
-            r.feeTex = f:CreateTexture(nil, "ARTWORK"); r.feeTex:SetSize(16, 16)
+            r.feeTex = f:CreateTexture(nil, "ARTWORK"); r.feeTex:SetSize(18, 18)
             r.feeTex:SetPoint("TOPLEFT", f, "TOPLEFT", f.colFee, y - 4)
-            r.fee = ns.freeText(f:CreateFontString(nil, "ARTWORK", "GameFontHighlight"))
-            r.fee:SetPoint("TOPLEFT", f, "TOPLEFT", f.colFee + 22, y - 2)
+            r.fee = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
+            r.fee:SetPoint("TOPLEFT", f, "TOPLEFT", f.colFee + 24, y - 2)
             r.edit = UI.textButton(f, "工錢", function() UI.editFee({ skill = r.skill, back = "services" }) end)
-            r.edit:SetPoint("TOPLEFT", f, "TOPLEFT", f.colFee + 130, y + 2)
+            r.edit:SetPoint("TOPLEFT", f, "TOPLEFT", f.colFee + 150, y + 4)
             f.rows[i] = r
         end
         r.skill = skill
@@ -1024,23 +1042,23 @@ function UI.drawServices()
         for _, w in ipairs({ r.icon, r.name, r.active, r.active.label, r.feeTex, r.fee, r.edit }) do w:Hide() end
     end
     f.none:SetText(#skills == 0 and "沒有可以接單的專業" or "")
-    f:SetHeight(150 + math.max(1, #skills) * 44)
+    f:SetHeight(160 + math.max(1, #skills) * ns.WINDOW_ROW)
 end
 
 function UI.openServices()
     if not UI.servicesPopup then
-        local f = ns.popupWindow(UI.SERVICES_NAME, 560, 240)
+        local f = ns.popupWindow(UI.SERVICES_NAME, 620, 260)
         f:SetPoint("CENTER", 0, 80)
         f:EnableMouse(true)
         ns.exclusivePopup(f)
         if f.TitleText then f.TitleText:SetText("我的服務") end
-        f.colActive, f.colFee = 200, 300
-        UI.fieldLabel(f, "專業", UI.FIELD_X, -44)
-        UI.fieldLabel(f, "接單", f.colActive, -44)
-        UI.fieldLabel(f, "工錢", f.colFee, -44)
+        f.colActive, f.colFee = 230, 340
+        UI.fieldLabel(f, "專業", UI.FIELD_X, -46)
+        UI.fieldLabel(f, "接單", f.colActive, -46)
+        UI.fieldLabel(f, "工錢", f.colFee, -46)
         f.rows = {}
-        f.none = ns.freeText(f:CreateFontString(nil, "ARTWORK", "GameFontDisable"))
-        f.none:SetPoint("TOPLEFT", f, "TOPLEFT", UI.FIELD_X, -84)
+        f.none = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT))
+        f.none:SetPoint("TOPLEFT", f, "TOPLEFT", UI.FIELD_X, -90)
         -- Per-recipe fees: the recipe page with only my recipes, each row has 「我的工錢」.
         f.recipeFees = UI.textButton(f, ns.GameIcons.markup("services", 16) .. " 配方工錢", function()
             f:Hide()
@@ -1107,7 +1125,7 @@ end
 
 function UI.openPicker()
     if not UI.picker then
-        local f = ns.popupWindow(UI.PICKER_NAME, 560, 470)
+        local f = ns.popupWindow(UI.PICKER_NAME, 640, 540)
         f:SetPoint("CENTER", 0, 60)
         f:EnableMouse(true)
         ns.exclusivePopup(f)
@@ -1115,7 +1133,7 @@ function UI.openPicker()
         UI.fieldLabel(f, "搜尋", UI.FIELD_X, -46)
         local X = UI.controlX({ "搜尋" })
         local box = ns.createFrame("EditBox", nil, f, "InputBoxTemplate")
-        box:SetSize(260, 26)
+        box:SetSize(300, 30)
         if box.SetFontObject then box:SetFontObject("ChatFontNormal") end
         box:SetPoint("TOPLEFT", f, "TOPLEFT", X + 6, -40)
         box:SetAutoFocus(true)
@@ -1124,25 +1142,25 @@ function UI.openPicker()
         box:SetScript("OnEscapePressed", function(self) self:ClearFocus(); f:Hide() end)
         box:SetScript("OnEnterPressed", function() local r = f.list and f.list[1]; if r then UI.pickRecipe(r) end end)
         f.search = box
-        UI.fieldLabel(f, "配方", UI.FIELD_X, -84)
-        UI.fieldLabel(f, "工錢", 380, -84)
+        UI.fieldLabel(f, "配方", UI.FIELD_X, -90)
+        UI.fieldLabel(f, "工錢", 430, -90)
         f.rows = {}
         for i = 1, UI.PICKER_ROWS do
             local b = CreateFrame("Button", nil, f)
-            b:SetSize(516, 30)
-            b:SetPoint("TOPLEFT", f, "TOPLEFT", UI.FIELD_X, -106 - (i - 1) * 32)
+            b:SetSize(590, ns.PAGE_ROW)
+            b:SetPoint("TOPLEFT", f, "TOPLEFT", UI.FIELD_X, -114 - (i - 1) * (ns.PAGE_ROW + 2))
             if b.SetHighlightTexture then b:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD") end
-            b.icon = b:CreateTexture(nil, "ARTWORK"); b.icon:SetSize(24, 24); b.icon:SetPoint("LEFT", b, "LEFT", 2, 0)
-            b.name = b:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-            b.name:SetPoint("LEFT", b, "LEFT", 34, 0); b.name:SetWidth(318); b.name:SetJustifyH("LEFT"); b.name:SetWordWrap(false)
-            b.feeTex = b:CreateTexture(nil, "ARTWORK"); b.feeTex:SetSize(16, 16); b.feeTex:SetPoint("LEFT", b, "LEFT", 358, 0)
-            b.fee = ns.freeText(b:CreateFontString(nil, "ARTWORK", "GameFontHighlight")); b.fee:SetPoint("LEFT", b, "LEFT", 378, 0)
+            b.icon = b:CreateTexture(nil, "ARTWORK"); b.icon:SetSize(ns.ROW_ICON, ns.ROW_ICON); b.icon:SetPoint("LEFT", b, "LEFT", 2, 0)
+            b.name = b:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
+            b.name:SetPoint("LEFT", b, "LEFT", 38, 0); b.name:SetWidth(360); b.name:SetJustifyH("LEFT"); b.name:SetWordWrap(false)
+            b.feeTex = b:CreateTexture(nil, "ARTWORK"); b.feeTex:SetSize(18, 18); b.feeTex:SetPoint("LEFT", b, "LEFT", 406, 0)
+            b.fee = ns.freeText(b:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)); b.fee:SetPoint("LEFT", b, "LEFT", 428, 0)
             b:SetScript("OnClick", function(self) if self.data then UI.pickRecipe(self.data) end end)
             f.rows[i] = b
         end
-        f.empty = ns.freeText(f:CreateFontString(nil, "ARTWORK", "GameFontDisable"))
+        f.empty = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT))
         f.empty:SetPoint("TOPLEFT", f, "TOPLEFT", UI.FIELD_X, -116)
-        f.count = ns.freeText(f:CreateFontString(nil, "ARTWORK", "GameFontDisable"))
+        f.count = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT))
         f.count:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", UI.FIELD_X, 20)
         f:Hide()
         UI.picker = f
@@ -1239,7 +1257,7 @@ function UI.tradeChanged()
             r:SetSize(296, 26)
             r:SetPoint("TOPLEFT", strip, "TOPLEFT", 2, -2 - (i - 1) * 26)
             r.icon = r:CreateTexture(nil, "ARTWORK"); r.icon:SetSize(22, 22); r.icon:SetPoint("LEFT", r, "LEFT", 2, 0)
-            r.text = r:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall"); r.text:SetPoint("LEFT", r, "LEFT", 30, 0)
+            r.text = r:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT); r.text:SetPoint("LEFT", r, "LEFT", 30, 0)
             r.state = r:CreateTexture(nil, "ARTWORK"); r.state:SetSize(18, 18); r.state:SetPoint("RIGHT", r, "RIGHT", -4, 0)
             strip.rows[i] = r
         end
