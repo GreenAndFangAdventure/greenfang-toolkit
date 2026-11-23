@@ -229,6 +229,32 @@ function ns.tooltipAbove(owner, x)
 end
 
 -- A popup window above the toolkit window: opaque, framed, raised on show.
+-- GF-002-D: the order, fee, paste, adventure-ticket and worker windows are
+-- exclusive: showing one hides the others (and any open menu).
+local exclusive = {}
+function ns.exclusivePopup(f)
+    exclusive[#exclusive + 1] = f
+    if f.HookScript then
+        f:HookScript("OnShow", function(self)
+            for _, other in ipairs(exclusive) do
+                if other ~= self and other:IsShown() then other:Hide() end
+            end
+            if ns.Framework and ns.Framework.closeMenu then ns.Framework.closeMenu() end
+            if ns.onExclusiveShow then pcall(ns.onExclusiveShow, self) end
+        end)
+    end
+    return f
+end
+function ns.exclusivePopups() return exclusive end
+
+-- GF-002-D: room for a short Chinese name (13 px a character, 7 for ASCII,
+-- a little more than the font needs, so nothing is cut to "…").
+function ns.labelWidth(text)
+    local w = 0
+    for ch in tostring(text or ""):gmatch("[%z\1-\127\194-\244][\128-\191]*") do w = w + (#ch == 1 and 7 or 13) end
+    return w + 4
+end
+
 function ns.popupWindow(name, w, h)
     local f = ns.createFrame("Frame", name, UIParent, "BasicFrameTemplateWithInset")
     f:SetSize(w, h)

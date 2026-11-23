@@ -487,7 +487,8 @@ function ns.showMenu(owner, items)
     if type(items) ~= "table" or #items == 0 then return nil end
     if not popup then
         popup = CreateFrame("Frame", F.MENU_NAME, UIParent)
-        popup:SetFrameStrata("FULLSCREEN_DIALOG")
+        -- GF-002-D: above every window (a toplevel window raised over level 100 hid half of it).
+        popup:SetFrameStrata("TOOLTIP")
         if popup.SetFrameLevel then popup:SetFrameLevel(100) end
         if popup.SetClampedToScreen then popup:SetClampedToScreen(true) end
         ns.makeOpaque(popup, 0)

@@ -159,6 +159,7 @@ return function(T)
         U.pickDestination(UIParent)
         ok(grid:IsShown() and not menuOpen(), "grid again; the menu closed")
         U.pickTime(UIParent, "t")
+        U.pickStart(UIParent) -- GF-002-D: 開始 has its own menu
         ok(menuOpen() and not grid:IsShown(), "a time menu closes the grid")
         GetNumQuestLogEntries, GetQuestLogTitle = nil, nil
         U.pickDestination(UIParent)

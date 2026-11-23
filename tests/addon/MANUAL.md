@@ -594,8 +594,8 @@ python tests/addon/run_lupa.py         # 預期最後一行：N passed, 0 failed
 
 **A. 16001 還沒查證的函式**
 
-- □ 任務日誌：開著任務日誌時 `/dump C_QuestLog.GetNumQuestLogEntries()` 和 `/dump C_QuestLog.GetInfo(1)`（有沒有 `questID`）；沒有的話 `/dump GetQuestLogTitle(1)`（第 8 個值是不是 quest ID）。「同步與診斷」的冒險段寫「任務日誌：可讀」或「讀不到」
-- □ 任務等級：`GetInfo` 或 `GetQuestLogTitle` 有沒有等級（目前任務單不檢查等級，只檢查地城）
+- ☑ 任務日誌：**已實機確認（2026-11-23，owner）**。`C_QuestLog.GetNumQuestLogEntries()` 回傳（列數、任務數）；`C_QuestLog.GetInfo(i)` 是表格，有 `isHeader`、`questID`、`title`；區域標題列 `isHeader = true`、`questID = 0`，工具箱跳過
+- ☑ 任務等級：**已實機確認（2026-11-23，owner）**。`level`（和 `difficultyLevel` 相同）；`isScaling = true` 的任務等級跟著角色變，不拿來排除配對。0.12.2 起任務單檢查等級（比任務等級低 3 級以上才排除）
 - □ 組隊邀請：「同步與診斷」寫的是 `C_PartyInfo.InviteUnit`、`InviteUnit` 還是「沒有」；按「組隊」時有沒有出現「功能因插件失效」。失效時，用頁面右下的邀請按鈕一位一位邀請
 - □ 交了任務、放棄任務後，職工單上那個任務會自動拿掉（`QUEST_TURNED_IN`／`QUEST_REMOVED`／`QUEST_LOG_UPDATE` 事件；「同步與診斷」若列出客戶端沒有的事件請貼回來）
 
@@ -659,6 +659,20 @@ ForeverAPI 沒有材質清單，下面的材質都**還沒在 16001 確認**。�
 - 標題與按鈕：冒險 `Ability_Warrior_BattleShout`（`INV_Sword_04`）、職工 `INV_Misc_Bag_10`、收到的 `INV_Letter_15`、我下的 `INV_Misc_Note_02`、勾與叉 `Interface\RaidFrame\ReadyCheck-Ready／NotReady`、匯入 `INV_Scroll_03`
 
 - □ 如果地城圖示全部是鑰匙：輸入 `/run local t=UIParent:CreateTexture() print(t:SetTexture("Interface\\LFGFrame\\LFGIcon-Deadmines"))`，把印出的 true 或 false 貼回來
+
+## 3y. 圖示旁的名稱：截圖確認（GF-002-D，0.12.2 起）
+
+owner 在 0.12.1 回報「只有圖片無法使用」。0.12.2 起每個可以點的圖示旁都有 2～4 個字的名稱，視窗每一列前面有欄位名稱。
+
+- □ 「冒險」頁：上方是「＋冒險單」「＋職工單」；每一列右邊的按鈕旁有名稱（申請、撤回、接受、拒絕、同意、組隊、完成、移除、邀請）；沒有單時中間一行「沒有冒險單」
+- □ 冒險單視窗：左邊一欄是「目的地、時間、人數、錄取、標籤、備註」；目的地沒選時寫「選擇目的地」；時間是「現在、今天、之後」；錄取是「直接錄取、團長同意」；標籤是「解任務、連刷、慢慢打、速刷、語音」
+- □ 職工單視窗：左邊一欄是「地城、任務、職責、副職責、時段」；沒選時寫「選擇地城」「選擇任務」；職責是「坦、補、輸出」；左下是「移除職工單」
+- □ 選地城的格子：每個地城圖示下面有簡稱，最後一格是「任務」
+- □ 先開冒險單視窗再按「＋職工單」：冒險單視窗會關掉，只剩職工單視窗（下單、工錢、匯入碼也一樣，一次只有一個）
+- □ 「訂單」頁上方：最左邊「專業」，每個專業圖示旁邊是「接單」或「不接」，再來是「工錢」按鈕和金額；右下是「匯入」「歷史」；沒有訂單時中間一行「沒有訂單」
+- □ 下單視窗：左邊一欄是「成品、數量、對象、材料、材料費、工錢、合計」；對象是「公會單、指定工匠」
+- □ 每一列的狀態圖示旁有狀態名稱（等接單、製作中、待驗收、成交、取消）
+- □ 所有名稱都完整，沒有被截成「…」（請特別看「工匠結案」「指定工匠」「移除職工單」）
 
 ## 3b. 睡袋路線（GF-008-A，0.6.0 起；部落角色）
 
