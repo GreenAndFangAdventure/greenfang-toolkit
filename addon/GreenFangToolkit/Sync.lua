@@ -272,6 +272,8 @@ function Sync.recordSelf(force, opts)
         -- every zone field.
         location = Sync.shareLocation() and ns.Data.location() or nil,
         recipes = Sync.ownRecipes(),
+        -- GF-006-B (savedvariables §crafting): my own services and order halves.
+        crafting = ns.Orders and ns.Orders.craftingFor(ns.Share.selfAuthor()) or nil,
     }
     local existing = Sync.find("character.self", function(e)
         return type(e.uploader) == "table" and e.uploader.guid == p.guid
@@ -409,14 +411,18 @@ local function sharePayload(m, a, recs, tombs, realm, idsFor)
             payload.withdrawn.recipes[skill] = t
         end
     end
+    -- GF-006-B (savedvariables §crafting): the halves the subject wrote.
+    payload.crafting = ns.Orders and ns.Orders.craftingFor(a) or nil
     return payload
 end
 
 -- What this subject's records look like now: [g] = { t, h } (tombstones h = "x").
-local function fieldState(recs, tombs)
+local function fieldState(recs, tombs, a)
     local out = {}
     for g, r in pairs(recs) do out[g] = { t = r.t, h = r.h } end
     for g, t in pairs(tombs) do out[g] = { t = t, h = "x" } end
+    -- GF-006-B: the subject's order records count as fields too.
+    if a and ns.Orders then for g, f in pairs(ns.Orders.uploadState(a)) do out[g] = f end end
     return out
 end
 
@@ -484,8 +490,9 @@ function Sync.recordShares()
     for _, m in ipairs(snap.members) do
         local a = m.guid and Share.authorOf(m.guid)
         local recs, tombs = a and s.rec[a] or {}, a and s.tomb[a] or {}
-        if a and a ~= selfA and (next(recs) or next(tombs)) then
-            local current = fieldState(recs, tombs)
+        local orderState = a and ns.Orders and ns.Orders.uploadState(a) or {}
+        if a and a ~= selfA and (next(recs) or next(tombs) or next(orderState)) then
+            local current = fieldState(recs, tombs, a)
             local diff = compareState(current, s.queued[a])
             local old = existing[m.guid]
             if not old and s.queued[a] then diff = "changed" end

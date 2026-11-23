@@ -562,6 +562,11 @@ python tests/addon/run_lupa.py         # 預期最後一行：N passed, 0 failed
 - □ 甲、乙在同一種拍賣場各掃一次；丙（第三個角色）登入兩分鐘後，「同步與診斷」的價格分享「收到」大於 0
 - □ 分享期間名冊、配方同步沒有變慢（「遊戲內分享」的佇列很快歸零）
 
+**K. 上傳的 `crafting`**（savedvariables §crafting）
+
+- □ 下線後打開存檔 `GreenFangToolkit.lua`：自己的 `character.self` 有 `crafting`，裡面只有 GUID、數字和契約列的英文值，沒有角色名字
+- □ 沒填工錢的專業沒有 `fee` 這個鍵；設 0 的是 `fee = 0`
+
 **J. 0.10.0 相容**（§12 第 10 項）
 
 - □ 一個角色用 0.10.0、一個用 0.11.0，互相下線上線：0.10.0 那邊沒有 Lua 錯誤，名冊和配方照常

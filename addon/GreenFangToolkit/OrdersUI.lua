@@ -750,7 +750,7 @@ end
 function UI.saveFee(fee)
     local t = feeTarget
     if not t then return end
-    if t.recipe then O().setRecipeFee(t.recipe, fee) else O().setFee(t.skill, fee) end
+    if t.recipe then O().setRecipeFee(t.recipe, fee, t.skill) else O().setFee(t.skill, fee) end
     if feePopup then feePopup:Hide() end
     UI.refresh()
 end

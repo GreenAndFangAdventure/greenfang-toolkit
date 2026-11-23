@@ -104,14 +104,20 @@ end
 -- Storage: GreenFangToolkitDB.ledger[<id>][<realm|guild>].rec[a][g] = { t, h, v }
 ---------------------------------------------------------------------------
 
-function L:store()
+-- readOnly: do not create empty tables (reading must not grow the save file).
+function L:store(readOnly)
     local db = ns.db
     if not db then return nil end
+    local key = guildKey()
+    if not key then return nil end
+    if readOnly then
+        local mine = type(db.ledger) == "table" and db.ledger[self.cfg.id]
+        local g = type(mine) == "table" and mine[key]
+        return type(g) == "table" and type(g.rec) == "table" and g or nil
+    end
     if type(db.ledger) ~= "table" then db.ledger = {} end
     local mine = db.ledger[self.cfg.id]
     if type(mine) ~= "table" then mine = {}; db.ledger[self.cfg.id] = mine end
-    local key = guildKey()
-    if not key then return nil end
     local g = mine[key]
     if type(g) ~= "table" then g = {}; mine[key] = g end
     if type(g.rec) ~= "table" then g.rec = {} end
@@ -119,17 +125,17 @@ function L:store()
 end
 
 function L:get(a, g)
-    local s = self:store()
+    local s = self:store(true)
     return s and s.rec[a] and s.rec[a][g] or nil
 end
 
 function L:records(a)
-    local s = self:store()
+    local s = self:store(true)
     return s and s.rec[a] or {}
 end
 
 function L:authors()
-    local s = self:store()
+    local s = self:store(true)
     local list = {}
     for a in pairs(s and s.rec or {}) do list[#list + 1] = a end
     table.sort(list)
@@ -137,7 +143,7 @@ function L:authors()
 end
 
 function L:count()
-    local s = self:store()
+    local s = self:store(true)
     local n = 0
     for _, groups in pairs(s and s.rec or {}) do for _ in pairs(groups) do n = n + 1 end end
     return n

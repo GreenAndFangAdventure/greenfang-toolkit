@@ -1010,6 +1010,113 @@ return function(T)
     end)
 
     ---------------------------------------------------------------------------
+    -- Upload: savedvariables §crafting, upload-api v1.4 §3.10 (R-9.2)
+    ---------------------------------------------------------------------------
+
+    local function entryOf(kind, guid)
+        for _, e in ipairs(GreenFangToolkitDB.sync.outbox) do
+            if e.kind == kind and (not guid or (e.payload.subject and e.payload.subject.guid == guid)) then return e end
+        end
+    end
+    local function strings(t, acc)
+        acc = acc or {}
+        for k, v in pairs(t) do
+            if type(k) == "string" then acc[#acc + 1] = k end
+            if type(v) == "string" then acc[#acc + 1] = v elseif type(v) == "table" then strings(v, acc) end
+        end
+        return acc
+    end
+
+    test("GF-006 R-9.2 character.self.crafting: my services (nil vs 0) and my order halves, contract shape", function()
+        local ns = login()
+        local O = ns.Orders
+        O.setActive(SKILL, true)
+        O.setFee(171, 0)
+        O.setRecipeFee(RECIPE, 500, SKILL)
+        O.setRecipeFee(2661, 0, SKILL)
+        local id = O.place({ recipe = RECIPE, item = ITEM, skill = SKILL, qty = 3, crafter = B,
+            mats = { [ORE] = 4 }, fee = 0, feeQuoted = nil, quote = 120 })
+        ok(O.validUploadId(id), "id fits the contract: " .. id)
+        local closed = O.place({ recipe = RECIPE, item = ITEM, skill = SKILL, qty = 1 })
+        O.customer(closed, "deal", "trade")
+        -- A job I accepted on B's directed order, and one I declined.
+        orders(ns, B, { w("gbbb.1", { cf = A }), w("gbbb.2", { cf = A }) })
+        O.press(O.get("gbbb.1"), "accept")
+        O.press(O.get("gbbb.2"), "decline")
+        ns.Sync.recordSelf(true)
+        local c = entryOf("character.self").payload.crafting
+        ok(c, "crafting written")
+        local sv = c.services.value
+        eq(sv["164"].active, true, "active"); eq(sv["164"].fee, nil, "no default fee: no key")
+        eq(sv["171"].active, false, "only a fee"); eq(sv["171"].fee, 0, "0 = free")
+        eq(sv["164"].recipes[tostring(RECIPE)], 500, "recipe fee"); eq(sv["164"].recipes["2661"], 0, "free recipe")
+        ok(type(c.services.recordedAt) == "number", "recordedAt")
+        local o = c.orders[id].w
+        eq(o.customer, "Player-" .. A, "customer GUID"); eq(o.crafter, "Player-" .. B, "crafter GUID")
+        eq(o.qty, 3, "qty"); eq(o.mats[tostring(ORE)], 4, "mats with string keys"); eq(o.fee, 0, "fee 0")
+        eq(o.feeQuoted, nil, "feeQuoted not filled in: no key"); eq(o.quote, 120, "quote"); eq(o.cst, "open", "cst")
+        eq(c.orders[id].j, nil, "no j: I am not the crafter")
+        local cw = c.orders[closed].w
+        eq(cw.cst, "deal", "closed"); eq(cw.close, "deal", "close"); eq(cw.closedBy, "customer", "by"); eq(cw.closeHow, "trade", "how")
+        eq(c.orders["gbbb.1"].j.jst, "accept", "my accept"); eq(c.orders["gbbb.1"].w, nil, "not B's half")
+        local d = c.orders["gbbb.2"].j
+        eq(d.jst, "decline", "decline"); eq(d.close, "cancel", "directed decline closes"); eq(d.closedBy, "crafter", "by crafter")
+        for _, str in ipairs(strings(c)) do
+            ok(not str:find("測試", 1, true) and not str:find("綠皮", 1, true), "no names or text: " .. str)
+        end
+    end)
+
+    test("GF-006 R-9.2 member.share.crafting: only the subject's halves; rewritten only when they change", function()
+        local ns = login()
+        local O = ns.Orders
+        local id = O.place({ recipe = RECIPE, item = ITEM, skill = SKILL, qty = 1, crafter = B })
+        services(ns, B, { active = { [SKILL] = true }, fees = { [SKILL] = 300 }, recipeFees = {} })
+        job(ns, B, { { id = id, cu = A, st = "a", ac = ns.Share.serverNow(), sa = ns.Share.serverNow() } })
+        orders(ns, B, { w("gbbb.9", { cf = C }) })
+        ns.Share.offer(B, "B", ns.Share.serverNow(), ns.Share.hash("60.WARRIOR"), "60.WARRIOR", true, B)
+        ns.Sync.recordShares()
+        local e = entryOf("member.share", "Player-" .. B)
+        ok(e and e.payload.crafting, "B's crafting")
+        local c = e.payload.crafting
+        eq(c.services.value["164"].fee, 300, "B's services")
+        eq(c.orders[id].j.jst, "accept", "B's job half"); eq(c.orders[id].w, nil, "my half is not in B's entry")
+        eq(c.orders["gbbb.9"].w.crafter, "Player-" .. C, "B's own order")
+        local firstId = e.id
+        ns.Sync.recordShares()
+        eq(entryOf("member.share", "Player-" .. B).id, firstId, "nothing changed: not rewritten")
+        wow.state.now = wow.state.now + 5
+        job(ns, B, { { id = id, cu = A, st = "d", ac = ns.Share.serverNow() - 5, sa = ns.Share.serverNow(),
+            dt = ns.Share.serverNow(), gv = 1 } })
+        ns.Sync.recordShares()
+        local e2 = entryOf("member.share", "Player-" .. B)
+        ok(e2.id ~= firstId, "B's job changed: rewritten")
+        eq(e2.payload.crafting.orders[id].j.jst, "delivered", "delivered")
+        eq(entryOf("member.share", "Player-" .. A), nil, "never a member.share for myself")
+    end)
+
+    test("GF-006 R-9.2 upload caps: 100 orders per author (oldest closed dropped first), 12 professions, 500 recipe fees", function()
+        local ns = login()
+        local O = ns.Orders
+        local list = {}
+        local t = ns.Share.serverNow()
+        for i = 1, 55 do list[#list + 1] = w("gbbb.o" .. i, { cf = C, sa = t - i }) end
+        for i = 1, 55 do list[#list + 1] = w("gbbb.c" .. i, { cf = C, st = "x", sa = t - 1000 - i }) end
+        orders(ns, B, list)
+        local sv = { active = {}, fees = {}, recipeFees = {}, recipeSkill = {} }
+        for skill = 100, 115 do sv.fees[skill] = 1 end
+        for r = 1, 600 do sv.recipeFees[10000 + r] = 1; sv.recipeSkill[10000 + r] = 100 end
+        services(ns, B, sv)
+        local c = O.craftingFor(B)
+        local n, open, closedKept = 0, 0, {}
+        for k in pairs(c.orders) do n = n + 1; if k:find("%.o") then open = open + 1 else closedKept[#closedKept + 1] = k end end
+        eq(orders(ns, B, list) ~= "invalid", true, "stored"); eq(n, 100, "100 orders"); eq(open, 55, "every open one kept")
+        for _, k in ipairs(closedKept) do ok(tonumber(k:match("c(%d+)$")) <= 45, "newest closed kept: " .. k) end
+        local skills, recipes = 0, 0
+        for _, v in pairs(c.services.value) do skills = skills + 1; for _ in pairs(v.recipes or {}) do recipes = recipes + 1 end end
+        eq(skills, 12, "12 professions"); eq(recipes, 500, "500 recipe fees")
+    end)
+
+    ---------------------------------------------------------------------------
     -- Performance (spec §12 items 6 and 11; share-performance.md style)
     ---------------------------------------------------------------------------
 

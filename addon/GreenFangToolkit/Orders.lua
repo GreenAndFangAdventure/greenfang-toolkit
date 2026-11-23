@@ -138,11 +138,15 @@ function Orders.encodeServices(sv)
     local rk = {}
     for id in pairs(sv.recipeFees or {}) do rk[#rk + 1] = id end
     table.sort(rk)
-    for _, id in ipairs(rk) do out[#out + 1] = "r" .. id .. "=" .. b36(sv.recipeFees[id]) end
+    -- "r<recipe>s<skill>": the upload nests recipe fees under their profession.
+    for _, id in ipairs(rk) do
+        local skill = sv.recipeSkill and sv.recipeSkill[id]
+        out[#out + 1] = "r" .. id .. (skill and ("s" .. skill) or "") .. "=" .. b36(sv.recipeFees[id])
+    end
     return table.concat(out, ",")
 end
 function Orders.decodeServices(s)
-    local sv = { active = {}, fees = {}, recipeFees = {} }
+    local sv = { active = {}, fees = {}, recipeFees = {}, recipeSkill = {} }
     for field in str(s):gmatch("[^,]+") do
         local k, v = field:match("^(%w+)=(.*)$")
         if k == "a" then
@@ -151,6 +155,10 @@ function Orders.decodeServices(s)
             sv.fees[tonumber(k:sub(2))] = unb36(v)
         elseif k and k:match("^r%d+$") and unb36(v) then
             sv.recipeFees[tonumber(k:sub(2))] = unb36(v)
+        elseif k and k:match("^r%d+s%d+$") and unb36(v) then
+            local id, skill = k:match("^r(%d+)s(%d+)$")
+            sv.recipeFees[tonumber(id)] = unb36(v)
+            sv.recipeSkill[tonumber(id)] = tonumber(skill)
         end
     end
     return sv
@@ -165,7 +173,7 @@ local function validAuthor(a)
     return type(a) == "string" and a ~= "" and not a:find("[~%.]") and S().memberFor(a) ~= nil
 end
 local function validValue(_, g, v)
-    if #v > 8000 then return false end
+    if #v > 12000 then return false end -- 64 parts of a B/D value
     if g == "O" then return true end
     return Orders.decodeList(v) ~= nil
 end
@@ -186,7 +194,7 @@ local svCache = {}
 -- change the result must copy it first (setActive/setFee do).
 function Orders.services(a)
     local rec = a and led:get(a, "O")
-    if not rec then return { active = {}, fees = {}, recipeFees = {} } end
+    if not rec then return { active = {}, fees = {}, recipeFees = {}, recipeSkill = {} } end
     local c = svCache[a]
     if c and c.h == rec.h then return c.sv end
     local sv = Orders.decodeServices(rec.v)
@@ -271,9 +279,11 @@ function Orders.setFee(skill, fee)
     sv.fees[skill] = fee
     return led:put("O", Orders.encodeServices(sv))
 end
-function Orders.setRecipeFee(recipe, fee)
+function Orders.setRecipeFee(recipe, fee, skill)
     local sv = myServices()
     sv.recipeFees[recipe] = fee
+    sv.recipeSkill = sv.recipeSkill or {}
+    sv.recipeSkill[recipe] = fee ~= nil and (skill or sv.recipeSkill[recipe]) or nil
     return led:put("O", Orders.encodeServices(sv))
 end
 
@@ -439,9 +449,11 @@ local function findIn(list, id)
 end
 
 local seq = 0
+-- Contract (savedvariables §crafting): only [0-9a-z.], at most 64 characters.
+-- The customer's part is a hash of their author id; time + sequence make it unique.
 function Orders.newId()
     seq = (seq + 1) % 36
-    return "g" .. S().selfAuthor() .. "." .. b36(now()) .. b36(seq)
+    return "g" .. S().hash(S().selfAuthor()) .. "." .. b36(S().serverNow()) .. b36(seq)
 end
 
 -- R-5.2: o = { recipe, item, skill, qty, crafter (author or "*"), mats = { [itemID] = n },
@@ -747,6 +759,142 @@ function Orders.markSeen()
             if row.attention and not row.attention.decide then seen[row.attention.key] = true end
         end
     end
+end
+
+---------------------------------------------------------------------------
+-- Upload (savedvariables §crafting, upload-api v1.4 §3.10): the halves one
+-- author wrote. character.self gets the uploader's own, member.share the
+-- subject's. No names, no free text (no note, no ext from the game).
+---------------------------------------------------------------------------
+
+Orders.UPLOAD_ORDERS = 100
+Orders.UPLOAD_SKILLS = 12
+Orders.UPLOAD_RECIPES = 500
+local CST = { o = "open", p = "open", r = "returned", d = "deal", x = "cancel" }
+local JST = { a = "accept", n = "decline", b = "drop", d = "delivered", m = "delivered", c = "delivered" }
+local HOW = { trade = true, mail = true, manual = true }
+
+local function validId(id) return type(id) == "string" and #id <= 64 and id:match("^[0-9a-z.]+$") ~= nil end
+Orders.validUploadId = validId
+local function guidOf(a) return a and S().guidOf(a) or nil end
+local function num(n) return type(n) == "number" and n >= 0 and math.floor(n) or nil end
+
+function Orders.wHalf(e, a, t)
+    local h = {
+        recordedAt = t, src = e.src or "g", ver = e.ver or 1, created = num(e.cr),
+        customer = guidOf(a), crafter = (e.cf == nil or e.cf == "*") and "*" or guidOf(e.cf),
+        lock = e.lk and guidOf(e.lk) or nil, recipe = num(e.rc), item = num(e.it),
+        qty = math.max(1, num(e.q) or 1), fee = num(e.fe) or 0, feeQuoted = num(e.fq), quote = num(e.qt),
+        cst = CST[e.st or "o"] or "open", got = num(e.gt) or 0,
+    }
+    for id, n in pairs(Orders.decodeMats(e.m)) do
+        h.mats = h.mats or {}
+        h.mats[tostring(id)] = n
+    end
+    if e.st == "d" then
+        h.close, h.closedBy, h.closedAt = "deal", "customer", num(e.sa)
+        h.closeHow = HOW[e.ch] and e.ch or "manual"
+    elseif e.st == "x" then
+        h.close, h.closedBy, h.closeHow, h.closedAt = "cancel", "customer", "manual", num(e.sa)
+    end
+    return h
+end
+
+function Orders.jHalf(e, t, view)
+    local h = { recordedAt = t, jst = JST[e.st or "a"] or "accept", gave = num(e.gv) or 0 }
+    local directed = view ~= nil and not view.guild
+    if e.st == "c" then
+        h.close, h.closedBy, h.closeHow, h.closedAt = "deal", "crafter", "timeout", num(e.sa)
+    elseif directed and (e.st == "n" or e.st == "b") then
+        h.close, h.closedBy, h.closeHow, h.closedAt = "cancel", "crafter", "manual", num(e.sa)
+    end
+    return h
+end
+
+-- crafting = { services?, orders? } for author a, or nil when there is nothing.
+function Orders.craftingFor(a)
+    if not a then return nil end
+    local out = {}
+    local o = led:get(a, "O")
+    if o then
+        local sv = Orders.decodeServices(o.v)
+        local value, skills = {}, 0
+        local function slot(skill)
+            local k = tostring(skill)
+            if not value[k] then
+                if skills >= Orders.UPLOAD_SKILLS then return nil end
+                skills = skills + 1
+                value[k] = { active = sv.active[skill] == true }
+            end
+            return value[k]
+        end
+        local list, seen = {}, {}
+        for skill in pairs(sv.active) do if not seen[skill] then seen[skill] = true; list[#list + 1] = skill end end
+        for skill in pairs(sv.fees) do if not seen[skill] then seen[skill] = true; list[#list + 1] = skill end end
+        table.sort(list)
+        for _, skill in ipairs(list) do
+            local v = slot(skill)
+            if v and sv.fees[skill] ~= nil then v.fee = sv.fees[skill] end
+        end
+        local ids = {}
+        for id in pairs(sv.recipeFees) do ids[#ids + 1] = id end
+        table.sort(ids)
+        local perSkill = {}
+        for _, id in ipairs(ids) do
+            local skill = sv.recipeSkill[id] or (ns.Recipes and ns.Recipes.skillOfRecipe(id))
+            local v = skill and slot(skill)
+            if v and (perSkill[skill] or 0) < Orders.UPLOAD_RECIPES then
+                v.recipes = v.recipes or {}
+                v.recipes[tostring(id)] = sv.recipeFees[id]
+                perSkill[skill] = (perSkill[skill] or 0) + 1
+            end
+        end
+        if next(value) then out.services = { recordedAt = o.t, value = value } end
+    end
+    local orders, count, entries = {}, 0, {}
+    local wrec, jrec = led:get(a, "W"), led:get(a, "J")
+    for _, e in ipairs(wrec and Orders.decodeList(wrec.v) or {}) do
+        if validId(e.id) then entries[#entries + 1] = { id = e.id, w = e, closed = e.st == "d" or e.st == "x", at = e.sa or 0 } end
+    end
+    local views = Orders.all()
+    for _, e in ipairs(jrec and Orders.decodeList(jrec.v) or {}) do
+        if validId(e.id) then
+            local v = views[e.id]
+            entries[#entries + 1] = { id = e.id, j = e, view = v,
+                closed = v ~= nil and (v.state == "deal" or v.state == "cancel"), at = e.sa or 0 }
+        end
+    end
+    -- Over the cap (100 per author): the oldest closed ones go first.
+    table.sort(entries, function(x, y)
+        if x.closed ~= y.closed then return not x.closed end
+        if x.at ~= y.at then return x.at > y.at end
+        return x.id < y.id
+    end)
+    for _, it in ipairs(entries) do
+        local slotted = orders[it.id]
+        if not slotted and count < Orders.UPLOAD_ORDERS then
+            slotted = {}
+            orders[it.id] = slotted
+            count = count + 1
+        end
+        if slotted then
+            if it.w then slotted.w = Orders.wHalf(it.w, a, wrec.t) end
+            if it.j then slotted.j = Orders.jHalf(it.j, jrec.t, it.view) end
+        end
+    end
+    if count > 0 then out.orders = orders end
+    if not out.services and not out.orders then return nil end
+    return out
+end
+
+-- { cO = { t, h }, cW = ..., cJ = ... } of author a: member.share change detection.
+function Orders.uploadState(a)
+    local out = {}
+    for _, g in ipairs({ "O", "W", "J" }) do
+        local r = a and led:get(a, g)
+        if r then out["c" .. g] = { t = r.t, h = r.h } end
+    end
+    return out
 end
 
 ---------------------------------------------------------------------------
