@@ -149,6 +149,7 @@ local SECTIONS = {
     { title = "價格（拍賣場、商人、公會分享）", text = Diag.pricesText },
     { title = "冒險（冒險單與職工單）", text = function() return Diag.adventureText() end },
     { title = "公會名冊", text = Diag.rosterText },
+    { title = "公會管理（GF-001-Q）", text = function() return ns.GuildAdmin and ns.GuildAdmin.diagText() or "" end },
     { title = "版本", text = Diag.versionText },
 }
 
@@ -173,7 +174,7 @@ end
 local function create()
     if window then return window end
     -- GF-001-D20: opaque and above the toolkit window (was see-through).
-    local f = ns.popupWindow(Diag.WINDOW_NAME, 640, 620)
+    local f = ns.popupWindow(Diag.WINDOW_NAME, 640, 700)
     f:SetPoint("CENTER", 0, 20)
     f:SetMovable(true)
     f:EnableMouse(true)

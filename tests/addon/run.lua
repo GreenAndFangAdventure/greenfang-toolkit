@@ -131,7 +131,7 @@ test("fresh install creates schema v2 defaults", function()
     local db = GreenFangToolkitDB
     eq(db.schema, "gf.toolkit", "schema")
     eq(db.schemaVersion, 2, "schemaVersion")
-    eq(db.addonVersion, "0.12.4", "addonVersion")
+    eq(db.addonVersion, "0.12.5", "addonVersion")
     eq(db.sync.enabled, true, "sync.enabled default")
     eq(db.sync.noticeShown, false, "noticeShown before login")
     eq(#db.sync.outbox, 0, "outbox empty")
@@ -157,7 +157,7 @@ test("TOC declares the agreed names and loads every file", function()
     ok(toc:find("## Interface: 16001", 1, true), "Interface")
     ok(toc:find("## Title: 綠皮冒險工具箱", 1, true), "Title")
     ok(toc:find("## Author: 綠皮與獠牙冒險事務所", 1, true), "Author")
-    ok(toc:find("## Version: 0.12.4", 1, true), "Version")
+    ok(toc:find("## Version: 0.12.5", 1, true), "Version")
     ok(toc:find("## SavedVariables: GreenFangToolkitDB\r?\n"), "SavedVariables")
     local listed = {}
     for line in toc:gmatch("[^\r\n]+") do
@@ -429,7 +429,7 @@ test("unknown fields in an existing v2 table are preserved", function()
         sync = { enabled = false, noticeShown = true, outbox = {} },
     } })
     eq(GreenFangToolkitDB.futureModule.keep, true, "unknown field kept")
-    eq(GreenFangToolkitDB.addonVersion, "0.12.4", "addonVersion updated")
+    eq(GreenFangToolkitDB.addonVersion, "0.12.5", "addonVersion updated")
     eq(GreenFangToolkitDB.sync.enabled, true, "old off ignored (D-015)")
 end)
 
@@ -479,7 +479,7 @@ test("TSV/JSON export keep the v0.3.1 format", function()
     local s = ns.Roster.current()
     local json = ns.Export.jsonParts(s)
     eq(#json, 1, "one part")
-    ok(json[1]:find('^{"schema":"gfguildroster.report","schemaVersion":1,"addonVersion":"0.12.4"'), "json header")
+    ok(json[1]:find('^{"schema":"gfguildroster.report","schemaVersion":1,"addonVersion":"0.12.5"'), "json header")
     ok(json[1]:find('"part":1,"partCount":1', 1, true), "parts")
     ok(json[1]:find('"onlineAtCapture":true', 1, true), "member online in manual export")
     ok(not json[1]:find('"guid":', 1, true), "no guid in v1 export")
@@ -2632,12 +2632,18 @@ test("D10 roster: tooltip shows recipe counts; clicking a member opens their rec
     ok(not has(lines, "小時前"), "no age (D19)")
     ok(not has(lines, "點一下看他的配方"), "no click hint (D19)")
     row._scripts.OnMouseUp(row, "LeftButton")
+    -- GF-001-Q: a left click selects the member; 配方 is in the bar under the list.
+    local recipesButton
+    for _, b in ipairs(ns.UI.actionBar.buttons) do if b:IsShown() and b.action == "recipes" then recipesButton = b end end
+    ok(recipesButton, "配方 in the member bar")
+    wow.click(recipesButton)
     ok(ns.Framework.isModuleShown("recipes"), "recipe page opened")
     eq(ns.Recipes.state.guid, "Player-0000-0000000B", "filtered to that member")
     ns.Framework.open("roster")
     local other = rowFor(ns, "測試丁-測試伺服器")
     other._scripts.OnMouseUp(other, "LeftButton")
-    ok(ns.Framework.isModuleShown("roster"), "no recipes: nothing happens")
+    ok(ns.Framework.isModuleShown("roster"), "no recipes: stays on the roster")
+    for _, b in ipairs(ns.UI.actionBar.buttons) do ok(not (b:IsShown() and b.action == "recipes"), "no 配方 button") end
 end)
 
 test("D10 character page: recipe line per craft profession", function()
@@ -2662,7 +2668,7 @@ test("D10 diag window: sections, sharing stats, export moved here, /gftk sync st
     ok(has(all, "GF Sync 只是補充來源"), "site note")
     ok(has(all, "記錄 ") and has(all, "這次登入：送出"), "sharing statistics")
     ok(has(all, "掃描時間："), "roster scan")
-    ok(has(all, "工具箱 0.12.4"), "version")
+    ok(has(all, "工具箱 0.12.5"), "version")
     wow.click(ns.Diag.exportJSONButton)
     ok(_G.GreenFangToolkit_ExportWindow and _G.GreenFangToolkit_ExportWindow:IsShown(), "export from the window")
     GreenFangToolkitDB.settings.minimapAngle = 10
@@ -4598,6 +4604,9 @@ assert(loadfile(ROOT .. "/tests/addon/usability_tests.lua"))()({ test = test, eq
     rMsg = rMsg, leatherWindow = leatherWindow, PEER = PEER, A_PEER = A_PEER, A_THIRD = A_THIRD })
 -- GF-002-F: no overlaps, click outside, past midnight, the year, my worker ticket, sizes (tests/addon/layout_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/layout_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-001-Q: guild management on the roster (tests/addon/guildadmin_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/guildadmin_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------

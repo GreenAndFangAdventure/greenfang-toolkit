@@ -743,6 +743,40 @@ owner 實測 0.12.2 回報：字太小、有些名稱被擠成兩行（「目的
 - □ 打開任何下拉清單、右鍵選單、時間選單，然後點旁邊空白的地方：選單關掉，視窗還在
 - □ 冒險單沒選目的地就按「開單」：左下角紅字「請先選目的地」
 
+## 3ab. 公會管理：實機查證（GF-001-Q，0.12.5 起）
+
+工具箱只呼叫遊戲自己的公會函式，而且只在按下按鈕時呼叫。16001 沒有函式清單，下面每一項都要在遊戲裡確認。先打開「同步與診斷」，看「公會管理」這一段：「函式 N / M 可用」後面的括號列出遊戲裡沒有的函式，最後寫出這個角色可以做哪些事。
+
+### 函式存不存在（任何角色都可以查）
+
+每一行輸入後，把印出來的結果貼回來：`function` 表示有，`nil` 表示沒有。
+
+- □ `/run for _,n in ipairs({"GuildInvite","GuildPromote","GuildDemote","GuildUninvite","GuildRosterSetPublicNote","GuildRosterSetOfficerNote","GuildSetMOTD","GetGuildRosterMOTD","GetGuildInfoText","SetGuildInfoText"}) do print(n, type(_G[n])) end`
+- □ `/run for _,n in ipairs({"CanGuildInvite","CanGuildPromote","CanGuildDemote","CanGuildRemove","CanEditPublicNote","CanEditOfficerNote","CanViewOfficerNote","CanEditMOTD","CanEditGuildInfo","GuildControlGetNumRanks","StaticPopup_Show","ToggleGuildFrame","ToggleFriendsFrame"}) do print(n, type(_G[n])) end`
+- □ `/run print(GetGuildInfo("player"))`：第三個值是自己的階級編號（0 是會長，數字越大階級越低）
+
+### 一般會員（沒有管理權限）
+
+- □ 名冊上點一列：下面一條出現成員名字和「密語、組隊、查看」（有分享配方的人還有「配方」）；右鍵選單也是這幾個
+- □ 上方沒有「邀請入會」；有「公會資訊」（只能看）和「開啟遊戲公會介面」
+- □ 看得到「公會註記」欄，看不到「幹部註記」欄
+
+### 幹部帳號（owner 試一次）
+
+- □ 上方有「邀請入會」；按了跳出遊戲的輸入框（可以按取消，不用真的邀請）
+- □ 點一個比自己低階的成員：多了「升階、降階、公會註記、幹部註記、踢出公會」（看權限，沒有的不出現）；點會長或比自己高的人：沒有升降和踢出；點自己：沒有組隊和踢出
+- □ 按「踢出公會」：跳出遊戲的確認框，寫「把 名字 踢出公會？」，**按取消**，確認對方還在公會
+- □ 按「降階」：跳出遊戲的確認框，寫「把 名字 降一階？」，**按取消**
+- □ 按「公會註記」：輸入框裡是原本的註記；可以改一個測試用的角色試，改完名冊上馬上看到
+- □ 看得到「幹部註記」欄（有權限的話）
+- □ 「公會資訊」：看得到今日訊息和公會資訊；有權限時各有「編輯」
+- □ 「開啟遊戲公會介面」：打開遊戲原本的公會視窗（階級權限等設定在那裡做）
+- □ 如果按了按鈕沒有反應，或聊天框出現「介面動作被阻擋」：截圖貼回來（表示那個函式在 16001 是受保護的）
+
+### 隱私
+
+- □ 幹部註記只在遊戲裡顯示。登出後在 `WTF\Account\<帳號>\SavedVariables\GreenFangToolkit.lua` 裡搜尋一段幹部註記的文字，應該找不到
+
 ## 3b. 睡袋路線（GF-008-A，0.6.0 起；部落角色）
 
 - □ 左側清單有「睡袋路線」；聯盟角色看不到這一項
