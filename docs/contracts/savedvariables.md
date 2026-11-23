@@ -6,6 +6,7 @@
   - **2026-11-20 claude-addon：D-015**。工具箱沒有開關了：`sync.enabled` 固定為 `true`、`sync.shareLocation` 不再使用；`withdrawn` 只剩 `recipes`（放棄專業）
   - **2026-11-20 claude-addon：GF-001-D14（AddOn 0.10.0，claude-pm 指派）**。第 4 段上線：開始寫 `member.share`、`recipe.names`、`capturedAtServer`、`character.self.recipes`，不再寫 `member.report`。outbox 上限改成依名冊人數（§2f）。`member.share` 的寫入時機和配方 ID 的分批（§member.share）。GFTKS 的目錄分桶（§遊戲內互傳）。格式（欄位、形狀）沒有改
   - **2026-11-23 claude-pm：GF-006-B（AddOn 0.11.0，製作與訂單）**。`character.self` 和 `member.share` 的 payload 多一個選填欄位 `crafting`（§crafting）；GF Sync 的 `member.share` 白名單要加上它（§3 第 8 點）。其餘格式不變。依據：規格 `GF-006_crafting-orders_v1.0.md`（內部 repo）R-4.x～R-9.3
+  - **2026-11-23 claude-pm：GF-002-B（AddOn 0.12.0，冒險單與職工單）**。`character.self` 和 `member.share` 的 payload 多一個選填欄位 `adventure`（§adventure）；GF Sync 的白名單要加上它。`crafting` 補一句：結案結果每次從所有半份重新計算。依據：規格 `GF-002_adventure-tickets_v1.0.md`（內部 repo）
 - 依據：D-003（兩者解耦，只透過 SavedVariables 交換資料）、D-008、D-009、D-011、D-014、D-015
 - 負責方：AddOn 負責寫，GF Sync 只讀。要改這份契約，必須先在 `collab/QUESTIONS.md` 提出，並同時通知 AddOn 和 GF Sync 兩邊的負責人
 
@@ -244,7 +245,7 @@ crafting = {
 - **決勝規則**（遊戲和網站要算出同樣的結果）：
   - 公會單的接單者：有 `w.lock` 時以它為準；沒有時，在 `jst` 是 `"accept"` 或 `"delivered"`、有 `acceptedAt`、而且 `statusAt` 之後沒有退單的工匠裡，取 `acceptedAt` 最早的；**時間相同時取 GUID 字串（逐位元組比較）較小的**。
   - `lock` 的工匠退單（`jst = "drop"` 且 `statusAt ≥ lockedAt`）：這張公會單回到「等接單」，不會自動轉給別人。
-  - 兩份結案（`w` 和 `j` 都有 `close`）：`closedAt` 早的為準；**相同時以客人的（`w`）為準**。結案後不能再改。
+  - 兩份結案（`w` 和 `j` 都有 `close`）：`closedAt` 早的為準；**相同時以客人的（`w`）為準**。「結案後不能再改」是指**不能重開**：結案之後收到非結案的資料，不能把單改回進行中。比較晚收到、但 `closedAt` 比較早的有效結案，要改正結果，所以網站每次都從所有的半份重新算。
   - 工匠 14 天結案（`closeHow = "timeout"`）只在 `j.closedAt − j.deliveredAt ≥ 14 天`，而且 `w.returnedAt` 不晚於 `j.deliveredAt` 時成立；否則網站當作沒有結案。
   - 同一半、同一位作者的兩份 `recordedAt` 相同但內容不同（同一秒寫兩次，很少見）：網站把兩份轉成鍵排序過的 JSON 字串，取**逐位元組比較較大**的那份。AddOn 不會依賴這條規則。
 - **誰可以寫哪一半**：`w` 只能由 `w.customer` 本人寫，`j` 只能由這張單的工匠（`crafter`，公會單是 `lock` 或接單的人）本人寫。`character.self` 的 `w`／`j` 必須屬於 `uploader`；`member.share` 的必須屬於 `subject`。不屬於的那一半，網站略過（只略過那一半，不讓整筆失敗）。
@@ -253,6 +254,64 @@ crafting = {
 - **不合格的資料**：只丟掉不合格的那一項。訂單的 `w` 或 `j` 只有一半不合格時，**只丟那一半**，另一半照留；一張單兩半都不合格才整張丟掉。
 - **什麼時候寫**：和所在的 kind 一樣，只在登出時寫。`crafting` 內容沒變時不因為它重寫 `member.share`（沿用 §member.share「什麼時候重寫」）。
 - `character.self` 原本的欄位不受影響。網站不認得 `crafting` 時忽略即可。
+
+### 欄位 `adventure`（0.12.0 起，GF-002-B；`character.self` 和 `member.share` 共用）
+
+冒險單（團長開的團）、職工單（玩家登記想去哪裡）和職工的動作。每個人只寫自己的那一份：團長寫 `tickets`（含自己的決定），職工寫 `worker` 和 `actions`。`character.self` 放上傳者自己寫的；`member.share` 放 subject 寫的（轉傳來的）。網站依冒險單 `id` 合併團長那份和各職工的 `actions`。
+
+```lua
+adventure = {
+  tickets = {                              -- 團長自己的冒險單；以 id 為鍵；沒有就不寫
+    recordedAt = 1763373590,
+    value = {
+      ["a3k9.mabc12"] = {
+        src = "g", ver = 1, created = 1763370000,
+        dungeon = "sfk",                     -- 地城代碼（下表）；沒有地城就不寫
+        quests = { 1013, 1014 },             -- quest ID，最多 5 個；沒有就不寫
+        time = { mode = "now" },             -- 或 { mode = "today" | "future", from = 1763380800, to = 1763388000 }
+        slots = { tank = 1, healer = 1, dps = 3 },   -- 地城；任務單改成 size = 4
+        tags = { "quest", "repeat" },        -- quest 解任務、repeat 連刷、slow 慢慢打、fast 速刷、voice 語音
+        note = "最多 40 字的一行文字",          -- 選填，見下面的規則
+        admit = "direct" | "consent",
+        status = "open" | "departed" | "done" | "cancel",
+        statusAt = 1763373590,
+        decisions = {                         -- 團長對每位職工的決定：鍵是職工 GUID
+          ["Player-0000-0000000B"] = { d = "approve" | "kick" | "invite", at = 1763372000 },
+        },
+      },
+    },
+  },
+  worker = {                                -- 我的職工單（一個角色一張）；沒有就不寫
+    recordedAt = 1763373590,
+    value = { dungeons = { "sfk", "rfk" }, quests = { 1013 }, allQuests = false,
+              main = "healer", alt = "dps",
+              times = { { mode = "now" } },   -- 最多 3 段，形狀同 tickets 的 time
+              expires = 1763456390 },
+  },
+  actions = {                               -- 我對冒險單的動作：鍵是冒險單 id
+    recordedAt = 1763373590,
+    value = {
+      ["a3k9.mabc12"] = { a = "apply" | "withdraw" | "accept" | "refuse",
+                          at = 1763372000, firstAt = 1763371000, role = "healer" },
+    },
+  },
+}
+```
+
+- **id**：冒險單 `id` 以 `a` 開頭（遊戲），網站之後用 `x`、Discord 用 `y` 開頭；只有 `[0-9a-z.]`、64 字元以內。`src` 是 `"g"`（之後才有 `"w"`、`"d"`）。
+- **地城代碼**：`rfc` 怒焰裂谷、`wc` 哀嚎洞穴、`dm` 死亡礦坑、`sfk` 影牙城堡、`bfd` 黑暗深淵、`stk` 監獄、`gnr` 諾姆瑞根、`rfk` 剃刀沼澤、`smg`／`sml`／`sma`／`smc` 血色修道院（墓地／圖書館／武器庫／大教堂）、`rfd` 剃刀高地、`ul` 奧達曼、`zf` 祖爾法拉克、`mar` 瑪拉頓、`st` 阿塔哈卡神廟、`brd` 黑石深淵、`lbrs` 黑石塔下層、`ubrs` 黑石塔上層、`dme`／`dmw`／`dmn` 厄運之槌（東／西／北）、`strat` 斯坦索姆、`scholo` 通靈學院。網站不認得的代碼照樣存，顯示代碼本身。
+- **時間**：全部是伺服器時間的 Unix 秒。`time.mode = "now"` 沒有 `from`、`to`。
+- **職責**：`"tank"`、`"healer"`、`"dps"`。
+- **狀態**：`"full"`（已滿）不寫，由網站依錄取人數算出。`statusAt` 是 `status` 最後一次改變的時間。
+- **`note`**（規格 R-4.4、R-10.2）：**這是唯一的自由文字欄位**。最多 40 個字元（UTF-8 字元，不是位元組）；AddOn 寫入前、GF Sync 上傳前都拿掉控制字元和換行，超過就截斷。網站一律當純文字顯示（轉義，不能當成 HTML、Markdown 或連結），只給公會成員看。
+- **`decisions`**：`approve`（「團長同意」的單同意錄取）、`kick`（踢掉）、`invite`（邀請）。同一位職工只留最後一個決定。
+- **`actions`**：`apply`（申請並確認時間）、`withdraw`（撤回）、`accept`／`refuse`（回應邀請）。`firstAt` 是這次申請一開始的時間（候補排序要用）；`role` 是申請時的職責。
+- **合併與狀態**：網站從團長的 `tickets` 和所有職工的 `actions`、`decisions` 重新算出錄取、候補、遞補（規格 R-4.5、R-6.3～R-6.6）：同一張冒險單的所有事件依（時間、GUID 逐位元組、事件種類）排序後依序套用，結果和收到的順序無關。
+- **歸屬**：`tickets` 的作者（團長）就是那一筆的 uploader 或 subject；`worker`、`actions` 也一樣。不屬於的略過。
+- **不放的東西**：名字、帳號、信箱；`note` 以外的任何文字。
+- **上限**：每位作者 20 張冒險單、1 張職工單、50 個動作；每張冒險單 40 個決定。超過時先丟結束最久的。
+- **上傳的範圍**：進行中的、或結束 1 天內的。只在登出時寫。
+- 網站不認得 `adventure` 時忽略即可，整筆照常接受。
 
 ### 2f. outbox 上限
 
@@ -308,6 +367,7 @@ crafting = {
    - `recipes[<skillLineID>]`：只留 `recordedAt`、`via`、`hash`、`ids`（數字陣列）。
    - `withdrawn`：只留 `recipes`（`<skillLineID>` → 數字）。其他鍵（例如舊草稿的 `all`、`location`）丟掉。
    - `via` 只接受 `"author"`、`"relay"`，其他值就拿掉這個鍵。
+   - **`adventure`（GF-002-B）**：只留 §adventure 列出的鍵和型別。字串只接受 GUID、`[0-9a-z.]` 的 id、地城代碼（小寫英數字，16 字元以內）和列出的列舉值；`note` 是唯一的文字，拿掉控制字元和換行、最多 40 個字元。數字是非負整數。不合格的那張冒險單、那個動作、那個決定只丟那一項。
    - **`crafting`（GF-006-B）**：只留 §crafting 列出的鍵和型別；字串只接受 GUID、`"*"` 和列出的列舉值，數字必須是非負整數；不合格的訂單或專業只丟掉那一項。`crafting` 裡不能有任何其他字串（名字、備註等）。
    - 其他鍵一律丟掉。
 9. **`capturedAtServer`**：不是數字就拿掉這個欄位，不要讓整筆失敗。
