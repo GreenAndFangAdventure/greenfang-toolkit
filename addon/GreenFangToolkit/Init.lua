@@ -155,7 +155,8 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
             end
             ns.after(MAINTAIN_EVERY, maintain)
         end
-        ns.after(ORDERS_DELAY + 5, maintain)
+        -- Review 3-3: after the first catalog round, not before.
+        ns.after(ORDERS_DELAY + 30, maintain)
         collectSoon(5)
         selfSoon(5)
         ns.after(GUILD_WAIT + 1, function()
@@ -222,7 +223,7 @@ ns.orderEventFrame = orderEvents
 ns.missingEvents = {}
 for _, e in ipairs({ "TRADE_SHOW", "TRADE_CLOSED", "TRADE_ACCEPT_UPDATE", "TRADE_PLAYER_ITEM_CHANGED",
     "TRADE_TARGET_ITEM_CHANGED", "TRADE_REQUEST_CANCEL", "UI_INFO_MESSAGE", "UI_ERROR_MESSAGE",
-    "BAG_UPDATE_DELAYED", "MAIL_SEND_SUCCESS", "MAIL_FAILED", "MERCHANT_SHOW", "MERCHANT_UPDATE",
+    "BAG_UPDATE_DELAYED", "MAIL_SEND_SUCCESS", "MAIL_FAILED", "MAIL_INBOX_UPDATE", "MERCHANT_SHOW", "MERCHANT_UPDATE",
     "AUCTION_HOUSE_SHOW", "AUCTION_HOUSE_CLOSED", "REPLICATE_ITEM_LIST_UPDATE",
     "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED", "AUCTION_HOUSE_BROWSE_RESULTS_ADDED",
     "COMMODITY_SEARCH_RESULTS_UPDATED", "ITEM_SEARCH_RESULTS_UPDATED" }) do
@@ -242,6 +243,7 @@ orderEvents:SetScript("OnEvent", function(_, event, arg1, arg2)
     elseif event == "BAG_UPDATE_DELAYED" then Delivery.onBagsSettled()
     elseif event == "MAIL_SEND_SUCCESS" then Delivery.onMailSent()
     elseif event == "MAIL_FAILED" then Delivery.onMailFailed()
+    elseif event == "MAIL_INBOX_UPDATE" then Delivery.onInboxUpdate()
     elseif event == "MERCHANT_SHOW" or event == "MERCHANT_UPDATE" then Prices.readMerchant()
     elseif event == "AUCTION_HOUSE_SHOW" then Prices.onAuctionShow()
     elseif event == "AUCTION_HOUSE_CLOSED" then Prices.onAuctionClosed()

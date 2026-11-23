@@ -120,6 +120,16 @@ local function countOf(id)
 end
 Delivery.countOf = countOf
 
+-- Review 2-2 / R-7.5: "可用" only after this client really produced the
+-- evidence once (a trade-complete message matched, a mail sent with items, a
+-- take judged by the bags). Until then: "未確認"; missing functions: "改成手動".
+function Delivery.verified() local o = O().local_(); if type(o.verified) ~= "table" then o.verified = {} end; return o.verified end
+function Delivery.markVerified(kind) Delivery.verified()[kind] = ns.now() end
+function Delivery.status(kind)
+    if not Delivery.features()[kind] then return "manual" end
+    return Delivery.verified()[kind] and "ok" or "unconfirmed"
+end
+
 function Delivery.features()
     local f = {}
     f.trade = fn(GetTradePlayerItemLink) and fn(GetTradeTargetItemLink) and fn(GetTradePlayerItemInfo)
@@ -216,6 +226,16 @@ function Delivery.snapshot()
         theirs = readSlots(GetTradeTargetItemLink, GetTradeTargetItemInfo),
         money = fn(GetTargetTradeMoney) and ns.num((ns.call(GetTargetTradeMoney))) or 0,
     }
+    -- Review 2-2: do not depend on TRADE_ACCEPT_UPDATE(1,1) arriving; the bags
+    -- before the trade are read every time the contents change.
+    local before = {}
+    for _, s in ipairs(trade.snap.mine) do before[s.id] = countOf(s.id) end
+    for _, s in ipairs(trade.snap.theirs) do before[s.id] = countOf(s.id) end
+    if #trade.snap.mine + #trade.snap.theirs > 0 then
+        trade.final = { mine = trade.snap.mine, theirs = trade.snap.theirs, before = before }
+    else
+        trade.final = nil
+    end
     if ns.OrdersUI and ns.OrdersUI.tradeChanged then ns.OrdersUI.tradeChanged() end
 end
 
@@ -234,11 +254,7 @@ end
 function Delivery.onAccept(playerAccepted, targetAccepted)
     if not trade then return end
     Delivery.snapshot()
-    if ns.num(playerAccepted) == 1 and ns.num(targetAccepted) == 1 then
-        local before = {}
-        for _, s in ipairs(trade.snap.mine) do before[s.id] = countOf(s.id) end
-        for _, s in ipairs(trade.snap.theirs) do before[s.id] = countOf(s.id) end
-        trade.final = { mine = trade.snap.mine, theirs = trade.snap.theirs, before = before }
+    if trade.final and (ns.num(playerAccepted) == 1 or ns.num(targetAccepted) == 1) then
         -- Survives a disconnect or /reload (R-7.2): turned into reminders at login.
         O().local_().pendingTrade = { at = ns.now(), other = trade.other,
             mine = trade.snap.mine, theirs = trade.snap.theirs }
@@ -277,9 +293,13 @@ end
 Delivery.finish = finish
 
 local completeAt
-function Delivery.onInfoMessage(_, message)
+function Delivery.onInfoMessage(a1, a2)
     if not trade then return end
-    if type(ERR_TRADE_COMPLETE) == "string" and message == ERR_TRADE_COMPLETE then
+    -- Review 2-2 B: newer clients pass (messageType, message), older ones just the message.
+    local complete = type(ERR_TRADE_COMPLETE) == "string" and (a1 == ERR_TRADE_COMPLETE or a2 == ERR_TRADE_COMPLETE)
+    local cancelled = type(ERR_TRADE_CANCELLED) == "string" and (a1 == ERR_TRADE_CANCELLED or a2 == ERR_TRADE_CANCELLED)
+    if complete then
+        Delivery.markVerified("trade")
         completeAt = ns.now()
         trade.complete = true
         -- Wait for the bags (BAG_UPDATE_DELAYED or a few seconds).
@@ -287,7 +307,7 @@ function Delivery.onInfoMessage(_, message)
         ns.after(Delivery.BAG_WAIT, function()
             if trade and trade.complete then finish(true) end
         end)
-    elseif (type(ERR_TRADE_CANCELLED) == "string" and message == ERR_TRADE_CANCELLED) then
+    elseif cancelled then
         finish(false)
     end
 end
@@ -357,6 +377,7 @@ function Delivery.onMailSent()
     if not s then return end
     -- Only "sent" counts: the mail left (R-7.3). Not sure it arrives, so
     -- this is the crafter's half only; the customer's side checks on taking it.
+    Delivery.markVerified("mailSend")
     local touched = Delivery.apply(s.to, nil, s.items, "mail", true)
     Delivery.log("mail", touched > 0 and "sent" or "no-order", s.to)
 end
@@ -367,7 +388,13 @@ function Delivery.onMailFailed()
 end
 
 -- What a take is about to move: { sender, returned, items = { { id, n, before } } }.
-local taking
+-- Review 2-4: several takes within a few seconds are judged together (one
+-- list, the bags compared once per item against the count before the first).
+-- Review 2-5: the hook runs after the client's call; if the attachment is
+-- already gone, the copy read at MAIL_INBOX_UPDATE is used.
+local takings, lastTakeAt = {}, 0
+local inboxCache = {}
+
 local function attachment(index, attach)
     local _, itemID, _, count = ns.call(GetInboxItem, index, attach)
     local id = ns.num(itemID)
@@ -375,41 +402,87 @@ local function attachment(index, attach)
     return id, ns.num(count)
 end
 
-function Delivery.onTake(index, attach)
+local function readMail(index)
     local _, _, sender, _, _, cod, _, _, _, wasReturned = ns.call(GetInboxHeaderInfo, index)
-    local from = authorByName(sender)
     local items = {}
-    local first, last = attach or 1, attach or Delivery.RECEIVE_SLOTS
-    for j = first, last do
+    for j = 1, Delivery.RECEIVE_SLOTS do
         local id, n = attachment(index, j)
-        if id and n then items[#items + 1] = { id = id, n = n, before = countOf(id) } end
+        if id and n then items[j] = { id = id, n = n } end
     end
-    if #items == 0 or str(sender) == "" then
+    return { sender = str(sender), cod = ns.num(cod) or 0, returned = wasReturned == true or wasReturned == 1, items = items }
+end
+
+function Delivery.onInboxUpdate()
+    if not fn(GetInboxHeaderInfo) then return end
+    inboxCache = {}
+    local n = fn(GetInboxNumItems) and ns.num((ns.call(GetInboxNumItems))) or 50
+    for i = 1, math.min(n, 100) do
+        local m = readMail(i)
+        if m.sender == "" and not next(m.items) then if not fn(GetInboxNumItems) then break end
+        else inboxCache[i] = m end
+    end
+end
+
+local lastTakeKey
+function Delivery.onTake(index, attach)
+    -- The same take reported twice in the same instant (a second hook) counts once.
+    local key = tostring(index) .. ":" .. tostring(attach)
+    if key == lastTakeKey and ns.now() == lastTakeAt then return "duplicate" end
+    lastTakeKey = key
+    local live = readMail(index)
+    local cached = inboxCache[index]
+    local m = (live.sender ~= "" and next(live.items)) and live or cached
+    if not m or m.sender == "" then
         Delivery.log("mail", "not-loaded")
         return "not-loaded"
     end
-    taking = { sender = from, returned = wasReturned == true or wasReturned == 1, items = items,
-        cod = ns.num(cod) or 0, at = ns.now() }
-    ns.after(Delivery.BAG_WAIT, function() Delivery.onBagsSettledMail() end)
+    local items = {}
+    for j, it in pairs(m.items) do
+        if not attach or j == attach then items[#items + 1] = { id = it.id, n = it.n } end
+    end
+    if #items == 0 then Delivery.log("mail", "not-loaded"); return "not-loaded" end
+    if cached and attach then cached.items[attach] = nil elseif cached then cached.items = {} end
+    takings[#takings + 1] = { sender = authorByName(m.sender), returned = m.returned, items = items,
+        cod = m.cod, at = ns.now() }
+    -- The bag count before THIS take (the first take of an item keeps its own).
+    for _, it in ipairs(items) do it.before = countOf(it.id) end
+    lastTakeAt = ns.now()
+    ns.after(Delivery.BAG_WAIT, function()
+        if ns.now() - lastTakeAt >= Delivery.BAG_WAIT - 0.01 then Delivery.onBagsSettledMail() end
+    end)
     return "waiting"
 end
 
 function Delivery.onBagsSettledMail()
-    local t = taking
-    if not t then return end
-    taking = nil
+    local list = takings
+    takings = {}
+    if #list == 0 then return end
+    -- One bag check per item over every take in the window.
+    local byItem = {}
+    for _, t in ipairs(list) do
+        for _, it in ipairs(t.items) do
+            local b = byItem[it.id]
+            if not b then byItem[it.id] = { before = it.before, n = it.n } else b.n = b.n + it.n end
+        end
+    end
+    local okItem = {}
+    for id, b in pairs(byItem) do okItem[id] = b.before ~= nil and countOf(id) ~= nil and countOf(id) - b.before == b.n end
+    for _, t in ipairs(list) do Delivery.settleOne(t, okItem) end
+end
+
+function Delivery.settleOne(t, okItem)
     if not t.sender then Delivery.log("mail", "not-member"); return end
-    -- Several attachments of one item: judge their sum once.
     local merged, order = {}, {}
     for _, it in ipairs(t.items) do
         local m = merged[it.id]
-        if not m then m = { id = it.id, n = 0, before = it.before }; merged[it.id] = m; order[#order + 1] = m end
+        if not m then m = { id = it.id, n = 0 }; merged[it.id] = m; order[#order + 1] = m end
         m.n = m.n + it.n
     end
     local received, sureAll = {}, true
     for _, it in ipairs(order) do
         local code = Delivery.judgeMail({ sender = t.sender, returned = t.returned, id = it.id, n = it.n,
-            before = it.before, after = countOf(it.id) })
+            before = 0, after = okItem[it.id] and it.n or -1 })
+        if code == "ok" then Delivery.markVerified("mailTake") end
         if code == "returned" then
             -- A returned mail back at the crafter: take the count back (R-7.3).
             for _, v in ipairs(O().between(me(), t.sender)) do
@@ -447,4 +520,4 @@ function Delivery.install()
     if fn(AutoLootMailItem) then pcall(hooksecurefunc, "AutoLootMailItem", function(i) Delivery.onTake(i) end) end
 end
 
-function Delivery.resetSession() trade, sending, taking, completeAt = nil, nil, nil, nil end
+function Delivery.resetSession() trade, sending, completeAt = nil, nil, nil; takings, inboxCache, lastTakeAt = {}, {}, 0 end

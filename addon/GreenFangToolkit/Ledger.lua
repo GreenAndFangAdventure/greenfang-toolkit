@@ -32,7 +32,10 @@ Ledger.VERSION = "L1"
 Ledger.MAX_BYTES = 250
 Ledger.FUTURE = 600
 Ledger.EPOCH = 1700000000
+-- Review 1-1: a long value can take minutes at 0.5 messages a second, so the
+-- timeout runs from the LAST part received, not from the first.
 Ledger.PART_TIMEOUT = 60
+Ledger.TARGET_FRESH = 120 -- only whisper someone heard from this recently (as Share)
 Ledger.BUCKETS = 64
 Ledger.list = {}
 
@@ -94,6 +97,7 @@ end
 
 function L:resetSession()
     self.queue, self.partials, self.pending, self.digests = {}, {}, {}, {}
+    self.lastHeard = {}
     self.allowance, self.lastTick, self.draining = self.cfg.burst or 4, nil, false
     self.sentThisSession, self.qid, self.version, self.totalsCache = 0, nil, 0, nil
     self.coalesced = {}
@@ -180,7 +184,15 @@ function L:offer(a, g, t, h, v)
     if not s then return "invalid" end
     local rec = s.rec[a] and s.rec[a][g]
     if rec then
-        if t < rec.t then return "older" end
+        if t < rec.t then
+            -- Review 3-3: an older copy of OUR record that differs came from another
+            -- computer of ours: let the owner merge it (never silently lost).
+            if cfg.mergeSelf and h ~= rec.h and type(v) == "string" and hash(v) == h
+                and cfg.selfAuthor and a == cfg.selfAuthor() then
+                ns.after(0, function() pcall(cfg.mergeSelf, g, v) end)
+            end
+            return "older"
+        end
         if t == rec.t and h == rec.h then return "same" end
         if t == rec.t and h < rec.h then return "older" end -- same time: larger hash wins (deterministic)
         if h == rec.h then rec.t = t; changed(self, a, g); return "confirm" end
@@ -300,7 +312,10 @@ function L:drain()
     if self.lastTick then self.allowance = math.min(burst, self.allowance + (now - self.lastTick) * refill) end
     self.lastTick = now
     for i = #self.queue, 1, -1 do
-        if now - self.queue[i].at > (cfg.stale or 600) then
+        local item = self.queue[i]
+        -- Review 1-3: whisper only someone heard from just now (as Share does).
+        local unwanted = item.to and now - (self.lastHeard[ns.keyName(item.to)] or 0) > Ledger.TARGET_FRESH
+        if now - item.at > (cfg.stale or 600) or unwanted then
             table.remove(self.queue, i); self.stats.dropped = self.stats.dropped + 1
         end
     end
@@ -316,7 +331,9 @@ function L:drain()
             else
                 r = ns.call(C_ChatInfo.SendAddonMessage, cfg.prefix, item.msg, "GUILD")
             end
-            if r == 3 or r == 8 then
+            -- Review 1-4: same throttle codes as Share (false, 3, 8, the Enum values).
+            local throttled = Share.isThrottled and Share.isThrottled(r) or (r == 3 or r == 8)
+            if throttled then
                 table.insert(self.queue, 1, item)
                 self.allowance = 0
                 self.stats.throttled = self.stats.throttled + 1
@@ -325,6 +342,8 @@ function L:drain()
             self.allowance = self.allowance - 1
             self.stats.sent = self.stats.sent + 1
             self.sentThisSession = self.sentThisSession + 1
+            -- Review 1-3: Share hides "No player named X" for names we just whispered.
+            if item.to and Share.noteWhisper then Share.noteWhisper(item.to) end
         end
     end
     if #self.queue > 0 then self:schedule(1 / math.max(refill, 0.05)) end
@@ -444,6 +463,11 @@ function L:onMessage(prefix, text, channel, sender)
     local senderA = senderM and S().authorOf(senderM.guid)
     if not senderA then return "not-in-roster" end
     if senderA == S().selfAuthor() then return "self" end
+    self.lastHeard[ns.keyName(sender)] = ns.now()
+    -- Forget long values that stopped arriving (review 1-9).
+    for key, p in pairs(self.partials) do
+        if ns.now() - p.at > Ledger.PART_TIMEOUT then self.partials[key] = nil end
+    end
     local fields = {}
     for f in (str(text) .. "~"):gmatch("([^~]*)~") do fields[#fields + 1] = f end
     if fields[1] ~= Ledger.VERSION then return "version" end
@@ -541,6 +565,7 @@ function L:onMessage(prefix, text, channel, sender)
         local p = self.partials[key]
         if not p or not part or part < 1 or part > p.n then return "malformed" end
         if ns.now() - p.at > Ledger.PART_TIMEOUT then self.partials[key] = nil; return "timeout" end
+        p.at = ns.now() -- review 1-1: from the last part received
         p.parts[part] = table.concat(fields, "~", 5)
         for i = 1, p.n do if not p.parts[i] then return "partial" end end
         self.partials[key] = nil
@@ -550,6 +575,18 @@ function L:onMessage(prefix, text, channel, sender)
         return cfg.onCustom(kind, fields, senderM, channel, sender) or "custom"
     end
     return "unknown-type"
+end
+
+-- Review 1-3: a whispered member went offline: drop what is still queued for them.
+function L:dropTarget(name)
+    local key = ns.keyName(name)
+    for i = #self.queue, 1, -1 do
+        local item = self.queue[i]
+        if item.to and ns.keyName(item.to) == key then
+            table.remove(self.queue, i); self.stats.dropped = self.stats.dropped + 1
+        end
+    end
+    self.lastHeard[key] = nil
 end
 
 function L:register()

@@ -130,7 +130,12 @@ function Prices.dayValue(own, others)
     table.sort(list)
     if #list > Prices.MAX_REPORTERS then
         local m = Prices.median(list)
-        table.sort(list, function(a, b) return math.abs(a - m) < math.abs(b - m) end)
+        -- Review 3-5: the same distance -> the smaller value (never arrival order).
+        table.sort(list, function(a, b)
+            local da, db = math.abs(a - m), math.abs(b - m)
+            if da ~= db then return da < db end
+            return a < b
+        end)
         local kept = {}
         for i = 1, Prices.MAX_REPORTERS do kept[i] = list[i] end
         list = kept
@@ -213,15 +218,45 @@ function Prices.record(rk, id, unit, qty, day, n, keep)
     return true
 end
 
+-- Review 1-5: big jobs (prune, fold, publish, cap) run a little every frame.
+-- Inside a job, Prices.tick() yields every TICK items; outside a job it does nothing.
+Prices.TICK = 200
+local jobs, jobsScheduled, ticks = {}, false, 0
+local function jobClock() if type(debugprofilestop) == "function" then return debugprofilestop() end end
+local function stepJobs()
+    jobsScheduled = false
+    local start = jobClock()
+    while #jobs > 0 do
+        local co = jobs[1]
+        local ok, err = coroutine.resume(co)
+        if not ok then Prices.jobError = tostring(err) end
+        if coroutine.status(co) == "dead" then table.remove(jobs, 1) end
+        if not start or jobClock() - start >= Prices.FRAME_BUDGET then break end
+    end
+    if #jobs > 0 then jobsScheduled = true; ns.after(0, stepJobs) end
+end
+function Prices.background(fn)
+    jobs[#jobs + 1] = coroutine.create(fn)
+    if not jobsScheduled then jobsScheduled = true; ns.after(0, stepJobs) end
+end
+function Prices.tick()
+    ticks = ticks + 1
+    if ticks % Prices.TICK == 0 and coroutine.running() then coroutine.yield() end
+end
+function Prices.busy() return #jobs > 0 end
+
 -- 30 days unseen: forget (R-8.4).
 function Prices.prune(today)
     today = today or Prices.today()
     local p = Prices.db()
     for rk, items in pairs(p.ah) do
+        local drop = {}
         for id, s in pairs(items) do
             local d = unb36(str(s):match("^([0-9a-z]+)%.")) or 0
-            if today - d > Prices.FORGET_DAYS then items[id] = nil end
+            if today - d > Prices.FORGET_DAYS then drop[#drop + 1] = id end
+            Prices.tick()
         end
+        for _, id in ipairs(drop) do items[id] = nil end
         itemCount[rk] = nil
     end
 end
@@ -293,12 +328,17 @@ end
 local sharedCache = { version = -1 }
 Prices.ledger = ns.Ledger.new({
     id = "prices", prefix = Prices.PREFIX, burst = 1, refill = 0.5, maxPerSession = 300,
-    yieldToShare = true, maxRecords = 3000, maxQueue = 300,
+    -- Review 1-6: 7 reporters x 3 days x 33 buckets.
+    yieldToShare = true, maxRecords = 700, maxQueue = 300,
     validAuthor = function(a) return type(a) == "string" and a:match("^t[0-9a-z]+$") ~= nil end,
     validGroup = validGroup, validValue = validValue,
     selfAuthor = function() return Prices.token() end,
     priority = function(g) return g:find(":p$") ~= nil or g:find(":p%.") ~= nil end,
-    onChange = function() sharedCache.version = -1 end,
+    onChange = function()
+        sharedCache.version = -1
+        -- Review 1-6: shared prices count toward the 8,000 items (checked a moment later).
+        ns.coalesce("price-cap", 5, function() Prices.enforceCapAll() end)
+    end,
     evict = function(l, s)
         local pickA, pickG, pickT
         for a, groups in pairs(s.rec) do
@@ -344,6 +384,10 @@ end
 -- Publish today's own prices of rk as our records (no broadcast: others
 -- fetch by digest; R-8.6). Order items go into bucket "p" (asked first).
 function Prices.publish(rk, today)
+    Prices.background(function() Prices.publishNow(rk, today) end)
+end
+
+function Prices.publishNow(rk, today)
     today = today or Prices.today()
     local realm, kind = rk:match("^(.*)%-(%a+)$")
     if not realm then return 0 end
@@ -356,12 +400,14 @@ function Prices.publish(rk, today)
             buckets[b] = buckets[b] or {}
             buckets[b][id] = e
         end
+        Prices.tick()
     end
     local n = 0
     local token = Prices.token()
     for b, items in pairs(buckets) do
         local r = led:put(groupOf(rk, today, b), Prices.encodeShare(realm, kind, items), token, true)
         if r == "stored" then n = n + 1 end
+        Prices.tick()
     end
     if n > 0 then led:announce() end
     return n
@@ -387,6 +433,7 @@ function Prices.fold(today)
                         folded[rk][id] = folded[rk][id] or {}
                         folded[rk][id][day] = folded[rk][id][day] or {}
                         if a ~= Prices.token() then folded[rk][id][day][a] = e.m end
+                        Prices.tick()
                     end
                 end
                 folded.drop = folded.drop or {}
@@ -403,12 +450,53 @@ function Prices.fold(today)
                     for _ in pairs(others) do count = count + 1 end
                     local value = Prices.dayValue(nil, others)
                     if value then Prices.record(rk, id, value, 0, day, count); n = n + 1 end
+                    Prices.tick()
                 end
             end
         end
     end
     for _, x in ipairs(folded.drop or {}) do led:drop(x.a, x.g) end
     return n
+end
+
+-- Review 1-6: items per realm + type, own and shared together.
+function Prices.itemCount(rk)
+    local seen, n = {}, 0
+    for id in pairs(Prices.items(rk)) do seen[id] = true; n = n + 1 end
+    for id in pairs(Prices.shared(rk)) do if not seen[id] then n = n + 1 end end
+    return n
+end
+
+-- Over 8,000: drop shared records, oldest first, until it fits.
+function Prices.enforceCap(rk)
+    local code = Prices.rkCode(rk)
+    local recs = {}
+    local s = led:store(true)
+    for a, groups in pairs(s and s.rec or {}) do
+        for g, rec in pairs(groups) do
+            if a ~= Prices.token() and g:match("^([0-9a-z]+):") == code then recs[#recs + 1] = { a = a, g = g, t = rec.t } end
+        end
+    end
+    table.sort(recs, function(x, y) if x.t ~= y.t then return x.t < y.t end return x.a .. x.g < y.a .. y.g end)
+    local i = 0
+    while Prices.itemCount(rk) > Prices.MAX_ITEMS and i < #recs do
+        i = i + 1
+        led:drop(recs[i].a, recs[i].g)
+        Prices.tick()
+    end
+    return i
+end
+
+function Prices.enforceCapAll()
+    local keys = {}
+    local s = led:store(true)
+    for _, groups in pairs(s and s.rec or {}) do
+        for _, rec in pairs(groups) do
+            local realm, kind = Prices.decodeShare(rec.v)
+            if realm then keys[Prices.realmKey(realm, kind)] = true end
+        end
+    end
+    for rk in pairs(keys) do Prices.background(function() Prices.enforceCap(rk) end) end
 end
 
 ---------------------------------------------------------------------------
@@ -686,6 +774,7 @@ local function runSoon()
                 elseif n >= Prices.ITEMS_PER_FRAME then break end
             end
             Prices.scan.frames = (Prices.scan.frames or 0) + 1
+            if ns.OrdersUI and ns.OrdersUI.scanChanged then pcall(ns.OrdersUI.scanChanged) end -- review 7-3
             runSoon()
         end)
     end
@@ -800,7 +889,7 @@ function Prices.startBrowse(rk)
         return "unsupported"
     end
     local s = Prices.scan
-    s.how, s.rk, s.agg, s.classIndex = "browse", rk, {}, 0
+    s.how, s.rk, s.agg, s.classIndex, s.page = "browse", rk, {}, 0, 0
     Prices.nextBrowse()
     return "started"
 end
@@ -808,28 +897,48 @@ end
 function Prices.nextBrowse()
     local s = Prices.scan
     if s.state ~= "running" or s.how ~= "browse" then return end
+    -- Review 7-2: GetBrowseResults is cumulative: the last list of a class replaces, never adds.
+    for id, e in pairs(s.classAgg or {}) do
+        local a = s.agg[id]
+        if not a then s.agg[id] = { m = e.m, q = e.q } else
+            if e.m < a.m then a.m = e.m end
+            a.q = a.q + e.q
+        end
+    end
+    s.classAgg = {}
     s.classIndex = s.classIndex + 1
     local class = Prices.BROWSE_CLASSES[s.classIndex]
     if not class then commit(s.rk, s.agg, "browse"); return end
     local query = { searchString = "", sorts = {}, filters = {}, itemClassFilters = { { classID = class } } }
     local ok = pcall(AH().SendBrowseQuery, query)
     if not ok then Prices.nextBrowse(); return end
-    local mine = s.classIndex
-    ns.after(15, function() if Prices.scan == s and s.classIndex == mine then Prices.nextBrowse() end end)
+    Prices.browseTimer(s)
+end
+
+-- 15 s without results for this class and page: next class.
+function Prices.browseTimer(s)
+    s.page = (s.page or 0) + 1
+    local class, page = s.classIndex, s.page
+    ns.after(15, function()
+        if Prices.scan == s and s.state == "running" and s.classIndex == class and s.page == page then Prices.nextBrowse() end
+    end)
 end
 
 function Prices.onBrowseResults()
     local s = Prices.scan
     if s.state ~= "running" or s.how ~= "browse" then return end
+    if ns.inCombat() or not Prices.ah.open then Prices.stopScan(); return end
     local list = ns.call(AH().GetBrowseResults)
+    s.classAgg = {}
     for _, r in ipairs(type(list) == "table" and list or {}) do
         local id = type(r.itemKey) == "table" and ns.num(r.itemKey.itemID)
-        add(s.agg, id, ns.num(r.minPrice), ns.num(r.totalQuantity))
+        add(s.classAgg, id, ns.num(r.minPrice), ns.num(r.totalQuantity))
     end
     local A = AH()
     local full = fn(A.HasFullBrowseResults) and ns.call(A.HasFullBrowseResults)
     if full == false and fn(A.RequestMoreBrowseResults) then
         pcall(A.RequestMoreBrowseResults)
+        Prices.browseTimer(s)
     else
         Prices.nextBrowse()
     end
@@ -850,14 +959,23 @@ function Prices.autoLookup()
     local n = 0
     for i = 1, math.min(#ids, Prices.AUTO_SEARCH) do
         local id = ids[i]
-        ns.after(i * 1.2, function()
+        local tries = 0
+        local function try()
             if not Prices.ah.open or ns.inCombat() then return end
-            local okKey, key = pcall(AH().MakeItemKey, id)
+            -- Review 7-1: respect the client's query state.
+            local A = AH()
+            if fn(A.IsThrottledMessageSystemReady) and ns.call(A.IsThrottledMessageSystemReady) ~= true then
+                tries = tries + 1
+                if tries <= 20 then ns.after(2, try) end
+                return
+            end
+            local okKey, key = pcall(A.MakeItemKey, id)
             if okKey and key then
                 lookups[id] = true
-                pcall(AH().SendSearchQuery, key, {}, true)
+                pcall(A.SendSearchQuery, key, {}, true)
             end
-        end)
+        end
+        ns.after(i * 1.2, try)
         n = n + 1
     end
     return n
@@ -890,6 +1008,7 @@ end
 
 function Prices.onAuctionClosed()
     Prices.ah.open = false
+    lookups = {} -- review 1-9
     Prices.stopScan()
     if ns.OrdersUI and ns.OrdersUI.auctionHidden then ns.OrdersUI.auctionHidden() end
 end
@@ -911,13 +1030,17 @@ function Prices.fake(id, copper)
 end
 
 function Prices.login()
-    Prices.prune()
-    Prices.fold()
+    Prices.background(function()
+        Prices.prune()
+        Prices.fold()
+        Prices.enforceCapAll()
+    end)
     return led:announce()
 end
 
 function Prices.resetSession()
     worker, lookups, itemCount, sharedCache = nil, {}, {}, { version = -1 }
+    jobs, jobsScheduled = {}, false
     Prices.scan = { state = "idle" }
     Prices.ah = { open = false }
     led:resetSession()

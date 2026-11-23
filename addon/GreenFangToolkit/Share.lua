@@ -705,6 +705,16 @@ local function throttledCode(r)
     return r == 3 or r == 8 or (codes and (r == codes.AddonMessageThrottle or r == codes.ChannelThrottle)) or false
 end
 
+Share.isThrottled = throttledCode
+
+-- GF-006-B2 (review 1-3): a ledger whispered name: hide its "No player named
+-- X" line like ours, and drop the ledgers' queues when it comes.
+function Share.noteWhisper(name)
+    local m = ns.Comm.memberFor(name)
+    local a = m and Share.authorOf(m.guid)
+    recentWhisper[ns.keyName(name)] = { at = ns.now(), a = a, name = name }
+end
+
 local drain
 local function schedule(delay)
     if draining then return end
@@ -1439,8 +1449,11 @@ local function whisperedTarget(name)
     return nil
 end
 
-function Share.targetGone(a)
-    gone[a] = ns.now()
+function Share.targetGone(a, name)
+    gone[a or ""] = ns.now()
+    if name and ns.Ledger then
+        for _, l in ipairs(ns.Ledger.list) do l:dropTarget(name) end
+    end
     for i = #queue, 1, -1 do
         if queue[i].to and queue[i].to.a == a then table.remove(queue, i); stats.dropped = stats.dropped + 1 end
     end
@@ -1454,7 +1467,7 @@ function Share.systemFilter(_, _, text, ...)
     local full, w = whisperedTarget(name)
     if not full then return false, text, ... end
     recentWhisper[full] = nil
-    Share.targetGone(w.a)
+    Share.targetGone(w.a, w.name or full)
     return true
 end
 

@@ -70,7 +70,8 @@ return function(T)
         -- The locked crafter releases after the lock: back to the others.
         jobs[C] = { id = "g1", st = "b", ac = 1763000200, sa = 1763000400 }
         local v = O.view(w("g1", { lk = C, lt = 1763000300 }), jobs, A)
-        eq(v.crafter, B, "released lock falls back to the next accept")
+        -- GF-006-B2 (review 3-1, contract v1.4a): never handed to the one who was too late.
+        eq(v.crafter, nil, "released lock: nobody"); eq(v.state, "waiting", "back to 等接單")
         ok(v.declined[C], "C marked as declined")
         jobs[B] = { id = "g1", st = "b", ac = 1763000100, sa = 1763000500 }
         eq(O.view(w("g1", { lk = C, lt = 1763000300 }), jobs, A).state, "waiting", "R-6.4: everyone released -> waiting again")
@@ -196,7 +197,8 @@ return function(T)
         local v = O.get("gB.1")
         O.press(v, "accept")
         eq(O.attentionCount(), 0, "accepted: nothing left")
-        ok(ns.OrdersUI.badgeCount ~= nil or true, "badge updated")
+        ns.OrdersUI.updateBadge()
+        eq(ns.OrdersUI.badgeCount, 0, "badge count (GF-006-B2: no longer a tautology)")
     end)
 
     test("GF-006 R-6.7 cancel waits 5 s and can be undone in place", function()
@@ -527,7 +529,9 @@ return function(T)
         local rk, today = "測試伺服器-horde", P.today()
         for id = 1, 3000 do P.record(rk, id, 50 + id % 9, 1, today) end
         wow.state.sent = {}
-        eq(P.publish(rk, today) > 0, true, "published")
+        P.publish(rk, today)
+        wow.advance(1)
+        ok(P.ledger:count() > 0, "published (in steps, GF-006-B2 review 1-5)")
         local summaries = 0
         for _, m in ipairs(wow.state.sent) do if m.prefix == "GFTKP" then summaries = summaries + 1 end end
         wow.advance(1)
