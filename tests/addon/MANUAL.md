@@ -577,6 +577,17 @@ python tests/addon/run_lupa.py         # 預期最後一行：N passed, 0 failed
 
 - □ 一個角色用 0.10.0、一個用 0.11.0，互相下線上線：0.10.0 那邊沒有 Lua 錯誤，名冊和配方照常
 
+## 3v. 網站訂單進遊戲（GF-006-C，第 1.5 版；格式草案 `docs/research/GF-006-C_inbox-format.md`）
+
+- □ 沒有 `GreenFangToolkit_Inbox` 資料夾時登入：沒有 Lua 錯誤；「同步與診斷」的訂單段寫「沒有 Inbox」
+- □ 手動放一個測試用的 `GreenFangToolkit_Inbox`（`.toc` 照草案 §5，含 `## LoadOnDemand: 1`；`Inbox.lua` 用 claude-addon 給的假資料字串）後**完全重開遊戲**：
+  - 登入約 30 秒後「同步與診斷」寫「上次讀到 Inbox …（隨選載入）」和匯入張數 → `LoadOnDemand` 可用
+  - 如果寫「沒有 Inbox」：把 `.toc` 的 `## LoadOnDemand: 1` 拿掉再重開；這次讀到了 → 16001 不支援 LoadOnDemand，GF Sync 要寫第二種 `.toc`
+- □ `/reload` 後再看一次：同一份字串顯示沒有新匯入（不會重複）
+- □ 「訂單」頁右下的捲軸圖示（匯入碼）：貼上一段匯入碼 → 綠勾和數字；隨便貼一段字 → 紅叉
+- □ 匯入後，另一個角色（沒有 Inbox）登入約 30 秒內也看得到那張網站單（轉傳）
+- □ 輸入框能貼多長：貼一段約 2,000 字元的匯入碼，看是否完整（結果是綠勾就是完整）
+
 ## 3b. 睡袋路線（GF-008-A，0.6.0 起；部落角色）
 
 - □ 左側清單有「睡袋路線」；聯盟角色看不到這一項

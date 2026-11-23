@@ -4,7 +4,7 @@
 
 local wow = {}
 
-local TOC_FILES = { "Config.lua", "Core.lua", "Data.lua", "Icons.lua", "Professions.lua", "Roster.lua", "Sync.lua", "Comm.lua", "Share.lua", "Ledger.lua", "Orders.lua", "Prices.lua", "Delivery.lua",
+local TOC_FILES = { "Config.lua", "Core.lua", "Data.lua", "Icons.lua", "Professions.lua", "Roster.lua", "Sync.lua", "Comm.lua", "Share.lua", "Ledger.lua", "Orders.lua", "Prices.lua", "Delivery.lua", "WebOrders.lua",
     "Export.lua", "Framework.lua", "UI.lua", "Character.lua", "Recipes.lua", "Diag.lua", "OrdersUI.lua", "SleepingBagData.lua", "SleepingBag.lua", "Init.lua" }
 wow.TOC_FILES = TOC_FILES
 

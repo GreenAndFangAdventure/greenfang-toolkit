@@ -29,6 +29,7 @@ UI.ICON = {
     undo = "Interface\\Buttons\\UI-RefreshButton",
     scan = "Interface\\Icons\\INV_Misc_Coin_02",
     history = "Interface\\Icons\\INV_Misc_PocketWatch_01",
+    paste = "Interface\\Icons\\INV_Scroll_03",
     bag = "Interface\\Icons\\INV_Misc_Bag_08",
     online = "Interface\\FriendsFrame\\StatusIcon-Online",
     unknown = "Interface\\Icons\\INV_Misc_QuestionMark",
@@ -434,6 +435,9 @@ local function build(p)
     scroll:HookScript("OnVerticalScroll", function() UI.layoutRows() end)
     UI.historyButton = iconButton(p, 24, "history", "歷史", function() UI.showHistory() end)
     UI.historyButton:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -170, 10)
+    -- GF-006-C (R-9.4): paste a web order's import code.
+    UI.pasteButton = iconButton(p, 24, "paste", "匯入碼", function() UI.openPaste() end)
+    UI.pasteButton:SetPoint("RIGHT", UI.historyButton, "LEFT", -10, 0)
     ns.Diag.smallButton(p, "BOTTOMRIGHT", -24, 10)
     panel = p
 end
@@ -446,6 +450,63 @@ ns.Framework.register({
     create = build,
     show = function() O().markSeen(); UI.refresh() end,
 })
+
+---------------------------------------------------------------------------
+-- Import code (GF-006-C, R-9.4): the same string as the Inbox, pasted.
+---------------------------------------------------------------------------
+
+UI.PASTE_NAME = "GreenFangToolkit_PastePopup"
+local pastePopup
+
+function UI.openPaste()
+    if not pastePopup then
+        local f = ns.popupWindow(UI.PASTE_NAME, 420, 200)
+        f:SetPoint("CENTER", 0, 80)
+        f:EnableMouse(true)
+        if UISpecialFrames then table.insert(UISpecialFrames, UI.PASTE_NAME) end
+        f.icon = f:CreateTexture(nil, "ARTWORK"); f.icon:SetSize(28, 28)
+        f.icon:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -30)
+        Icons.set(f.icon, UI.ICON.paste)
+        local box = ns.createFrame("EditBox", nil, f, "InputBoxTemplate")
+        box:SetSize(320, 22)
+        box:SetPoint("TOPLEFT", f, "TOPLEFT", 60, -34)
+        box:SetAutoFocus(true)
+        if box.SetMaxLetters then box:SetMaxLetters(0) end
+        box:SetScript("OnEscapePressed", function(self) self:ClearFocus(); f:Hide() end)
+        box:SetScript("OnEnterPressed", function() UI.pasteImport() end)
+        f.box = box
+        f.result = f:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+        f.result:SetPoint("TOPLEFT", f, "TOPLEFT", 60, -80)
+        f.go = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.go:SetSize(90, 24)
+        f.go:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -18, 14); f.go:SetText("匯入")
+        f.go:SetScript("OnClick", function() UI.pasteImport() end)
+        f:Hide()
+        pastePopup = f
+    end
+    pastePopup.box:SetText("")
+    pastePopup.result:SetText("")
+    pastePopup:Show()
+    return pastePopup
+end
+
+-- Result as icons and numbers only (R-10.2): ✓ imported, ✗ skipped.
+function UI.pasteImport(text)
+    local f = pastePopup
+    text = text or (f and f.box:GetText()) or ""
+    local res = ns.WebOrders.import(text, "paste")
+    local skipped = 0
+    for _, n in pairs(res.skipped or {}) do skipped = skipped + n end
+    if f then
+        if res.ok then
+            f.result:SetText(UI.tex("deal", 16) .. " " .. ((res.imported or 0) + (res.same or 0))
+                .. (skipped > 0 and ("   " .. UI.tex("cancel", 16) .. " " .. skipped) or ""))
+        else
+            f.result:SetText(UI.tex("cancel", 16))
+        end
+    end
+    UI.refresh()
+    return res
+end
 
 ---------------------------------------------------------------------------
 -- History (R-6.10): closed orders, newest first; right-click = order again.

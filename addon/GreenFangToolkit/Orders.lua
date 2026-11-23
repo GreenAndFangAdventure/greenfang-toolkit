@@ -175,7 +175,15 @@ end
 local function validValue(_, g, v)
     if #v > 12000 then return false end -- 64 parts of a B/D value
     if g == "O" then return true end
-    return Orders.decodeList(v) ~= nil
+    local list = Orders.decodeList(v)
+    if not list then return false end
+    -- GF-006-C: M holds web orders only ("w" ids, src w); a game order can never be replaced by one.
+    if g == "M" then
+        for _, e in ipairs(list) do
+            if not str(e.id):match("^w[0-9a-z.]+$") or e.src ~= "w" then return false end
+        end
+    end
+    return true
 end
 
 local cache = { version = -1 }
@@ -352,7 +360,7 @@ function Orders.guidLess(x, y)
 end
 local function authorLess(x, y) return Orders.guidLess(S().guidOf(x), S().guidOf(y)) end
 
-function Orders.view(w, jobs, cust)
+function Orders.view(w, jobs, cust, web)
     local v = {
         id = w.id, customer = cust, src = w.src or "g", created = w.cr or 0, recipe = w.rc, item = w.it,
         skill = w.sk, qty = math.max(1, w.q or 1), mats = Orders.decodeMats(w.m), fee = w.fe or 0,
@@ -400,6 +408,8 @@ function Orders.view(w, jobs, cust)
     local closes = {}
     if w.st == "x" then closes[#closes + 1] = { close = "cancel", by = "customer", how = "manual", at = w.sa or 0 } end
     if w.st == "d" then closes[#closes + 1] = { close = "deal", by = "customer", how = w.ch or "manual", at = w.sa or 0 } end
+    -- GF-006-C: cancelled on the website (the M copy of a web order).
+    if web and web.st == "x" then closes[#closes + 1] = { close = "cancel", by = "web", how = "manual", at = web.sa or 0 } end
     if job and not v.guild and (job.st == "n" or job.st == "b") then
         closes[#closes + 1] = { close = "cancel", by = "crafter", how = "manual", at = job.sa or 0 }
     end
@@ -453,13 +463,22 @@ function Orders.all()
     end
     local views = {}
     for _, a in ipairs(led:authors()) do
+        -- GF-006-C: M = the website's copy of a web order. The customer's own
+        -- W entry (once they pressed a button on it) carries their actions;
+        -- a cancel on the website still closes it (earliest close wins).
+        local web = {}
+        for _, m in ipairs(listOf(a, "M")) do web[m.id] = m end
         local seen = {}
         for _, w in ipairs(listOf(a, "W")) do
             seen[w.id] = true
-            views[w.id] = Orders.view(w, jobsBy[w.id], a)
+            views[w.id] = Orders.view(w, jobsBy[w.id], a, web[w.id])
         end
-        for _, w in ipairs(listOf(a, "M")) do
-            if not seen[w.id] then views[w.id] = Orders.view(w, jobsBy[w.id], a) end
+        for id, m in pairs(web) do
+            if not seen[id] then
+                local base = ns.copy(m)
+                if base.st == "x" then base.st, base.sa = "o", base.cr end
+                views[id] = Orders.view(base, jobsBy[id], a, m)
+            end
         end
     end
     cache.version, cache.views = led.version, views
@@ -584,7 +603,13 @@ end
 function Orders.customer(id, action, arg)
     local list = myList("W")
     local e = findIn(list, id)
-    if not e then return false, "unknown" end
+    if not e then
+        -- GF-006-C: my web order (M) gets its W entry when I first act on it.
+        local m = findIn(listOf(S().selfAuthor(), "M"), id)
+        if not m or m.st == "x" then return false, "unknown" end
+        e = ns.copy(m)
+        list[#list + 1] = e
+    end
     if e.st == "x" or e.st == "d" then return false, "closed" end
     local t = now()
     if action == "cancel" then e.st, e.sa = "x", t

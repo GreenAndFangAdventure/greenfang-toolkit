@@ -36,6 +36,8 @@ local function collectSoon(delay)
             -- GF-006-B: orders (GFTKO) and shared prices (GFTKP), later and slower.
             if not ns.ordersStarted and ns.now() - loginAt >= ORDERS_DELAY then
                 ns.ordersStarted = Orders.ledger:announce()
+                -- GF-006-C (R-9.4): web orders GF Sync left in GreenFangToolkit_Inbox.
+                if ns.ordersStarted then pcall(ns.WebOrders.readInbox) end
                 Delivery.checkPending()
             end
             if not ns.pricesStarted and ns.now() - loginAt >= PRICES_DELAY then
