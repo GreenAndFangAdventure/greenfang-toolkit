@@ -97,10 +97,16 @@ local function profession(name, skillLine, rank, maxRank, icon)
 end
 Data.skillLineIDFor = skillLineIDFor
 
+-- Professions the client listed but whose name could not be read (secret
+-- or empty) on the last read (GF-001-D23): then an empty list is not "no
+-- professions" and must not be uploaded as such.
+Data.unreadableProfessions = 0
+
 local function fromProfessionsAPI()
     if type(GetProfessions) ~= "function" or type(GetProfessionInfo) ~= "function" then return nil end
     local packed = { pcall(GetProfessions) }
     if not packed[1] then return nil end
+    Data.unreadableProfessions = 0
     local result, seen = {}, {}
     for i = 2, table.maxn(packed) do
         local index = ns.num(packed[i])
@@ -108,7 +114,11 @@ local function fromProfessionsAPI()
             seen[index] = true
             local ok, name, icon, rank, maxRank, _, _, skillLine = pcall(GetProfessionInfo, index)
             local p = ok and profession(name, skillLine, rank, maxRank, icon)
-            if p then result[#result + 1] = p end
+            if p then
+                result[#result + 1] = p
+            else
+                Data.unreadableProfessions = Data.unreadableProfessions + 1
+            end
         end
     end
     return result
@@ -176,6 +186,71 @@ function Data.ownProfessionNames()
     return names
 end
 
+-- GF-001-D24: full name "名字 姓氏" as the guild roster shows it. The site's
+-- roster (Blizzard API) has full names; UnitName gives only the first part,
+-- so the site could not find the uploader (character_not_in_roster).
+-- Only ever found by GUID in the roster, never guessed. Remembered per
+-- character in settings.fullNames (GF Sync never reads settings).
+function Data.cleanFullName(v)
+    local s = ns.str(v)
+    -- A normal space U+0020 between the parts (no-break and ideographic
+    -- spaces become one); nothing else in the name is changed.
+    s = s:gsub("\194\160", " "):gsub("\227\128\128", " ")
+    s = s:match("^([^-]+)") or s -- no "-Realm"
+    return s:match("^%s*(.-)%s*$") or ""
+end
+
+local function fullNameStore()
+    local s = ns.db and ns.db.settings
+    if type(s) ~= "table" then return nil end
+    if type(s.fullNames) ~= "table" then s.fullNames = {} end
+    return s.fullNames
+end
+
+function Data.rememberFullName(guid, name)
+    name = Data.cleanFullName(name)
+    local store = fullNameStore()
+    if store and type(guid) == "string" and guid ~= "" and name ~= "" then store[guid] = name end
+end
+
+-- GUID -> full name from the last roster scan, rebuilt when the scan changes.
+local index, indexOf, indexAt = nil, nil, nil
+function Data.rosterFullNames()
+    local r = ns.db and ns.db.roster
+    local snap = type(r) == "table" and type(r.snapshots) == "table" and r.lastKey and r.snapshots[r.lastKey]
+    if type(snap) ~= "table" then return {} end
+    if snap ~= indexOf or snap.capturedAt ~= indexAt then
+        index = {}
+        for _, m in ipairs(type(snap.members) == "table" and snap.members or {}) do
+            if type(m) == "table" and type(m.guid) == "string" and m.guid ~= "" then
+                local n = Data.cleanFullName(m.name)
+                if n ~= "" then index[m.guid] = n end
+            end
+        end
+        indexOf, indexAt = snap, snap.capturedAt
+    end
+    return index
+end
+
+-- A guild member's full name by GUID, or nil.
+function Data.memberFullName(guid)
+    if type(guid) ~= "string" or guid == "" then return nil end
+    return Data.rosterFullNames()[guid]
+end
+
+-- The logged-in character's full name, or nil while the roster is not known.
+function Data.fullName(guid)
+    if type(guid) ~= "string" or guid == "" then return nil end
+    local store = fullNameStore()
+    local n = store and ns.str(store[guid]) or ""
+    if n ~= "" then return n end
+    -- From the last roster scan only (Roster.collect also remembers it):
+    -- reading the live roster here would scan outside the target guild.
+    n = Data.memberFullName(guid)
+    if n then Data.rememberFullName(guid, n) end
+    return n
+end
+
 -- Facts about the logged-in character used by both outbox kinds.
 -- Every call is guarded: a missing function or secret value becomes nil.
 local function optional(v) v = ns.str(v); if v == "" then return nil end; return v end
@@ -185,7 +260,8 @@ function Data.player()
     local guid = ns.str((ns.call(UnitGUID, "player")))
     p.guid = guid ~= "" and guid or nil
     p.name = ns.str((ns.call(UnitName, "player")))
-    p.realm = ns.str((ns.call(GetRealmName)))
+    p.fullName = Data.fullName(p.guid) -- GF-001-D24: nil until the roster is known
+    p.realm = ns.realm() -- GF-001-D23: never "" when the realm can be known
     p.faction = ns.str((ns.call(UnitFactionGroup, "player")))
     p.level = ns.num((ns.call(UnitLevel, "player")))
     local className, classToken = ns.call(UnitClass, "player")

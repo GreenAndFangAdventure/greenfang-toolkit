@@ -25,9 +25,16 @@ function Diag.shareText()
         for _ in pairs(groups) do records = records + 1 end
     end
     local st = Share.stats
-    return string.format("記錄 %d / %d 筆（%d 位成員）｜佇列 %d 則｜等待補資料 %d 筆｜這次登入：送出 %d、收到 %d、轉傳 %d、被節流 %d、逾時丟棄 %d、空間不足刪除 %d 位",
+    local text = string.format("記錄 %d / %d 筆（%d 位成員）｜佇列 %d 則｜等待補資料 %d 筆｜這次登入：送出 %d、收到 %d、轉傳 %d、被節流 %d、逾時丟棄 %d、空間不足刪除 %d 位",
         records, Share.maxRecords(), authors, Share.queued(), Share.waiting(), st.sent, st.received, st.relayed,
         st.throttled, st.dropped, st.evicted)
+    -- GF-001-D19: a profession window with a filter keeps the saved recipes;
+    -- this used to be a chat message at every login.
+    local skipped = ns.Recipes and ns.Recipes.skippedFiltered() or {}
+    if #skipped > 0 then
+        text = text .. "｜專業視窗有篩選，配方沒有更新：" .. table.concat(skipped, "、")
+    end
+    return text
 end
 
 function Diag.rosterText()
@@ -40,8 +47,15 @@ end
 function Diag.versionText()
     local server = ns.num((ns.call(GetServerTime)))
     local skew = server and (server - ns.now()) or nil
-    return string.format("工具箱 %s｜介面 %s｜伺服器時間和本機差 %s",
-        ns.VERSION, tostring(ns.Data.interface()), skew and (skew .. " 秒") or "不明")
+    -- GF-001-D23: the realm the outbox gets, and where it came from.
+    local realm = ns.realm()
+    local from = ({ GetRealmName = "遊戲", saved = "存檔記住的", GetNormalizedRealmName = "遊戲（無空格）" })[ns.realmSource]
+    local full = ns.Data.fullName(ns.str((ns.call(UnitGUID, "player"))))
+    return string.format("工具箱 %s｜介面 %s｜伺服器 %s｜角色全名 %s｜伺服器時間和本機差 %s",
+        ns.VERSION, tostring(ns.Data.interface()),
+        realm ~= "" and string.format("「%s」（%s）", realm, from or "?") or "不明（暫停寫入上傳資料）",
+        full and string.format("「%s」", full) or "未取得（名冊載入後補上）",
+        skew and (skew .. " 秒") or "不明")
 end
 
 Diag.SITE_NOTE = "GF Sync 會在你下線後讀取存檔並上傳。公會網站的名冊主要由 Blizzard API 自動更新，GF Sync 只是補充來源：沒有安裝或關閉同步，網站照樣會更新。"
@@ -74,10 +88,9 @@ end
 
 local function create()
     if window then return window end
-    local f = ns.createFrame("Frame", Diag.WINDOW_NAME, UIParent, "BasicFrameTemplateWithInset")
-    f:SetSize(640, 470)
+    -- GF-001-D20: opaque and above the toolkit window (was see-through).
+    local f = ns.popupWindow(Diag.WINDOW_NAME, 640, 470)
     f:SetPoint("CENTER", 0, 20)
-    f:SetFrameStrata("DIALOG")
     f:SetMovable(true)
     f:EnableMouse(true)
     f:RegisterForDrag("LeftButton")
@@ -139,7 +152,6 @@ function Diag.smallButton(parent, point, x, y)
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("同步與診斷")
-        GameTooltip:AddLine("點一下查看待上傳資料和分享情形", 0.75, 0.9, 0.75)
         GameTooltip:Show()
     end)
     b:SetScript("OnLeave", function() GameTooltip:Hide() end)

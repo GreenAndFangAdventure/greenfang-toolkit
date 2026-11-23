@@ -21,7 +21,9 @@ Recipes.CRAFTS = { [164] = true, [165] = true, [197] = true, [202] = true, [171]
     [333] = true, [185] = true, [129] = true, [186] = true }
 Recipes.READ_AGAIN = { 2, 5 }
 
-local filterWarned = {}
+-- Professions whose window had a filter on this session, so the saved list
+-- was kept (GF-001-D19: no chat message; shown in 「同步與診斷」).
+local skippedFiltered = {}
 
 local function T() return C_TradeSkillUI end
 
@@ -44,6 +46,75 @@ function Recipes.openSkillLine()
     local id = type(info) == "table" and ns.num(info.professionID) or nil
     if id and Recipes.CRAFTS[id] then return id end
     return nil
+end
+
+---------------------------------------------------------------------------
+-- Which profession a recipe belongs to (GF-001-D21)
+---------------------------------------------------------------------------
+-- 0.9.5 in game: with 專業 = 烹飪 the page listed first aid and smelting
+-- recipes too. GetAllRecipeIDs() in the open window also returns recipes of
+-- the character's other professions, and every learned one was stored under
+-- the open profession. Each recipe is now checked, when reading the window
+-- and when building the page (records shared by 0.9.0 to 0.9.5 carry the
+-- mixed lists). Unknown (the client does not say) = keep.
+
+local recipeSkillCache = {}
+
+local function craftOf(...)
+    for i = 1, select("#", ...) do
+        local id = ns.num((select(i, ...)))
+        if id and Recipes.CRAFTS[id] then return id end
+    end
+    return nil
+end
+
+-- skillLineID of a recipe, or nil when the client does not say.
+function Recipes.skillOfRecipe(id)
+    local cached = recipeSkillCache[id]
+    if cached then return cached end
+    local t = T()
+    if type(t) ~= "table" then return nil end
+    local skill
+    if type(t.GetProfessionInfoByRecipeID) == "function" then
+        local info = ns.call(t.GetProfessionInfoByRecipeID, id)
+        if type(info) == "table" then skill = craftOf(info.parentProfessionID, info.professionID) end
+    end
+    if not skill and type(t.GetTradeSkillLineForRecipe) == "function" then
+        local ok, a, _, c = pcall(t.GetTradeSkillLineForRecipe, id)
+        if ok then skill = craftOf(c, a) end
+    end
+    if skill then recipeSkillCache[id] = skill end
+    return skill
+end
+
+-- true / false when the client can tell whether recipe id is in skill; nil
+-- when it cannot.
+function Recipes.inSkill(id, skill)
+    local known = Recipes.skillOfRecipe(id)
+    if known then return known == skill end
+    local t = T()
+    if type(t) == "table" and type(t.IsRecipeInSkillLine) == "function" then
+        local r = ns.call(t.IsRecipeInSkillLine, id, skill)
+        if type(r) == "boolean" then return r end
+    end
+    return nil
+end
+
+-- Can this client tell at all? (Checked once per index build.)
+function Recipes.canTellSkill()
+    local t = T()
+    return type(t) == "table" and (type(t.GetProfessionInfoByRecipeID) == "function"
+        or type(t.GetTradeSkillLineForRecipe) == "function" or type(t.IsRecipeInSkillLine) == "function")
+end
+
+-- ids without the ones the client says belong to another profession.
+function Recipes.onlySkill(ids, skill)
+    if not Recipes.canTellSkill() then return ids end
+    local out = {}
+    for _, id in ipairs(ids) do
+        if Recipes.inSkill(id, skill) ~= false then out[#out + 1] = id end
+    end
+    return out
 end
 
 -- Learned recipe IDs in the open window (sorted), or nil when not readable.
@@ -83,17 +154,20 @@ function Recipes.scan()
     local ids = Recipes.readOpen()
     if not ids then return "no-api" end
     if #ids == 0 then return "empty" end -- not loaded yet
+    ids = Recipes.onlySkill(ids, skill) -- D21: not the other professions' recipes
+    if #ids == 0 then return "empty" end
     local a = Share.selfAuthor()
     if not a or not Share.store() then return "unknown" end
     local g = "R" .. skill
     local old = Share.get(a, g)
     local oldIDs = old and Share.decodeValue(g, old.v) or nil
+    -- A list saved by 0.9.5 or older may hold other professions' recipes.
+    local savedCount = oldIDs and #oldIDs or 0
+    if oldIDs then oldIDs = Recipes.onlySkill(oldIDs, skill) end
     if oldIDs and #ids < #oldIDs and isSubset(ids, oldIDs) then
-        if not filterWarned[skill] then
-            filterWarned[skill] = true
-            ns.say(string.format("%s視窗目前有篩選，配方清單沒有更新（取消篩選後再開一次即可）。",
-                ns.Data.skillName(nil, skill) or "專業"))
-        end
+        skippedFiltered[skill] = true
+        -- Keep the saved list, but without the mixed-in recipes.
+        if #oldIDs < savedCount then Share.ownRecord(g, Share.encodeValue(g, oldIDs)) end
         return "filtered"
     end
     if oldIDs then
@@ -106,6 +180,15 @@ function Recipes.scan()
     end
     local r = Share.ownRecord(g, Share.encodeValue(g, ids))
     return r
+end
+
+-- Names of the professions skipped because of a window filter (sorted).
+function Recipes.skippedFiltered()
+    local list = {}
+    for skill in pairs(skippedFiltered) do list[#list + 1] = skill end
+    table.sort(list)
+    for i, skill in ipairs(list) do list[i] = ns.Data.skillName(nil, skill) or ("專業 " .. skill) end
+    return list
 end
 
 local readTimers = {}
@@ -141,6 +224,49 @@ end
 function Recipes.knownName(id)
     local name = Recipes.name(id)
     if nameCache[id] then return name end
+    return nil
+end
+
+-- Icon of a recipe (GF-001-D21): the crafted item's icon, else the one the
+-- profession window gives, else the recipe spell's. nil when the client
+-- knows none yet (not cached then: item data may arrive later).
+local iconCache = {}
+function Recipes.icon(id)
+    local cached = iconCache[id]
+    if cached then return cached end
+    local icon
+    local t = T()
+    if type(t) == "table" and type(t.GetRecipeSchematic) == "function" then
+        local sc = ns.call(t.GetRecipeSchematic, id, false)
+        local item = type(sc) == "table" and ns.num(sc.outputItemID) or nil
+        if item then
+            if C_Item and type(C_Item.GetItemIconByID) == "function" then icon = ns.call(C_Item.GetItemIconByID, item) end
+            if not icon and type(GetItemIcon) == "function" then icon = ns.call(GetItemIcon, item) end
+        end
+    end
+    if not icon and type(t) == "table" and type(t.GetRecipeInfo) == "function" then
+        local info = ns.call(t.GetRecipeInfo, id)
+        icon = type(info) == "table" and info.icon or nil
+    end
+    if not icon and C_Spell and type(C_Spell.GetSpellTexture) == "function" then
+        icon = ns.call(C_Spell.GetSpellTexture, id)
+    end
+    if type(icon) ~= "number" and type(icon) ~= "string" then icon = nil end
+    if icon == "" or icon == 0 then icon = nil end
+    if icon then iconCache[id] = icon end
+    return icon
+end
+
+-- Put the recipe's icon on tex, or the profession's; hidden when neither.
+function Recipes.setIcon(tex, id, skill)
+    for _, path in ipairs({ Recipes.icon(id) or false, ns.Icons.professionIcon(skill) or false }) do
+        if path and ns.Icons.set(tex, path) then
+            tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+            tex:Show()
+            return path
+        end
+    end
+    tex:Hide()
     return nil
 end
 
@@ -186,7 +312,7 @@ local function startBuild(snap)
         return x.key < y.key
     end)
     return { version = Share.version, snap = snap, ordered = ordered, pos = 1, out = {},
-        selfGuid = ns.Data.player().guid }
+        selfGuid = ns.Data.player().guid, check = Recipes.canTellSkill() }
 end
 
 -- Work on the build until about budget entries were added. True when done.
@@ -200,6 +326,7 @@ local function work(b, budget)
         for g, rec in pairs(recs or {}) do
             local skill = tonumber(g:match("^R(%d+)$"))
             local ids = skill and Share.decoded(a, g)
+            if ids and b.check then ids = Recipes.onlySkill(ids, skill) end -- D21
             if ids and #ids > 0 then
                 local p = b.out[skill] or { crafters = {}, recipes = {} }
                 b.out[skill] = p
@@ -280,20 +407,28 @@ end
 function Recipes.isBuilding() return building ~= nil end
 
 -- Rows for one profession: { { id, name, crafters } }, filtered and sorted by name.
-function Recipes.rows(index, skill, query, onlyGuid)
+-- opts (GF-001-D19): online = only crafters who are online; who = "mine"
+-- (only recipes I know) or "others" (only other members).
+function Recipes.rows(index, skill, query, onlyGuid, opts)
     local p = index[skill]
     local rows = {}
     if not p then return rows end
+    opts = opts or {}
+    if opts.who == "none" then return rows end
     local q = ns.keyName(query)
     for id, who in pairs(p.recipes) do
-        local list = {}
+        local list, mine = {}, false
         for _, m in ipairs(who) do
-            if not onlyGuid or m.guid == onlyGuid then list[#list + 1] = m end
+            if m.self then mine = true end
+            local keep = (not onlyGuid or m.guid == onlyGuid)
+                and (not opts.online or m.online)
+                and (opts.who ~= "others" or not m.self)
+            if keep then list[#list + 1] = m end
         end
-        if #list > 0 then
+        if #list > 0 and (opts.who ~= "mine" or mine) then
             local name = Recipes.name(id)
             if q == "" or ns.keyName(name):find(q, 1, true) then
-                rows[#rows + 1] = { id = id, name = name, crafters = list } -- already online first
+                rows[#rows + 1] = { id = id, name = name, crafters = list, mine = mine, skill = skill } -- online first
             end
         end
     end
@@ -302,6 +437,21 @@ function Recipes.rows(index, skill, query, onlyGuid)
         return a.id < b.id
     end)
     return rows
+end
+
+-- Rows of several professions in one list, by name (GF-001-D22).
+function Recipes.rowsFor(index, skills, query, onlyGuid, opts)
+    local out = {}
+    for _, skill in ipairs(skills) do
+        for _, r in ipairs(Recipes.rows(index, skill, query, onlyGuid, opts)) do out[#out + 1] = r end
+    end
+    if #skills > 1 then
+        table.sort(out, function(a, b)
+            if a.name ~= b.name then return a.name < b.name end
+            return a.id < b.id
+        end)
+    end
+    return out
 end
 
 -- "測試甲、測試乙 +2" (online first, at most 3 names).
@@ -313,27 +463,151 @@ function Recipes.crafterText(list)
     return text
 end
 
+-- Online crafters other than this character (online first already).
+function Recipes.onlineCrafters(list)
+    local out = {}
+    for _, m in ipairs(list or {}) do
+        if m.online and not m.self then out[#out + 1] = m end
+    end
+    return out
+end
+
+-- First online crafter other than this character, or nil.
+function Recipes.onlineCrafter(list)
+    return Recipes.onlineCrafters(list)[1]
+end
+
+---------------------------------------------------------------------------
+-- What a click on a recipe can do (GF-001-D19; docs/research/recipe-click.md)
+---------------------------------------------------------------------------
+
+-- Chat link of a recipe: the trade skill link when the client gives one,
+-- else the spell link. nil when neither works.
+function Recipes.link(id)
+    local t = T()
+    if type(t) == "table" and type(t.GetRecipeLink) == "function" then
+        local link = ns.call(t.GetRecipeLink, id)
+        if type(link) == "string" and link ~= "" then return link end
+    end
+    if C_Spell and type(C_Spell.GetSpellLink) == "function" then
+        local link = ns.call(C_Spell.GetSpellLink, id)
+        if type(link) == "string" and link ~= "" then return link end
+    end
+    return nil
+end
+
+local function chatUtil(modern, legacy)
+    if type(ChatFrameUtil) == "table" and type(ChatFrameUtil[modern]) == "function" then return ChatFrameUtil[modern] end
+    if type(_G[legacy]) == "function" then return _G[legacy] end
+    return nil
+end
+
+-- Shift-click: put the link into the chat box (opening it when closed).
+function Recipes.insertLink(id)
+    local link = Recipes.link(id)
+    if not link then return false end
+    local insert = chatUtil("InsertLink", "ChatEdit_InsertLink")
+    if insert and ns.call(insert, link) then return true end
+    local open = chatUtil("OpenChat", "ChatFrame_OpenChat")
+    if open then
+        local ok = pcall(open, link)
+        return ok
+    end
+    return false
+end
+
+-- Click: the recipe's own tooltip, pinned (as a chat link opens).
+function Recipes.showDetail(id)
+    local tip = ItemRefTooltip
+    if type(tip) ~= "table" or type(tip.SetHyperlink) ~= "function" then return false end
+    local link = Recipes.link(id)
+    local hyperlink = link and link:match("|H(.-)|h") or ("spell:" .. id)
+    if tip.SetOwner then pcall(tip.SetOwner, tip, UIParent, "ANCHOR_PRESERVE") end
+    local ok = pcall(tip.SetHyperlink, tip, hyperlink)
+    if ok and tip.Show then tip:Show() end
+    return ok
+end
+
+-- 「密語」: open a whisper to an online crafter (m, or the first one), with
+-- the recipe in it. The player still presses Enter; nothing is sent by the
+-- toolkit.
+function Recipes.whisper(data, m)
+    m = m or (data and Recipes.onlineCrafter(data.crafters))
+    if not m then return false end
+    local link = Recipes.link(data.id) or data.name
+    local withText = chatUtil("SendTellWithMessage", "ChatFrame_SendTellWithMessage")
+    if withText and pcall(withText, m.name, "可以幫我做" .. link .. "嗎？") then return true end
+    local tell = chatUtil("SendTell", "ChatFrame_SendTell")
+    return tell ~= nil and pcall(tell, m.name) or false
+end
+
+-- This character's own recipe in its profession window (click on a row,
+-- GF-001-D20). Only out of combat; false when the function is missing or
+-- fails, and the caller then shows the pinned recipe instead.
+function Recipes.openOwn(id)
+    if ns.inCombat() then return false end
+    local t = T()
+    if type(t) ~= "table" or type(t.OpenRecipe) ~= "function" then return false end
+    return (pcall(t.OpenRecipe, id))
+end
+
 ---------------------------------------------------------------------------
 -- 「配方」 page
 ---------------------------------------------------------------------------
 
-local ROW_HEIGHT, MAX_TABS = 22, 9
-local panel, scroll, content, search, emptyLine, filterLine, clearFilter, footer
-local tabs, rowWidgets = {}, {}
+local ROW_HEIGHT, RECIPE_ICON, RECIPE_TIP_X = 22, 20, 300
+local panel, scroll, content, search, emptyLine, filterLine, clearFilter
+local rowWidgets = {}
 local shownRows = {} -- all rows of the current list; only those in view have frames
-local current = { skill = nil, guid = nil, query = "" }
+local lastIndex = {} -- the index the page last drew (option lists use it)
+local current = { skills = {}, guid = nil, query = "", online = false }
 Recipes.state = current
 
-local function professionName(skill) return ns.Data.skillName(nil, skill) or ("專業 " .. skill) end
+local function professionName(skill)
+    if not skill then return nil end
+    return ns.Data.skillName(nil, skill) or ("專業 " .. skill)
+end
+
+-- Right-click: 「密語 名字」 for each online crafter (GF-001-D20).
+function Recipes.whisperItems(data)
+    local items = {}
+    for _, m in ipairs(Recipes.onlineCrafters(data and data.crafters)) do
+        items[#items + 1] = { text = "密語 " .. ns.shortName(m.name), fn = function() Recipes.whisper(data, m) end }
+    end
+    return items
+end
+
+-- A click on a row (GF-001-D20): Shift = link in chat; my own recipe =
+-- open it in my profession window, else (or when that does not work) the
+-- recipe pinned; right button = whisper menu.
+function Recipes.click(row, button)
+    local data = row and row.data
+    if not data then return "none" end
+    if button == "RightButton" then
+        return ns.showMenu(row, Recipes.whisperItems(data)) and "menu" or "none"
+    end
+    if type(IsShiftKeyDown) == "function" and IsShiftKeyDown() then
+        return Recipes.insertLink(data.id) and "link" or "none"
+    end
+    if data.mine and Recipes.openOwn(data.id) then return "open" end
+    return Recipes.showDetail(data.id) and "detail" or "none"
+end
 
 local function newRow(i)
-    local row = CreateFrame("Frame", nil, content)
+    local row = CreateFrame("Button", nil, content)
     row:SetSize(930, ROW_HEIGHT)
     row.bg = row:CreateTexture(nil, "BACKGROUND")
     row.bg:SetAllPoints()
+    -- Hover: a light highlight under the text; the row stays readable.
+    if row.SetHighlightTexture then
+        row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+    end
+    row.icon = row:CreateTexture(nil, "ARTWORK")
+    row.icon:SetSize(RECIPE_ICON, RECIPE_ICON)
+    row.icon:SetPoint("LEFT", row, "LEFT", 6, 0)
     row.name = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    row.name:SetPoint("LEFT", row, "LEFT", 8, 0)
-    row.name:SetWidth(420)
+    row.name:SetPoint("LEFT", row, "LEFT", 32, 0)
+    row.name:SetWidth(396)
     row.name:SetJustifyH("LEFT")
     row.name:SetWordWrap(false)
     row.who = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -342,10 +616,11 @@ local function newRow(i)
     row.who:SetJustifyH("LEFT")
     row.who:SetWordWrap(false)
     row:EnableMouse(true)
+    if row.RegisterForClicks then row:RegisterForClicks("LeftButtonUp", "RightButtonUp") end
     row:SetScript("OnEnter", function(self)
         local data = self.data
         if not data then return end
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        ns.tooltipAbove(self, RECIPE_TIP_X) -- next to the name, not the screen corner
         local shown = false
         if type(GameTooltip.SetSpellByID) == "function" then
             shown = pcall(GameTooltip.SetSpellByID, GameTooltip, data.id)
@@ -355,22 +630,14 @@ local function newRow(i)
         GameTooltip:AddLine("會做的人", 1, 0.82, 0)
         for _, m in ipairs(data.crafters) do
             local c = m.online and { 0.4, 1, 0.4 } or { 0.8, 0.8, 0.8 }
-            local note = Recipes.agoText(m.t) .. "記錄" .. (m.relayed and "，公會成員轉傳" or "")
-            GameTooltip:AddLine(string.format("%s（%s）", ns.shortName(m.name), note), c[1], c[2], c[3])
+            GameTooltip:AddLine(ns.shortName(m.name), c[1], c[2], c[3])
         end
         GameTooltip:Show()
     end)
     row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    row:SetScript("OnClick", function(self, button) Recipes.click(self, button) end)
     rowWidgets[i] = row
     return row
-end
-
-local function newTab(i)
-    local b = ns.createFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    b:SetSize(100, 24)
-    b:SetPoint("TOPLEFT", panel, "TOPLEFT", 20 + (i - 1) * 104, -40)
-    tabs[i] = b
-    return b
 end
 
 function Recipes.professionsInIndex(index)
@@ -382,6 +649,71 @@ function Recipes.professionsInIndex(index)
         return a < b
     end)
     return list
+end
+
+-- Professions on the page: the ones in the index (only the member's own
+-- when the page is filtered to one member).
+function Recipes.pageSkills(index)
+    local skills = Recipes.professionsInIndex(index)
+    if not current.guid then return skills end
+    local mine = {}
+    for _, s in ipairs(skills) do
+        for _, c in ipairs(index[s].crafters) do if c.guid == current.guid then mine[#mine + 1] = s; break end end
+    end
+    return mine
+end
+
+function Recipes.skillOptions()
+    local list = {}
+    for _, s in ipairs(Recipes.pageSkills(lastIndex)) do
+        list[#list + 1] = { value = s, text = professionName(s), icon = ns.Icons.professionIcon(s) }
+    end
+    return list
+end
+
+-- The ticked professions among those on the page (all by default).
+function Recipes.selectedSkills(skills)
+    local b = Recipes.skillChoice
+    if not b then return skills end
+    local out = {}
+    for _, s in ipairs(skills) do if b.isOn(s) then out[#out + 1] = s end end
+    return out
+end
+
+-- "全部專業" / "烹飪" / "3 個專業" / "沒有選專業"
+function Recipes.skillSummary(b)
+    local list = b.options()
+    if b.selected == nil then return "全部專業" end
+    local on = {}
+    for _, o in ipairs(list) do if b.isOn(o.value) then on[#on + 1] = o end end
+    if #on == 0 then return "沒有選專業" end
+    if #on == #list then return "全部專業" end
+    if #on == 1 then return on[1].text end
+    return #on .. " 個專業"
+end
+
+Recipes.WHO_OPTIONS = {
+    { value = "me", text = "我" },
+    { value = "others", text = "別人" },
+}
+
+-- 會做的人 as rows() wants it: nil (both), "mine", "others" or "none".
+function Recipes.whoFilter()
+    local b = Recipes.whoChoice
+    if not b or b.selected == nil then return nil end
+    local me, others = b.isOn("me"), b.isOn("others")
+    if me and others then return nil end
+    if me then return "mine" end
+    if others then return "others" end
+    return "none"
+end
+
+function Recipes.whoSummary()
+    local w = Recipes.whoFilter()
+    if w == "mine" then return "只看我的" end
+    if w == "others" then return "只看別人的" end
+    if w == "none" then return "沒有選" end
+    return "所有人"
 end
 
 -- Fill the pooled rows with the recipes in view (GF-001-D14).
@@ -402,6 +734,7 @@ function Recipes.layoutRows()
                 row:ClearAllPoints()
                 row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -(i - 1) * ROW_HEIGHT)
                 row.bg:SetColorTexture(0.17, 0.2, 0.18, i % 2 == 0 and 0.35 or 0.09)
+                Recipes.setIcon(row.icon, data.id, data.skill)
                 row.name:SetText(data.name)
                 row.who:SetText(Recipes.crafterText(data.crafters))
                 local online = data.crafters[1] and data.crafters[1].online
@@ -414,6 +747,8 @@ function Recipes.layoutRows()
     end
 end
 function Recipes.rowFrames() return rowWidgets end
+-- All rows of the current list (offline tests).
+function Recipes.shownRows() return shownRows end
 
 Recipes.BUILDING_TEXT = "配方整理中，請稍候。"
 
@@ -423,7 +758,6 @@ function Recipes.refresh()
         if ns.Framework.isModuleShown("recipes") then Recipes.refresh() end
     end)
     if not index then
-        for _, b in ipairs(tabs) do b:Hide() end
         shownRows = {}
         content:SetHeight(1)
         Recipes.layoutRows()
@@ -432,42 +766,24 @@ function Recipes.refresh()
         clearFilter:Hide()
         return
     end
-    local skills = Recipes.professionsInIndex(index)
-    if current.guid then
-        -- Filtered to one member: only professions that member shared.
-        local mine = {}
-        for _, s in ipairs(skills) do
-            for _, c in ipairs(index[s].crafters) do if c.guid == current.guid then mine[#mine + 1] = s; break end end
-        end
-        skills = mine
-    end
-    local found = false
-    for _, s in ipairs(skills) do if s == current.skill then found = true end end
-    if not found then current.skill = skills[1] end
-    for i = 1, math.max(#skills, #tabs) do
-        local s = skills[i]
-        local b = tabs[i] or (i <= MAX_TABS and s and newTab(i)) or nil
-        if b then
-            if s and i <= MAX_TABS then
-                b:SetText(professionName(s))
-                b:SetScript("OnClick", function() current.skill = s; Recipes.refresh() end)
-                if b.SetEnabled then b:SetEnabled(s ~= current.skill) end
-                b.skill = s
-                b:Show()
-            else
-                b:Hide()
-            end
-        end
-    end
-    local rows = current.skill and Recipes.rows(index, current.skill, current.query, current.guid) or {}
+    lastIndex = index
+    local skills = Recipes.pageSkills(index)
+    local chosen = Recipes.selectedSkills(skills)
+    current.skills = chosen
+    if Recipes.skillChoice then Recipes.skillChoice.refreshText() end
+    if Recipes.whoChoice then Recipes.whoChoice.refreshText() end
+    local opts = { online = current.online, who = Recipes.whoFilter() }
+    local rows = Recipes.rowsFor(index, chosen, current.query, current.guid, opts)
     shownRows = rows
     content:SetHeight(math.max(1, #rows * ROW_HEIGHT))
     Recipes.layoutRows()
+    local filtered = current.query ~= "" or current.online or opts.who ~= nil
     if #skills == 0 then
-        emptyLine:SetText(current.guid and "這位成員還沒有分享配方。"
-            or "還沒有人分享配方。打開自己的專業視窗，就會分享你的配方。")
+        emptyLine:SetText(current.guid and "這位成員還沒有分享配方。" or "還沒有人分享配方。")
+    elseif #chosen == 0 then
+        emptyLine:SetText("沒有選專業。")
     elseif #rows == 0 then
-        emptyLine:SetText(current.query ~= "" and "找不到符合的配方。" or "這個專業還沒有配方資料。")
+        emptyLine:SetText(filtered and "找不到符合的配方。" or "這個專業還沒有配方資料。")
     else
         emptyLine:SetText("")
     end
@@ -479,62 +795,75 @@ function Recipes.refresh()
         filterLine:SetText("只看：" .. ns.shortName(name or "?"))
         clearFilter:Show()
     else
-        filterLine:SetText(current.skill and string.format("%s｜%d 個配方", professionName(current.skill), #rows) or "")
+        filterLine:SetText(#chosen > 0 and string.format("%d 個配方", #rows) or "")
         clearFilter:Hide()
     end
 end
 
--- Open the page, optionally on one member (GUID) and one profession.
+-- Open the page, optionally on one member (GUID) and one profession (then
+-- only that one is ticked).
 function Recipes.show(guid, skill)
     current.guid = guid
-    if skill then current.skill = skill end
     ns.Framework.open("recipes")
+    if skill and Recipes.skillChoice then Recipes.skillChoice.selected = { [skill] = true } end
     Recipes.refresh()
 end
 
+-- GF-001-D20 layout: one filter line at the top, like the roster's:
+-- 搜尋 [box]  專業 [▼]  會做的人 [▼]  [ ] 只看在線   N 個配方
+local FILTER_Y = -44
+
+local function label(p, text, x)
+    local l = p:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    l:SetPoint("TOPLEFT", p, "TOPLEFT", x, FILTER_Y - 6)
+    l:SetText(text)
+    return l
+end
+
 local function build(p)
-    panel = p
+    label(p, "搜尋", 22)
     search = ns.createFrame("EditBox", nil, p, "InputBoxTemplate")
-    search:SetSize(260, 24)
-    search:SetPoint("TOPLEFT", p, "TOPLEFT", 70, -74)
+    search:SetSize(180, 24)
+    search:SetPoint("TOPLEFT", p, "TOPLEFT", 62, FILTER_Y)
     search:SetAutoFocus(false)
     search:SetMaxLetters(60)
     search:SetScript("OnTextChanged", function(self) current.query = str(self:GetText()); Recipes.refresh() end)
     search:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     Recipes.searchBox = search
-    local label = p:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    label:SetPoint("TOPLEFT", p, "TOPLEFT", 22, -80)
-    label:SetText("搜尋")
+    label(p, "專業", 262)
+    -- GF-001-D22: check boxes (several professions at once), with icons.
+    Recipes.skillChoice = ns.multiChoiceButton(p, 120, 300, FILTER_Y, Recipes.skillOptions,
+        function() Recipes.refresh() end, Recipes.skillSummary)
+    label(p, "會做的人", 440)
+    Recipes.whoChoice = ns.multiChoiceButton(p, 110, 500, FILTER_Y, function() return Recipes.WHO_OPTIONS end,
+        function() Recipes.refresh() end, Recipes.whoSummary)
+    Recipes.onlineCheck = ns.checkBox(p, "只看在線", 628, FILTER_Y, function(on) current.online = on; Recipes.refresh() end)
     filterLine = p:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    filterLine:SetPoint("TOPLEFT", p, "TOPLEFT", 350, -80)
+    filterLine:SetPoint("TOPLEFT", p, "TOPLEFT", 724, FILTER_Y - 5)
     filterLine:SetJustifyH("LEFT")
     clearFilter = ns.createFrame("Button", nil, p, "UIPanelButtonTemplate")
-    clearFilter:SetSize(110, 22)
-    clearFilter:SetPoint("TOPLEFT", p, "TOPLEFT", 560, -75)
+    clearFilter:SetSize(100, 22)
+    clearFilter:SetPoint("TOPLEFT", p, "TOPLEFT", 840, FILTER_Y - 1)
     clearFilter:SetText("看全部的人")
     clearFilter:SetScript("OnClick", function() current.guid = nil; Recipes.refresh() end)
     clearFilter:Hide()
     Recipes.clearFilterButton = clearFilter
     local header = p:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    header:SetPoint("TOPLEFT", p, "TOPLEFT", 28, -108)
+    header:SetPoint("TOPLEFT", p, "TOPLEFT", 52, -82)
     header:SetText("配方")
     local header2 = p:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    header2:SetPoint("TOPLEFT", p, "TOPLEFT", 460, -108)
-    header2:SetText("會做的人（在線的在前）")
+    header2:SetPoint("TOPLEFT", p, "TOPLEFT", 460, -82)
+    header2:SetText("會做的人")
     scroll = ns.createFrame("ScrollFrame", nil, p, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 20, -126)
-    scroll:SetPoint("BOTTOMRIGHT", -40, 44)
+    scroll:SetPoint("TOPLEFT", 20, -100)
+    scroll:SetPoint("BOTTOMRIGHT", -40, 24)
     content = CreateFrame("Frame", nil, scroll)
     content:SetSize(930, 1)
     scroll:SetScrollChild(content)
     scroll:HookScript("OnVerticalScroll", function() Recipes.layoutRows() end)
     emptyLine = p:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    emptyLine:SetPoint("TOP", p, "TOP", 0, -170)
-    footer = p:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    footer:SetPoint("BOTTOMLEFT", p, "BOTTOMLEFT", 22, 18)
-    footer:SetWidth(940)
-    footer:SetJustifyH("LEFT")
-    footer:SetText("配方由公會內有裝工具箱的人分享與轉傳；打開自己的專業視窗就會更新。你的配方也會分享給公會成員。")
+    emptyLine:SetPoint("TOP", p, "TOP", 0, -150)
+    panel = p -- last: refresh() needs every widget above
 end
 
 ns.Framework.register({

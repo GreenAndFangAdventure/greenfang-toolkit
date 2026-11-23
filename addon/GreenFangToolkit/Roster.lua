@@ -62,7 +62,7 @@ end
 function Roster.current()
     if not ns.db or not Roster.available() then return nil end
     local guild = str((ns.call(GetGuildInfo, "player")))
-    local realm = str((ns.call(GetRealmName)))
+    local realm = ns.realm()
     local s = Roster.snapshotFor(realm, guild)
     if type(s) == "table" and type(s.members) == "table" and #s.members > 0 then return s end
     return nil
@@ -108,7 +108,7 @@ function Roster.collect()
     end
     local guild = GetGuildInfo and str(GetGuildInfo("player")) or ""
     if guild == "" then return false, "尚未取得公會名稱" end
-    local realm = GetRealmName and str(GetRealmName()) or ""
+    local realm = ns.realm()
     local previous = olderMembers(realm, guild)
     local clubGUID, clubExact, clubShort = guildClubIndex()
     local ownGUID = ns.Data.player().guid
@@ -210,6 +210,7 @@ function Roster.collect()
         for _, m in ipairs(members) do
             if ownGUID and m.guid == ownGUID then
                 ns.Sync.rememberGuild(ownGUID, guild, m.guildRank)
+                ns.Data.rememberFullName(ownGUID, m.name) -- GF-001-D24
             end
         end
         ns.Sync.rememberGuild(ownGUID, guild, nil)

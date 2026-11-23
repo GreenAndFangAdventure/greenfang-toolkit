@@ -36,6 +36,28 @@ local function textWidth(t)
     return w
 end
 
+-- A FontString with a fixed width (SetWidth > 0) reports at most that width,
+-- as the client does for truncated text; SetWidth(0) frees it (GF-001-D18:
+-- this is what cut the roster's profession names to "…"). Shared functions,
+-- so every mock object does not carry its own copies.
+local function fixedWidthOf(self)
+    local fixed = self._fixedWidth
+    if self._kind == "FontString" and type(fixed) == "number" and fixed > 0 then return fixed end
+end
+local function setWidth(self, w) self._fixedWidth = w end
+local function setAlpha(self, a) self._alpha = a end
+local function setFrameStrata(self, v) self._strata = v end
+local function setColorTexture(self, r, g, b, a) self._color = { r, g, b, a } end
+local function getStringWidth(self)
+    local w, fixed = textWidth(self._text), fixedWidthOf(self)
+    if fixed and w > fixed then return fixed end
+    return w
+end
+local function isTruncated(self)
+    local fixed = fixedWidthOf(self)
+    return fixed ~= nil and textWidth(self._text) > fixed
+end
+
 local function newObject(kind, name)
     local o = { _kind = kind, _name = name, _shown = true, _scripts = {}, _events = {}, _text = "", _attrs = {} }
     allObjects[#allObjects + 1] = o
@@ -62,7 +84,9 @@ local function newObject(kind, name)
     function methods.SetAttribute(self, k, v) guard(self, "SetAttribute"); self._attrs[k] = v end
     function methods.GetAttribute(self, k) return self._attrs[k] end
     function methods.RegisterForClicks(self, ...) self._clicks = { ... } end
-    function methods.GetStringWidth(self) return textWidth(self._text) end
+    methods.SetWidth, methods.GetStringWidth, methods.IsTruncated = setWidth, getStringWidth, isTruncated
+    methods.SetAlpha = setAlpha
+    methods.SetFrameStrata, methods.SetColorTexture = setFrameStrata, setColorTexture
     function methods.SetVerticalScroll(self, v)
         self._vscroll = v
         if self._scripts.OnVerticalScroll then self._scripts.OnVerticalScroll(self, v) end
@@ -340,7 +364,7 @@ function wow.installGlobals()
     allObjects = {}
     GameTooltip = newObject("GameTooltip", "GameTooltip")
     GameTooltip._lines = {}
-    GameTooltip.SetOwner = function(self, owner) self._owner = owner; self._lines = {} end
+    GameTooltip.SetOwner = function(self, owner, anchor) self._owner = owner; self._anchor = anchor; self._points = {}; self._lines = {} end
     GameTooltip.GetOwner = function(self) return self._owner end
     GameTooltip.ClearLines = function(self) self._lines = {} end
     GameTooltip.AddLine = function(self, text, r, g, b)
@@ -543,6 +567,14 @@ function wow.installGlobals()
             IsTradeSkillGuild = function() return ts.guild == true end,
             IsTradeSkillGuildMember = function() return ts.guildMember == true end,
         }
+        -- GF-001-D21: like Forever, GetAllRecipeIDs may list other
+        -- professions' recipes; ts.recipeSkills = { [id] = skillLineID }.
+        if ts.recipeSkills then
+            C_TradeSkillUI.GetProfessionInfoByRecipeID = function(id)
+                local skill = ts.recipeSkills[id]
+                return skill and { professionID = skill, parentProfessionID = skill } or nil
+            end
+        end
     end
     GetPlayerInfoByGUID = function(guid)
         if guid == "Player-0000-0000000D" then return "獵人", "HUNTER", "食人妖", "Troll", 2, "測試丁", "" end

@@ -253,7 +253,10 @@ test("one entry per character and per guild across logins and rescans", function
     saved = wow.logout()
     local alt = wow.defaultPlayer()
     alt.guid, alt.name = "Player-0000-0000000F", "測試己"
-    wow.reset({ now = 1763390000, player = alt })
+    local roster = wow.defaultRoster() -- the alt is in the guild's roster too
+    roster[#roster + 1] = { name = "測試己-測試伺服器", rank = "會員", level = 10, class = "戰士",
+        classToken = "WARRIOR", zone = "奧格瑪", online = true, guid = alt.guid }
+    wow.reset({ now = 1763390000, player = alt, roster = roster })
     wow.login(ADDON_DIR, saved)
     eq(#entriesOf("character.self"), 2, "two characters -> two character.self")
     eq(#entriesOf("roster.snapshot"), 1, "same guild -> one roster.snapshot")
@@ -772,24 +775,18 @@ test("sync status: the roster's small 「同步與診斷」 button and the windo
     ok(not ns.Diag.isShown(), "second click closes it")
 end)
 
-test("sync status: minimap tooltip shows the same line and stays current", function()
+test("D19 minimap tooltip: only the name; no hints, no sync status", function()
     wow.reset()
     local ns = wow.login(ADDON_DIR)
     local b = _G.GreenFangToolkit_MinimapButton
     b:GetScript("OnEnter")(b)
-    local function lines()
-        local t = {}
-        for _, l in ipairs(GameTooltip._lines) do t[#t + 1] = l.text end
-        return table.concat(t, "\n")
-    end
-    ok(lines():find(ns.Sync.shortStatus(), 1, true), "tooltip has the status line")
-    for _, l in ipairs(GameTooltip._lines) do noCommand(l.text, "tooltip") end
+    local t = {}
+    for _, l in ipairs(GameTooltip._lines) do t[#t + 1] = l.text end
+    eq(table.concat(t, "|"), "綠皮冒險工具箱", "name only")
     GreenFangToolkitDB.sync.outbox = {}
     ns.Sync.recordSelf(true)
-    ok(lines():find("待上傳 1 筆", 1, true), "open tooltip updated after an outbox write")
+    eq(#GameTooltip._lines, 1, "an outbox write does not add a status line")
     b:GetScript("OnLeave")(b)
-    ns.Sync.recordSelf(true)
-    eq(#GameTooltip._lines, 0, "closed tooltip is not rebuilt")
 end)
 
 ---------------------------------------------------------------------------
@@ -1474,6 +1471,33 @@ test("icons: class colour from C_ClassColor, else built-in; class icon falls bac
     eq(ns.Icons.setClassIcon(tex, "NOPE"), false, "unknown class -> hidden")
 end)
 
+-- GF-001-D18: the professions cell as text, one entry per shown slot:
+-- "<icon file name>:<points>" (just the icon name when no points), the text
+-- when there is no icon, then "+N". Icon paths keep only the last part.
+local function profIconName(t)
+    if type(t) == "string" then return (t:match("([^\\]+)$")) end
+    return tostring(t)
+end
+
+local function profCell(row)
+    local list = {}
+    for _, s in ipairs(row.profSlots) do
+        local icon = s.icon:IsShown() and profIconName(s.icon._texture) or nil
+        local text = s.label:IsShown() and s.label:GetText() or ""
+        if icon and text ~= "" then list[#list + 1] = icon .. ":" .. text
+        elseif icon then list[#list + 1] = icon
+        elseif text ~= "" then list[#list + 1] = text end
+    end
+    if row.profMore:IsShown() then list[#list + 1] = row.profMore:GetText() end
+    return table.concat(list, "|")
+end
+
+local function rosterRow(ns, name)
+    for _, row in ipairs(ns.UI.rows()) do
+        if row:IsShown() and row.memberName == name then return row end
+    end
+end
+
 test("roster: rows show class icon/colour, rank column, profession names; rank sorts by index", function()
     wow.reset()
     local ns = wow.login(ADDON_DIR)
@@ -1490,9 +1514,21 @@ test("roster: rows show class icon/colour, rank column, profession names; rank s
         if o._texture then textures[o._texture] = true end
     end
     ok(textures["Interface\\Icons\\ClassIcon_Warrior"], "warrior class icon in the roster")
-    -- GF-001-D8: the professions cell is a compact text list (no icons).
-    local texts = table.concat(wow.allTexts(), "\n")
-    ok(texts:find("採礦", 1, true), "mining name for a member with a name only")
+    -- GF-001-D18: the professions cell shows icons (dimmed, no points, for a
+    -- member known by name only); the tooltip names them.
+    ok(textures["Interface\\Icons\\Trade_Mining"], "mining icon for a member with a name only")
+    local named
+    for _, row in ipairs(ns.UI.rows()) do
+        if row:IsShown() and row.rosterNames then named = row end
+    end
+    ok(named, "a row with names only")
+    ok(not profCell(named):find(":", 1, true), "no points for names only: " .. profCell(named))
+    named._scripts.OnEnter(named)
+    local tip = {}
+    for _, l in ipairs(GameTooltip._lines) do tip[#tip + 1] = l.text end
+    tip = table.concat(tip, "\n")
+    ok(tip:find(named.rosterNames[1], 1, true), "tooltip names the profession")
+    ok(not tip:find("技能點數未知", 1, true), "no explanation line (D19)")
 end)
 
 test("character page: icons and progress bars for own professions", function()
@@ -1756,10 +1792,11 @@ test("roster window: shared professions show skill points and update time", func
     ok(detail, "detail for the member who shared")
     eq(detail.source, "公會成員分享", "source")
     eq(ns.UI.skillLabel(detail.professions[3]), "釣魚 150 / 225", "label")
-    ok(ns.UI.updatedText(detail):find("更新時間", 1, true), "update time text")
-    local texts = table.concat(wow.allTexts(), "\n")
-    ok(texts:find("採礦 300/300", 1, true), "shared skill points in the list")
-    ok(texts:find("製皮 151/225", 1, true), "own row uses own skill points")
+    eq(ns.UI.updatedText, nil, "no update time text (D19)")
+    local peerCell = profCell(rosterRow(ns, PEER))
+    ok(peerCell:find("^Trade_Mining:300|"), "shared skill points in the list: " .. peerCell)
+    local ownCell = profCell(rosterRow(ns, "測試甲-測試伺服器"))
+    ok(ownCell:find(":151", 1, true), "own row uses own skill points: " .. ownCell)
     local quiet
     for _, m in ipairs(ns.Roster.current().members) do if m.name == "測試丁-測試伺服器" then quiet = m end end
     eq(ns.UI.detailFor(quiet), nil, "members without data unchanged")
@@ -1849,7 +1886,7 @@ test("D8 character page: secure spell buttons for professions with a window only
     for _, b in ipairs(shown) do if b:GetAttribute("spell") == "鍛造" then smith = b end end
     eq(wow.click(smith), "spell:鍛造", "click opens the window")
     eq(table.concat(wow.state.casts, ","), "鍛造", "only that spell cast")
-    ok(table.concat(wow.allTexts(), "\n"):find("點專業可以開啟技能視窗", 1, true), "hint shown")
+    ok(not table.concat(wow.allTexts(), "\n"):find("點專業可以開啟技能視窗", 1, true), "no hint (D19)")
     ns.Framework.open("sleepingbag")
     eq(#ns.Professions.shown("character"), 0, "hidden with the page")
     ns.Framework.open("character")
@@ -1883,33 +1920,101 @@ local function rowFor(ns, name)
     end
 end
 
-local function rowTexts(row)
-    local list = {}
-    for _, l in ipairs(row.profSlots) do if l:IsShown() then list[#list + 1] = l:GetText() end end
-    if row.profMore:IsShown() then list[#list + 1] = row.profMore:GetText() end
-    return table.concat(list, "|")
-end
+local rowTexts = profCell
 
-test("D8 roster: one-line list with skill points, primary then secondary, +N, － without data", function()
+test("D18 roster: icon + skill points, primary then secondary, － without data", function()
     wow.reset({ player = crafter() })
     local ns = wow.login(ADDON_DIR)
     sendFrom(ns, PEER, peerData())
     ns.Framework.open("roster")
     local own = rowFor(ns, "測試甲-測試伺服器")
-    eq(rowTexts(own), "鍛造 34/75|採礦 50/75|急救 10/75|釣魚 20/75|+1", "own: primary first, then secondary")
+    -- Own icons are the file IDs GetProfessionInfo returns.
+    eq(rowTexts(own), "136241:34|136248:50|135966:10|136245:20|133971:1", "own: primary first, then secondary")
     local peer = rowFor(ns, PEER)
-    eq(rowTexts(peer), "採礦 300/300|鍛造 280/300|釣魚 150/225|+2", "peer: what does not fit is counted")
+    eq(rowTexts(peer), "Trade_Mining:300|Trade_BlackSmithing:280|Trade_Fishing:150|INV_Misc_Food_15:90|Spell_Holy_SealOfSacrifice:75",
+        "peer: every profession fits as icon + points")
+    eq(peer.profSlots[3].label._color[1], 0.72, "secondary points in the secondary colour")
     eq(peer._h, 23, "row height unchanged")
-    eq(rowTexts(rowFor(ns, "測試丙-測試伺服器")), "裁縫|附魔", "names only from the roster")
-    eq(rowTexts(rowFor(ns, "測試丁-測試伺服器")), "－", "no data")
+    eq(rowTexts(rowFor(ns, "測試丙-測試伺服器")), "Trade_Tailoring|Trade_Engraving", "names only: icons without points")
+    eq(rowTexts(rowFor(ns, "測試丁-測試伺服器")), "－", "no data: a faint dash")
+    eq(rowFor(ns, "測試丁-測試伺服器").profSlots[1].label._color[1], 0.42, "the dash is faint")
     peer._scripts.OnEnter(peer)
     local lines = {}
     for _, l in ipairs(GameTooltip._lines) do lines[#lines + 1] = l.text end
     local tip = table.concat(lines, "\n")
-    for _, want in ipairs({ "採礦 300 / 300", "鍛造 280 / 300", "釣魚 150 / 225", "烹飪 90 / 150", "急救 75 / 150", "更新時間" }) do
+    for _, want in ipairs({ "採礦 300 / 300", "鍛造 280 / 300", "釣魚 150 / 225", "烹飪 90 / 150", "急救 75 / 150" }) do
         ok(tip:find(want, 1, true), "tooltip has " .. want)
     end
-    eq(ns.UI.shortLabel({ name = "鍛造", rank = 34, max = 75 }), "鍛造 34/75", "format")
+    for _, gone in ipairs({ "更新時間", "公會成員分享", "本人", "點", "分鐘前" }) do
+        ok(not tip:find(gone, 1, true), "row tooltip has no " .. gone .. ": " .. tip)
+    end
+    for _, t in ipairs(wow.allTexts()) do ok(not t:find("…", 1, true), "no ellipsis in any text: " .. t) end
+end)
+
+test("D18 roster: a reused row measures its new text in full (the 0.9.2 「剝…」/「…」 rows)", function()
+    wow.reset({ player = crafter() })
+    local ns = wow.login(ADDON_DIR)
+    sendFrom(ns, PEER, peerData())
+    ns.Framework.open("roster")
+    local members = {}
+    for _, m in ipairs(ns.Roster.current().members) do members[m.name] = m end
+    local row = rowFor(ns, "測試丁-測試伺服器")
+    -- Same row, longer content each time: no data -> peer -> names only -> icons missing (text).
+    wow.state.missingFiles = {}
+    ns.UI.fillRow(row, members[PEER])
+    eq(rowTexts(row), "Trade_Mining:300|Trade_BlackSmithing:280|Trade_Fishing:150|INV_Misc_Food_15:90|Spell_Holy_SealOfSacrifice:75", "peer after no data")
+    for _, path in pairs(ns.Icons.PROFESSION) do wow.state.missingFiles[path] = true end
+    ns.UI.fillRow(row, members["測試丁-測試伺服器"])
+    ns.UI.fillRow(row, members["測試丙-測試伺服器"])
+    eq(rowTexts(row), "裁縫|附魔", "no icon in the client: the name instead")
+    ns.UI.fillRow(row, members[PEER])
+    eq(rowTexts(row), "採礦 300|鍛造 280|釣魚 150|烹飪 90|急救 75", "no icon: name and points")
+    for k, s in ipairs(row.profSlots) do
+        ok(not s.label:IsTruncated(), "slot " .. k .. " not cut: " .. s.label:GetText())
+    end
+    wow.state.missingFiles = nil
+end)
+
+test("D18 roster: secondary professions only while they fit; hidden primaries are counted", function()
+    wow.reset({ player = crafter() })
+    local ns = wow.login(ADDON_DIR)
+    sendFrom(ns, PEER, peerData())
+    ns.Framework.open("roster")
+    local peer = rowFor(ns, PEER)
+    local member
+    for _, m in ipairs(ns.Roster.current().members) do if m.name == PEER then member = m end end
+    local width = peer.profW
+    peer.profW = 100 -- 2 icons with 3 digits fit (34 + 8 + 34), a third does not
+    ns.UI.fillRow(peer, member)
+    eq(rowTexts(peer), "Trade_Mining:300|Trade_BlackSmithing:280", "secondaries left to the tooltip, not counted")
+    sendFrom(ns, PEER, peerData({ professions = {
+        { name = "採礦", skillLineID = 186, rank = 300, max = 300 },
+        { name = "鍛造", skillLineID = 164, rank = 280, max = 300 },
+        { name = "工程學", skillLineID = 202, rank = 5, max = 75 },
+        { name = "釣魚", skillLineID = 356, rank = 150, max = 225 } } }), "a2")
+    peer.profW = 80
+    ns.UI.fillRow(peer, member)
+    eq(rowTexts(peer), "Trade_Mining:300|+2", "room kept for +N while primaries remain")
+    peer.profW = width
+    ns.UI.fillRow(peer, member)
+    eq(rowTexts(peer), "Trade_Mining:300|Trade_BlackSmithing:280|Trade_Engineering:5|Trade_Fishing:150", "full width again")
+end)
+
+test("D18 roster: sorting by 專業技能 still uses the profession names", function()
+    wow.reset({ player = crafter() })
+    local ns = wow.login(ADDON_DIR)
+    ns.Framework.open("roster")
+    local list = ns.UI.sortMembers(ns.UI.filterMembers(ns.Roster.current().members, ""), "professions", true)
+    local last = list[#list]
+    ok(type(last.professions) ~= "table" or #last.professions == 0, "members without professions sort last")
+    local names = {}
+    for _, m in ipairs(list) do
+        if type(m.professions) == "table" and #m.professions > 0 then names[#names + 1] = table.concat(m.professions, "、") end
+    end
+    ok(#names >= 2, "several members with professions")
+    local desc = ns.UI.sortMembers(ns.UI.filterMembers(ns.Roster.current().members, ""), "professions", false)
+    ok(type(desc[#desc].professions) ~= "table" or #desc[#desc].professions == 0, "still last when descending")
+    ok(desc[1] ~= list[1] or #names == 1, "descending changes the order")
 end)
 
 test("D8 roster: own row only gets secure buttons; none for others; hidden when scrolled away", function()
@@ -1919,17 +2024,17 @@ test("D8 roster: own row only gets secure buttons; none for others; hidden when 
     ns.Framework.open("roster")
     local own = rowFor(ns, "測試甲-測試伺服器")
     local shown = ns.Professions.shown("roster")
-    -- 烹飪 is the 5th entry and does not fit in the cell (counted as +1).
-    eq(spellsOf(shown), "急救,熔煉,鍛造", "own visible professions with a window")
+    -- D18: all five fit as icons; 釣魚 has no window, so four buttons.
+    eq(spellsOf(shown), "急救,烹飪,熔煉,鍛造", "own visible professions with a window")
     for _, b in ipairs(shown) do eq(b._points[1][2], own, "anchored to the own row only") end
     ns.UI.scrollFrame():SetVerticalScroll(200)
     eq(#ns.Professions.shown("roster"), 0, "own row scrolled out of view -> hidden")
     ns.UI.scrollFrame():SetVerticalScroll(0)
-    eq(#ns.Professions.shown("roster"), 3, "back in view")
+    eq(#ns.Professions.shown("roster"), 4, "back in view")
     ns.Framework.open("sleepingbag")
     eq(#ns.Professions.shown("roster"), 0, "hidden with the page")
     ns.Framework.open("roster")
-    eq(#ns.Professions.shown("roster"), 3, "back with the page")
+    eq(#ns.Professions.shown("roster"), 4, "back with the page")
     ns.Framework.toggle() -- close the toolkit window
     eq(#ns.Professions.shown("roster"), 0, "hidden when the window closes")
     eq(#wow.state.blocked, 0, "nothing blocked")
@@ -2431,10 +2536,8 @@ test("D10 recipes: a filtered (smaller) list keeps the saved one; new recipes me
     wow.clearPrinted()
     eq(ns.Recipes.scan(), "filtered", "subset")
     eq(#ns.Share.decodeValue("R165", ns.Share.get(A_SELF, "R165").v), 2, "saved list kept")
-    ok(printedContains("有篩選"), "told once")
-    wow.clearPrinted()
-    ns.Recipes.scan()
-    ok(not printedContains("有篩選"), "only once per profession")
+    ok(not printedContains("篩選"), "nothing in chat (D19)")
+    ok(ns.Diag.shareText():find("專業視窗有篩選，配方沒有更新：製皮", 1, true), "noted in 同步與診斷")
     wow.state.tradeSkill.recipes = { [2152] = true, [2660] = true }
     eq(ns.Recipes.scan(), "stored", "new recipe")
     eq(table.concat(ns.Share.decodeValue("R165", ns.Share.get(A_SELF, "R165").v), ","), "2149,2152,2660", "union")
@@ -2496,17 +2599,16 @@ test("D10 recipe page: tabs per profession, rows, filter by member, empty text",
     shareFrom(ns, PEER, (rMsg(ns, A_THIRD, 197, t, { 3115 })))
     wow.advance(1.2) -- the page redraws at most once a second
     ok(has(texts(), "粗製磨刀石"), "recipe listed")
-    eq(ns.Recipes.state.skill, 164, "first profession selected")
+    eq(table.concat(ns.Recipes.state.skills, ","), "164,197", "every profession ticked (D22)")
     ns.Recipes.show("Player-0000-0000000C")
-    eq(ns.Recipes.state.skill, 197, "member's own profession")
+    eq(table.concat(ns.Recipes.state.skills, ","), "197", "member's own profession")
     ok(has(texts(), "只看：測試丙"), "filter shown")
     ok(ns.Recipes.clearFilterButton:IsShown(), "clear button")
     wow.click(ns.Recipes.clearFilterButton)
     eq(ns.Recipes.state.guid, nil, "filter cleared")
     ns.Recipes.searchBox:SetText("鎖甲")
     ns.Recipes.searchBox._scripts.OnTextChanged(ns.Recipes.searchBox)
-    ns.Recipes.state.skill = 164
-    ns.Recipes.refresh()
+    ns.Recipes.skillChoice.setOnly(164)
     eq(#ns.Recipes.rows(ns.Recipes.index(), 164, ns.Recipes.state.query, nil), 1, "search applied")
     ok(panel, "panel exists")
 end)
@@ -2522,8 +2624,9 @@ test("D10 roster: tooltip shows recipe counts; clicking a member opens their rec
     local list = {}
     for _, l in ipairs(GameTooltip._lines) do list[#list + 1] = l.text end
     local lines = table.concat(list, "\n")
-    ok(has(lines, "配方 2 個（2 小時前）"), "recipe count in tooltip: " .. lines)
-    ok(has(lines, "點一下看他的配方"), "click hint")
+    ok(has(lines, "配方 2 個"), "recipe count in tooltip: " .. lines)
+    ok(not has(lines, "小時前"), "no age (D19)")
+    ok(not has(lines, "點一下看他的配方"), "no click hint (D19)")
     row._scripts.OnMouseUp(row, "LeftButton")
     ok(ns.Framework.isModuleShown("recipes"), "recipe page opened")
     eq(ns.Recipes.state.guid, "Player-0000-0000000B", "filtered to that member")
@@ -2537,9 +2640,10 @@ test("D10 character page: recipe line per craft profession", function()
     local ns = shareLogin({ tradeSkill = leatherWindow() })
     ns.Framework.open("character")
     local function texts() return table.concat(wow.allTexts(), "\n") end
-    ok(has(texts(), "還沒記錄配方：打開一次專業視窗"), "not read yet")
+    ok(not has(texts(), "還沒記錄配方"), "no hint before the window was opened (D19)")
     wow.fire("TRADE_SKILL_SHOW")
-    ok(has(texts(), "配方 2 個，剛剛記錄"), "after opening the window")
+    ok(has(texts(), "配方 2 個"), "after opening the window")
+    ok(not has(texts(), "剛剛記錄"), "no time (D19)")
 end)
 
 test("D10 diag window: sections, sharing stats, export moved here, /gftk sync status opens it", function()
@@ -3352,8 +3456,7 @@ test("D14 recipe page: index built over several frames with 整理中, then only
     ok(not has(texts(), ns.Recipes.BUILDING_TEXT), "list shown")
     local frames = ns.Recipes.rowFrames()
     ok(#frames > 0 and #frames <= 10, "frames only for the rows in view: " .. #frames)
-    local index = ns.Recipes.index()
-    local rows = ns.Recipes.rows(index, ns.Recipes.state.skill, "", nil)
+    local rows = ns.Recipes.shownRows() -- D22: every ticked profession in one list
     ok(#rows > 100, "many recipes: " .. #rows)
     eq(frames[1].data.id, rows[1].id, "first row")
     -- New data later: the finished list stays on screen while a new one is built.
@@ -3567,7 +3670,8 @@ test("16001: GetProfessionInfo errors -> empty, no Lua error", function()
     local list = ns.Data.ownProfessionsDetailed()
     eq(#list, 0, "nothing read")
     wow.fire("PLAYER_LOGIN"); wow.advance(10)
-    eq(#entriesOf("character.self")[1].payload.professions, 0, "entry still written")
+    -- GF-001-D23: listed but unreadable is not "none": the field is left out.
+    eq(entriesOf("character.self")[1].payload.professions, nil, "entry still written, professions left out")
 end)
 
 test("16001: secret values become nil/empty, never stored", function()
@@ -3641,6 +3745,800 @@ local function buildFixture()
     saved = wow.logout()
     return saved.GreenFangToolkitDB
 end
+
+---------------------------------------------------------------------------
+-- GF-001-D19: player text only, bigger icons, per-icon tooltips, filters,
+-- recipe actions
+---------------------------------------------------------------------------
+
+local function tipText()
+    local t = {}
+    for _, l in ipairs(GameTooltip._lines) do t[#t + 1] = l.text end
+    return table.concat(t, "\n")
+end
+
+test("D19 roster icons: 20 px, full colour for names only, row height kept", function()
+    wow.reset({ player = crafter() })
+    local ns = wow.login(ADDON_DIR)
+    ns.Framework.open("roster")
+    local named = rowFor(ns, "測試丙-測試伺服器")
+    local s = named.profSlots[1]
+    eq(s.icon._w, 20, "icon 20 px wide")
+    eq(s.icon._h, 20, "icon 20 px high")
+    eq(s.icon._alpha, 1, "names only: full colour")
+    eq(named.profSlots[2].icon._alpha, 1, "second icon full colour too")
+    eq(named._h, 23, "row height unchanged")
+end)
+
+test("D19 roster tooltips: one profession over its icon, short member tooltip elsewhere", function()
+    local ns = shareLogin({ player = crafter() })
+    sendFrom(ns, PEER, peerData())
+    shareFrom(ns, PEER, (rMsg(ns, A_PEER, 164, wow.state.now - 7200, { 2660, 2661 })))
+    ns.Framework.open("roster")
+    local peer = rowFor(ns, PEER)
+    local smith = peer.profSlots[2]
+    eq(ns.UI.slotAt(peer, smith.x0 + 1), smith, "cursor over the second icon")
+    eq(ns.UI.slotAt(peer, smith.x1 + 3), nil, "between icons: none")
+    ns.UI.showRowTooltip(peer, smith)
+    eq(tipText(), "鍛造\n280 / 300\n配方 2 個", "that profession only")
+    ns.UI.showRowTooltip(peer, peer.profSlots[3])
+    eq(tipText(), "釣魚\n150 / 225", "fishing: name and rank / max")
+    ns.UI.showRowTooltip(peer, nil)
+    local tip = tipText()
+    ok(tip:find("鍛造 280 / 300　配方 2 個", 1, true), "member tooltip: " .. tip)
+    for _, gone in ipairs({ "更新時間", "本人", "分享", "點", "前", "技能點數未知" }) do
+        ok(not tip:find(gone, 1, true), "no " .. gone)
+    end
+    -- Names only: the icon tooltip is the name.
+    local named = rowFor(ns, "測試丙-測試伺服器")
+    ns.UI.showRowTooltip(named, named.profSlots[1])
+    eq(tipText(), "裁縫", "names only: just the name")
+    -- Own row: the secure buttons have the same short tooltip.
+    local b = ns.Professions.shown("roster")[1]
+    b._scripts.OnEnter(b)
+    tip = tipText()
+    ok(not tip:find("點一下", 1, true), "own button: no hint: " .. tip)
+    ok(tip:find(" / 75", 1, true), "own button: rank / max")
+end)
+
+test("D19 roster: click on an icon filters by that profession; again clears it", function()
+    local ns = shareLogin({ player = crafter() })
+    sendFrom(ns, PEER, peerData())
+    ns.Framework.open("roster")
+    local peer = rowFor(ns, PEER)
+    local fishing = peer.profSlots[3]
+    local real = ns.UI.cursorX
+    ns.UI.cursorX = function() return fishing.x0 + 2 end
+    peer._scripts.OnMouseUp(peer, "LeftButton")
+    eq(ns.UI.filters.skill, 356, "fishing filter")
+    ok(ns.UI.skillChoice:GetText():find("釣魚", 1, true), "the profession button shows it")
+    ok(ns.Framework.isModuleShown("roster"), "stays on the roster")
+    local names = {}
+    for _, row in ipairs(ns.UI.rows()) do if row:IsShown() then names[#names + 1] = row.memberName end end
+    table.sort(names)
+    eq(table.concat(names, ","), "測試乙-測試伺服器,測試甲-測試伺服器", "only members who fish")
+    peer = rowFor(ns, PEER)
+    peer._scripts.OnMouseUp(peer, "LeftButton")
+    eq(ns.UI.filters.skill, nil, "same icon again: cleared")
+    ns.UI.cursorX = real
+end)
+
+test("D19 roster filters: profession (incl. secondary), class, online, minimum level, clear", function()
+    local ns = shareLogin({ player = crafter() })
+    sendFrom(ns, PEER, peerData())
+    ns.Framework.open("roster")
+    local function shown()
+        local list = {}
+        for _, row in ipairs(ns.UI.rows()) do if row:IsShown() then list[#list + 1] = ns.shortName(row.memberName) end end
+        table.sort(list)
+        return table.concat(list, ",")
+    end
+    eq(shown(), "測試丁,測試丙,測試乙,測試甲", "everyone")
+    local opts = {}
+    for _, o in ipairs(ns.UI.professionOptions()) do opts[#opts + 1] = o.text end
+    eq(table.concat(opts, ","), "全部專業,鍛造,採礦,裁縫,附魔,烹飪,急救,釣魚", "professions in the roster, secondary last")
+    ns.UI.skillChoice.choose(197)
+    eq(shown(), "測試丙", "tailoring (from the guild roster names)")
+    ns.UI.skillChoice.choose(129)
+    eq(shown(), "測試乙,測試甲", "first aid (secondary, shared)")
+    ns.UI.skillChoice.choose(nil)
+    ns.UI.classChoice.choose("WARRIOR")
+    eq(shown(), "測試乙", "warriors")
+    ns.UI.classChoice.choose(nil)
+    wow.click(ns.UI.onlineCheck)
+    eq(shown(), "測試乙,測試甲", "online only")
+    ns.UI.levelBox:SetText("30")
+    ns.UI.levelBox._scripts.OnTextChanged(ns.UI.levelBox)
+    eq(shown(), "測試乙,測試甲", "online and level 30+")
+    wow.click(ns.UI.onlineCheck)
+    eq(shown(), "測試乙,測試甲", "level 30+")
+    ns.UI.levelBox:SetText("50")
+    ns.UI.levelBox._scripts.OnTextChanged(ns.UI.levelBox)
+    eq(shown(), "測試乙", "level 50+")
+    ns.UI.skillChoice.choose(197)
+    eq(shown(), "", "nobody: tailoring and 50+")
+    wow.click(ns.UI.clearButton)
+    eq(shown(), "測試丁,測試丙,測試乙,測試甲", "清除 resets every filter")
+    eq(ns.UI.filters.skill, nil, "skill cleared"); eq(ns.UI.filters.minLevel, nil, "level cleared")
+    eq(ns.UI.onlineCheck.checked, false, "online cleared")
+    -- The list opens with the options and a pick closes it.
+    wow.click(ns.UI.classChoice)
+    ok(ns.UI.classChoice.menu:IsShown(), "class list open")
+    local item = ns.UI.classChoice.menu.items[2]
+    wow.click(item)
+    ok(not ns.UI.classChoice.menu:IsShown(), "closed after a pick")
+    ok(ns.UI.filters.class ~= nil, "a class picked")
+end)
+
+test("D19 roster page text: footer is just the count, header time without seconds", function()
+    wow.reset()
+    local ns = wow.login(ADDON_DIR)
+    ns.Framework.open("roster")
+    local texts = table.concat(wow.allTexts(), "\n")
+    ok(texts:find("顯示 4 / 4 位", 1, true), "count")
+    ok(not texts:find("點欄位標題排序", 1, true), "no sort hint")
+    ok(not texts:find("點成員看他的配方", 1, true), "no recipe hint")
+    local s = ns.Roster.current()
+    s.capturedAtLocal = "2026-11-20 21:05:33"
+    eq(ns.UI.shortTime(s), "2026-11-20 21:05", "no seconds")
+    ns.UI.refresh(false)
+    texts = table.concat(wow.allTexts(), "\n")
+    ok(texts:find("2026-11-20 21:05 更新", 1, true), "header uses it")
+    ok(not texts:find("21:05:33", 1, true), "seconds gone")
+end)
+
+test("D19 player text: no hints or technical lines on the pages", function()
+    local ns = shareLogin({ player = crafter(), tradeSkill = leatherWindow() })
+    wow.fire("TRADE_SKILL_SHOW")
+    for _, id in ipairs({ "roster", "recipes", "character", "sleepingbag" }) do ns.Framework.open(id) end
+    local texts = table.concat(wow.allTexts(), "\n")
+    for _, gone in ipairs({ "點一下", "點專業", "點欄位", "點成員", "戰鬥中不可用", "打開自己的專業視窗",
+        "分享與轉傳", "在線的在前", "還沒記錄配方", "（點一下切換）", "剛剛記錄", "（本人）" }) do
+        ok(not texts:find(gone, 1, true), "no " .. gone)
+    end
+    local b = ns.Diag.smallButton(UIParent, "CENTER", 0, 0)
+    b._scripts.OnEnter(b)
+    eq(tipText(), "同步與診斷", "diag button: name only")
+end)
+
+test("D19 recipe filters: only mine / only others, only online crafters, search", function()
+    local ns = shareLogin({ tradeSkill = leatherWindow() })
+    wow.fire("TRADE_SKILL_SHOW") -- own 製皮: 2149, 2152
+    local t = wow.state.now - 600
+    shareFrom(ns, PEER, (rMsg(ns, A_PEER, 165, t, { 2152, 2153 })))   -- online
+    shareFrom(ns, PEER, (rMsg(ns, A_THIRD, 165, t, { 2153, 2160 })))  -- offline
+    local index = ns.Recipes.index()
+    local function ids(opts)
+        local list = {}
+        for _, r in ipairs(ns.Recipes.rows(index, 165, "", nil, opts)) do list[#list + 1] = r.id end
+        table.sort(list)
+        return table.concat(list, ",")
+    end
+    eq(ids(nil), "2149,2152,2153,2160", "all")
+    eq(ids({ who = "mine" }), "2149,2152", "only mine")
+    eq(ids({ who = "others" }), "2152,2153,2160", "only others")
+    eq(ids({ online = true }), "2149,2152,2153", "only online crafters (self is online)")
+    eq(ids({ online = true, who = "others" }), "2152,2153", "online others")
+    local row = ns.Recipes.rows(index, 165, "", nil, { online = true })
+    for _, r in ipairs(row) do
+        for _, m in ipairs(r.crafters) do ok(m.online, "only online crafters listed") end
+    end
+    -- On the page.
+    ns.Recipes.show(nil, 165)
+    ns.Recipes.whoChoice.toggle("others") -- only 我 left
+    local shown = 0
+    for _, r in ipairs(ns.Recipes.rowFrames()) do if r:IsShown() then shown = shown + 1 end end
+    eq(shown, 2, "page: only mine")
+    wow.click(ns.Recipes.onlineCheck)
+    eq(ns.Recipes.state.online, true, "online check")
+    ns.Recipes.whoChoice.selectAll()
+    wow.click(ns.Recipes.onlineCheck)
+    shown = 0
+    for _, r in ipairs(ns.Recipes.rowFrames()) do if r:IsShown() then shown = shown + 1 end end
+    eq(shown, 4, "page: all again")
+end)
+
+test("D20 recipe clicks: mine opens, others pinned, Shift links, right-click whisper menu", function()
+    local ns = shareLogin({ tradeSkill = leatherWindow() })
+    wow.fire("TRADE_SKILL_SHOW")                                          -- mine: 2149, 2152
+    shareFrom(ns, PEER, (rMsg(ns, A_PEER, 165, wow.state.now - 600, { 2152, 2153 })))  -- online
+    shareFrom(ns, PEER, (rMsg(ns, A_THIRD, 165, wow.state.now - 600, { 2153 })))       -- offline
+    local calls = {}
+    C_TradeSkillUI.GetRecipeLink = function(id) return "|cffffd000|Henchant:" .. id .. "|h[配方" .. id .. "]|h|r" end
+    C_TradeSkillUI.OpenRecipe = function(id) calls[#calls + 1] = "open:" .. id end
+    ChatEdit_InsertLink = function(link) calls[#calls + 1] = "insert:" .. link; return true end
+    ChatFrame_SendTellWithMessage = function(name, text) calls[#calls + 1] = "tell:" .. name .. ":" .. text end
+    local pinned
+    ItemRefTooltip = { SetOwner = function() end, SetHyperlink = function(_, h) pinned = h end, Show = function() end }
+    local shift = false
+    IsShiftKeyDown = function() return shift end
+    ns.Recipes.show(nil, 165)
+    local function rowOf(id)
+        for _, r in ipairs(ns.Recipes.rowFrames()) do if r:IsShown() and r.data and r.data.id == id then return r end end
+    end
+    local mine, theirs = rowOf(2152), rowOf(2153)
+    ok(mine and theirs, "rows")
+    eq(ns.Recipes.actions, nil, "no hover buttons any more")
+    -- Click.
+    eq(ns.Recipes.click(mine, "LeftButton"), "open", "my recipe: opened in my profession window")
+    eq(calls[#calls], "open:2152", "OpenRecipe")
+    eq(ns.Recipes.click(theirs, "LeftButton"), "detail", "someone else's: pinned")
+    eq(pinned, "enchant:2153", "pinned link")
+    C_TradeSkillUI.OpenRecipe = function() error("blocked") end
+    pinned = nil
+    eq(ns.Recipes.click(mine, "LeftButton"), "detail", "open fails: pinned instead")
+    eq(pinned, "enchant:2152", "pinned link")
+    wow.enterCombat()
+    pinned = nil
+    eq(ns.Recipes.click(mine, "LeftButton"), "detail", "in combat: pinned, never opened")
+    wow.leaveCombat()
+    shift = true
+    eq(ns.Recipes.click(theirs, "LeftButton"), "link", "Shift-click")
+    eq(calls[#calls], "insert:|cffffd000|Henchant:2153|h[配方2153]|h|r", "link in chat")
+    shift = false
+    -- Right-click: one 密語 line per online crafter (not me, not offline).
+    eq(ns.Recipes.click(theirs, "RightButton"), "menu", "menu")
+    local menu = _G[ns.Framework.MENU_NAME]
+    ok(menu and menu:IsShown(), "menu shown")
+    ok(menu.gfOpaque, "menu is opaque")
+    local items = {}
+    for _, b in ipairs(menu.items) do if b:IsShown() then items[#items + 1] = b:GetText() end end
+    eq(table.concat(items, "|"), "密語 測試乙", "only the online crafter")
+    wow.click(menu.items[1])
+    eq(calls[#calls], "tell:" .. PEER .. ":可以幫我做|cffffd000|Henchant:2153|h[配方2153]|h|r嗎？", "whisper opened")
+    ok(not menu:IsShown(), "closed after the pick")
+    local onlyMine = rowOf(2149)
+    eq(ns.Recipes.click(onlyMine, "RightButton"), "none", "nobody else online: no menu")
+    -- The row stays shown while hovered and after the cursor leaves (0.9.4 hid it).
+    theirs._scripts.OnEnter(theirs)
+    ok(theirs:IsShown(), "shown while hovered")
+    theirs._scripts.OnLeave(theirs)
+    ok(theirs:IsShown(), "still shown after the cursor leaves")
+    ns.Recipes.refresh()
+    ok(rowOf(2153), "still shown after a redraw")
+    eq(theirs.name:GetText() ~= "", true, "text kept")
+    -- Without the newer functions: the spell link, and the chat box opened.
+    C_TradeSkillUI.GetRecipeLink = nil
+    C_Spell.GetSpellLink = function(id) return "|Hspell:" .. id .. "|h[x]|h" end
+    ChatEdit_InsertLink = function() return false end
+    local opened
+    ChatFrame_OpenChat = function(text) opened = text end
+    ok(ns.Recipes.insertLink(2149), "chat opened with the link")
+    eq(opened, "|Hspell:2149|h[x]|h", "spell link")
+    ItemRefTooltip = nil
+    eq(ns.Recipes.showDetail(2149), false, "no pinned tooltip in this client: nothing happens")
+    ChatEdit_InsertLink, ChatFrame_SendTellWithMessage, ChatFrame_OpenChat, IsShiftKeyDown = nil, nil, nil, nil
+    eq(#wow.state.blocked, 0, "nothing blocked")
+end)
+
+test("D20 recipe filter line: 搜尋, 專業, 會做的人, 只看在線 on one line; no tabs", function()
+    local ns = shareLogin({ tradeSkill = leatherWindow() })
+    wow.fire("TRADE_SKILL_SHOW")
+    shareFrom(ns, PEER, (rMsg(ns, A_PEER, 164, wow.state.now - 600, { 2660, 2661 })))
+    ns.Framework.open("recipes")
+    local R = ns.Recipes
+    local function y(w) return w._points[1][5] end
+    eq(y(R.searchBox), -44, "search on the filter line")
+    eq(y(R.skillChoice), -44, "專業 on the filter line")
+    eq(y(R.whoChoice), -44, "會做的人 on the filter line")
+    eq(y(R.onlineCheck), -44, "只看在線 on the filter line")
+    local texts = table.concat(wow.allTexts(), "\n")
+    for _, want in ipairs({ "搜尋", "專業", "會做的人", "只看在線" }) do ok(texts:find(want, 1, true), "label " .. want) end
+    ok(R.skillChoice:GetText():find("全部專業", 1, true), "all ticked at first: " .. R.skillChoice:GetText())
+    local opts = {}
+    for _, o in ipairs(R.skillOptions()) do opts[#opts + 1] = o.text end
+    eq(table.concat(opts, ","), "鍛造,製皮", "professions with recipes")
+    R.skillChoice.setOnly(165)
+    eq(table.concat(R.state.skills, ","), "165", "picked")
+    ok(R.skillChoice:GetText():find("製皮", 1, true), "button shows it")
+    ok(texts:find("個配方", 1, true), "count")
+    -- No tab buttons above the list any more.
+    for _, t in ipairs(wow.allTexts()) do ok(t ~= "鍛造" or false, "no tab labelled 鍛造") end
+end)
+
+test("D20 popups: 同步與診斷 and export are opaque, framed and above the toolkit window", function()
+    wow.reset()
+    local ns = wow.login(ADDON_DIR)
+    ns.Framework.open("roster")
+    ns.Diag.open()
+    local d = _G[ns.Diag.WINDOW_NAME]
+    ok(d.gfOpaque, "diag: own opaque background")
+    eq(d.gfOpaque._color and d.gfOpaque._color[4] or d.gfOpaque._colorTexture[4], 0.97, "diag: nearly solid")
+    eq(d._strata, "FULLSCREEN_DIALOG", "diag above the toolkit window (DIALOG)")
+    ns.UI.startExport("tsv")
+    local e = _G.GreenFangToolkit_ExportWindow
+    ok(e.gfOpaque, "export: opaque")
+    eq(e._strata, "FULLSCREEN_DIALOG", "export above the toolkit window")
+    ok(_G[ns.Framework.WINDOW_NAME].gfOpaque, "toolkit window: opaque too")
+    wow.click(ns.UI.classChoice)
+    ok(ns.UI.classChoice.menu.gfOpaque, "filter list: opaque")
+    eq(ns.UI.classChoice.menu._strata, "FULLSCREEN_DIALOG", "filter list on top")
+end)
+
+test("D20 roster filter line: labels and boxes do not overlap", function()
+    wow.reset()
+    local ns = wow.login(ADDON_DIR)
+    ns.Framework.open("roster")
+    -- Left edge and width of each control on the line, in order.
+    local function x(w) return w._points[1][4] end
+    local list = {
+        { "搜尋", x(ns.UI.searchBox), ns.UI.searchBox._w },
+        { "專業", x(ns.UI.skillChoice), ns.UI.skillChoice._w },
+        { "職業", x(ns.UI.classChoice), ns.UI.classChoice._w },
+        { "在線", x(ns.UI.onlineCheck), 24 + 60 },
+        { "等級", x(ns.UI.levelLabel), 30 },
+        { "等級框", x(ns.UI.levelBox), ns.UI.levelBox._w },
+        { "以上", x(ns.UI.levelSuffix), 26 },
+        { "清除", x(ns.UI.clearButton), ns.UI.clearButton._w },
+    }
+    for i = 2, #list do
+        local prev, cur = list[i - 1], list[i]
+        -- Input boxes draw their border about 6 px outside their edges.
+        ok(prev[2] + prev[3] + 6 <= cur[2], prev[1] .. " ends before " .. cur[1] .. " starts")
+    end
+    ok(ns.UI.levelBox._w >= 40, "level box wide enough for two digits")
+    ok(list[#list][2] + list[#list][3] <= 1000 - 20, "fits in the page")
+end)
+
+---------------------------------------------------------------------------
+-- GF-001-D21: profession filter, tooltip position, recipe icons
+---------------------------------------------------------------------------
+
+-- Cooking window that, like Forever, also lists first aid and smelting.
+local function mixedCookingWindow()
+    return { skillLine = 185,
+        recipes = { [2538] = true, [2540] = true, [818] = true, [3275] = true, [2657] = true, [2659] = true },
+        recipeSkills = { [2538] = 185, [2540] = 185, [818] = 185, [3275] = 129, [2657] = 186, [2659] = 186 } }
+end
+
+local function shownRecipeIDs(ns)
+    local list = {}
+    for _, r in ipairs(ns.Recipes.shownRows()) do list[#list + 1] = r.id end
+    table.sort(list)
+    return table.concat(list, ",")
+end
+
+test("D21 recipes: a cooking window storing first aid and smelting keeps only cooking", function()
+    local ns = shareLogin({ tradeSkill = mixedCookingWindow() })
+    wow.fire("TRADE_SKILL_SHOW")
+    eq(table.concat(ns.Share.decodeValue("R185", ns.Share.get(A_SELF, "R185").v), ","), "818,2538,2540",
+        "only cooking stored")
+    eq(ns.Recipes.skillOfRecipe(3275), 129, "first aid recipe known as first aid")
+    eq(ns.Recipes.inSkill(2657, 185), false, "smelting is not cooking")
+    eq(ns.Recipes.inSkill(99999, 185), nil, "unknown recipe: cannot tell")
+end)
+
+test("D21 recipes: a mixed list saved by 0.9.5 is cleaned at the next read", function()
+    local ns = shareLogin({ tradeSkill = mixedCookingWindow() })
+    ns.Share.ownRecord("R185", ns.Share.encodeValue("R185", { 818, 2538, 2540, 2657, 2659, 3275 }))
+    eq(ns.Recipes.scan(), "stored", "rewritten")
+    eq(table.concat(ns.Share.decodeValue("R185", ns.Share.get(A_SELF, "R185").v), ","), "818,2538,2540", "clean")
+    -- With a window filter the saved list stays, but cleaned too.
+    ns.Share.ownRecord("R185", ns.Share.encodeValue("R185", { 818, 2538, 2540, 2657, 3275 }))
+    wow.state.tradeSkill.recipes = { [818] = true }
+    eq(ns.Recipes.scan(), "filtered", "window filter")
+    eq(table.concat(ns.Share.decodeValue("R185", ns.Share.get(A_SELF, "R185").v), ","), "818,2538,2540",
+        "saved list kept without the mixed-in recipes")
+end)
+
+test("D21 recipe page: 專業 = 烹飪 lists only cooking, also from members on 0.9.5; count matches", function()
+    local ns = shareLogin({ tradeSkill = mixedCookingWindow() })
+    wow.fire("TRADE_SKILL_SHOW")
+    -- A member on 0.9.5 shared a mixed R185 and a first aid list.
+    shareFrom(ns, PEER, (rMsg(ns, A_PEER, 185, wow.state.now - 600, { 2538, 2657, 3275, 4444 })))
+    shareFrom(ns, PEER, (rMsg(ns, A_PEER, 129, wow.state.now - 600, { 3275 })))
+    ns.Recipes.show(nil, 185)
+    ns.Recipes.skillChoice.setOnly(185)
+    -- 4444: the client does not say which profession -> kept.
+    eq(shownRecipeIDs(ns), "818,2538,2540,4444", "cooking only (and the unknown one)")
+    local texts = table.concat(wow.allTexts(), "\n")
+    ok(texts:find("4 個配方", 1, true), "count matches the list")
+    ns.Recipes.skillChoice.setOnly(129)
+    eq(shownRecipeIDs(ns), "3275", "first aid")
+    ok(table.concat(wow.allTexts(), "\n"):find("1 個配方", 1, true), "count for first aid")
+    local opts = {}
+    for _, o in ipairs(ns.Recipes.skillOptions()) do opts[#opts + 1] = o.text end
+    eq(table.concat(opts, ","), "急救,烹飪", "no mining entry made from mixed-in recipes")
+end)
+
+test("D21 tooltips: recipe tooltip next to the row's name; roster icon tooltip over the icon", function()
+    local ns = shareLogin({ tradeSkill = leatherWindow(), player = crafter() })
+    wow.fire("TRADE_SKILL_SHOW")
+    ns.Recipes.show(nil, 165)
+    local row
+    for _, r in ipairs(ns.Recipes.rowFrames()) do if r:IsShown() then row = r; break end end
+    row._scripts.OnEnter(row)
+    eq(GameTooltip._anchor, "ANCHOR_NONE", "not the default (screen corner) anchor")
+    local pt = GameTooltip._points[1]
+    eq(pt[1] .. ">" .. pt[3], "BOTTOMLEFT>TOPLEFT", "just above the row")
+    eq(pt[2], row, "on the hovered row")
+    eq(pt[4], 300, "next to the name, towards the middle")
+    sendFrom(ns, PEER, peerData())
+    ns.Framework.open("roster")
+    local peer = rowFor(ns, PEER)
+    local slot = peer.profSlots[2]
+    ns.UI.showRowTooltip(peer, slot)
+    eq(GameTooltip._points[1][4], slot.x0, "icon tooltip over that icon")
+    ns.UI.showRowTooltip(peer, nil)
+    eq(GameTooltip._anchor, "ANCHOR_TOP", "member tooltip above the row's middle")
+end)
+
+test("D21 recipe icons: crafted item, else spell icon, else the profession's; cached", function()
+    local ns = shareLogin({ tradeSkill = leatherWindow() })
+    wow.fire("TRADE_SKILL_SHOW")              -- 2149, 2152
+    local schematics = 0
+    C_TradeSkillUI.GetRecipeSchematic = function(id)
+        schematics = schematics + 1
+        if id == 2152 then return { outputItemID = 2304 } end
+        return {}
+    end
+    C_Item = { GetItemIconByID = function(item) return item == 2304 and 133611 or nil end }
+    C_Spell.GetSpellTexture = function(id) return id == 2149 and 132539 or nil end
+    eq(ns.Recipes.icon(2152), 133611, "crafted item's icon")
+    eq(ns.Recipes.icon(2149), 132539, "spell icon when there is no item")
+    eq(ns.Recipes.icon(2152), 133611, "again")
+    eq(schematics, 2, "cached: asked once per recipe")
+    eq(ns.Recipes.icon(2153), nil, "unknown")
+    ns.Recipes.show(nil, 165)
+    local icons = {}
+    for _, r in ipairs(ns.Recipes.rowFrames()) do
+        if r:IsShown() and r.data then
+            icons[#icons + 1] = r.data.id .. "=" .. tostring(r.icon:IsShown() and r.icon._texture)
+            eq(r.icon._w, 20, "20 px like the roster icons")
+        end
+    end
+    table.sort(icons)
+    eq(table.concat(icons, ","), "2149=132539,2152=133611", "icons on the rows")
+    local tex = CreateFrame("Frame"):CreateTexture()
+    eq(ns.Recipes.setIcon(tex, 2153, 165), "Interface\\Icons\\Trade_LeatherWorking", "unknown: the profession icon")
+    C_Item = nil
+end)
+
+---------------------------------------------------------------------------
+-- GF-001-D22: multi-select 專業 and 會做的人 on the recipe page
+---------------------------------------------------------------------------
+
+local function recipeIDs(ns)
+    local list = {}
+    for _, r in ipairs(ns.Recipes.shownRows()) do list[#list + 1] = r.id end
+    table.sort(list)
+    return table.concat(list, ",")
+end
+
+local function multiPage()
+    local ns = shareLogin({ tradeSkill = mixedCookingWindow() }) -- mine: cooking 818, 2538, 2540
+    wow.fire("TRADE_SKILL_SHOW")
+    shareFrom(ns, PEER, (rMsg(ns, A_PEER, 129, wow.state.now - 600, { 3275 })))         -- first aid
+    shareFrom(ns, PEER, (rMsg(ns, A_PEER, 186, wow.state.now - 600, { 2657, 2659 })))   -- smelting
+    shareFrom(ns, PEER, (rMsg(ns, A_PEER, 185, wow.state.now - 600, { 2538 })))          -- cooking
+    ns.Framework.open("recipes")
+    return ns
+end
+
+test("D22 recipe 專業: all by default, tick several, 全選 / 全不選, button summary, count", function()
+    local ns = multiPage()
+    local b = ns.Recipes.skillChoice
+    eq(b:GetText(), "全部專業 ▼", "all ticked at first")
+    eq(recipeIDs(ns), "818,2538,2540,2657,2659,3275", "every profession in one list")
+    ok(table.concat(wow.allTexts(), "\n"):find("6 個配方", 1, true), "count")
+    b.toggle(186)
+    eq(b:GetText(), "2 個專業 ▼", "two left")
+    eq(recipeIDs(ns), "818,2538,2540,3275", "smelting unticked: gone")
+    b.toggle(129)
+    eq(b:GetText(), "烹飪 ▼", "one left: its name")
+    eq(recipeIDs(ns), "818,2538,2540", "cooking only")
+    ok(table.concat(wow.allTexts(), "\n"):find("3 個配方", 1, true), "count follows")
+    b.selectNone()
+    eq(b:GetText(), "沒有選專業 ▼", "none")
+    eq(recipeIDs(ns), "", "nothing listed")
+    ok(table.concat(wow.allTexts(), "\n"):find("沒有選專業。", 1, true), "says so")
+    b.toggle(129); b.toggle(185); b.toggle(186)
+    eq(b:GetText(), "全部專業 ▼", "all ticked again = 全部專業")
+    eq(b.selected, nil, "stored as everything (a new profession is included)")
+    b.selectNone(); b.selectAll()
+    eq(recipeIDs(ns), "818,2538,2540,2657,2659,3275", "全選")
+    -- Rows of several professions are sorted by name, each with its own icon fallback.
+    local skills = {}
+    for _, r in ipairs(ns.Recipes.shownRows()) do skills[r.id] = r.skill end
+    eq(skills[3275], 129, "row knows its profession"); eq(skills[2657], 186, "smelting row")
+end)
+
+test("D22 recipe 專業 list: check boxes with icons, 全選 and 全不選 first, stays open", function()
+    local ns = multiPage()
+    local b = ns.Recipes.skillChoice
+    wow.click(b)
+    ok(b.menu:IsShown(), "list open")
+    ok(b.menu.gfOpaque, "opaque")
+    local items = {}
+    for _, it in ipairs(b.menu.items) do
+        if it:IsShown() then
+            items[#items + 1] = it.label:GetText() .. (it.isOption and (it.checked and "[x]" or "[ ]") or "")
+                .. (it.icon:IsShown() and "+icon" or "")
+        end
+    end
+    eq(table.concat(items, "|"), "全選|全不選|採礦[x]+icon|急救[x]+icon|烹飪[x]+icon", "entries (primary first)")
+    eq(b.menu.items[4].icon._texture, "Interface\\Icons\\Spell_Holy_SealOfSacrifice", "first aid icon")
+    eq(b.menu.items[3].check._texture, "Interface\\Buttons\\UI-CheckBox-Check", "check mark")
+    wow.click(b.menu.items[5]) -- 烹飪
+    ok(b.menu:IsShown(), "still open: tick several")
+    ok(not b.menu.items[5].check:IsShown(), "unticked")
+    eq(b:GetText(), "2 個專業 ▼", "button follows")
+    wow.click(b.menu.items[2]) -- 全不選
+    eq(b:GetText(), "沒有選專業 ▼", "全不選")
+    wow.click(b.menu.items[1]) -- 全選
+    eq(b:GetText(), "全部專業 ▼", "全選")
+    wow.click(b)
+    ok(not b.menu:IsShown(), "button again: closed")
+end)
+
+test("D22 recipe 會做的人: 我 and 別人 as two check boxes", function()
+    local ns = multiPage()
+    local w = ns.Recipes.whoChoice
+    eq(w:GetText(), "所有人 ▼", "both at first")
+    w.toggle("others")
+    eq(w:GetText(), "只看我的 ▼", "only me")
+    eq(recipeIDs(ns), "818,2538,2540", "my recipes")
+    w.toggle("me"); w.toggle("others")
+    eq(w:GetText(), "只看別人的 ▼", "only others")
+    eq(recipeIDs(ns), "2538,2657,2659,3275", "the others' recipes")
+    w.toggle("others")
+    eq(w:GetText(), "沒有選 ▼", "neither")
+    eq(recipeIDs(ns), "", "nothing")
+    w.selectAll()
+    eq(recipeIDs(ns), "818,2538,2540,2657,2659,3275", "everyone")
+    -- Together with 專業 and 只看在線.
+    ns.Recipes.skillChoice.setOnly(185)
+    w.toggle("me") -- only others
+    eq(recipeIDs(ns), "2538", "others' cooking")
+end)
+
+test("D22 recipe page: a long list only has frames for the rows in view", function()
+    local ns = multiPage()
+    local ids = {}
+    for i = 1, 300 do ids[i] = 20000 + i end
+    shareFrom(ns, PEER, (rMsg(ns, A_PEER, 164, wow.state.now - 500, ids)))
+    wow.advance(1.2)
+    ns.Recipes.refresh()
+    eq(#ns.Recipes.shownRows(), 306, "every recipe in the list")
+    ok(#ns.Recipes.rowFrames() < 40, "few frames: " .. #ns.Recipes.rowFrames())
+end)
+
+---------------------------------------------------------------------------
+-- GF-001-D23: never an empty realm in the outbox (invalid_realm since 2026-11-21)
+---------------------------------------------------------------------------
+
+local function noRealmPlayer(realm)
+    local p = wow.defaultPlayer()
+    p.realm = realm or ""
+    return p
+end
+
+local function realmsIn(kind)
+    local list = {}
+    for _, e in ipairs(entriesOf(kind)) do
+        list[#list + 1] = tostring(e.game and e.game.realm) .. "/" .. tostring(e.uploader and e.uploader.realm)
+    end
+    return table.concat(list, ",")
+end
+
+test("D23 realm: GetRealmName empty and nothing remembered -> no entry at all, 同步與診斷 says so", function()
+    wow.reset({ player = noRealmPlayer("") })
+    local ns = wow.login(ADDON_DIR)
+    wow.advance(30)
+    wow.fire("GUILD_ROSTER_UPDATE"); wow.advance(5)
+    eq(#entriesOf("character.self"), 0, "no character.self with an empty realm")
+    eq(#entriesOf("roster.snapshot"), 0, "no roster.snapshot with an empty realm")
+    local _, why = ns.Sync.recordSelf(true, { allowNoGuild = true })
+    eq(why, "waiting-realm", "waiting for the realm")
+    ok(ns.Diag.versionText():find("伺服器 不明（暫停寫入上傳資料）", 1, true), "diag: " .. ns.Diag.versionText())
+    wow.logout()
+    for _, e in ipairs(outbox()) do
+        ok(e.game.realm ~= "" and e.uploader.realm ~= "", "never an empty realm in the outbox")
+    end
+end)
+
+test("D23 realm: a secret GetRealmName counts as empty", function()
+    wow.reset({ secrets = { ["測試伺服器"] = true } })
+    local ns = wow.login(ADDON_DIR)
+    wow.advance(30)
+    eq(#entriesOf("character.self"), 0, "nothing written")
+    eq(ns.realm(), "", "unknown")
+end)
+
+test("D23 realm: remembered from an earlier login when GetRealmName goes empty", function()
+    wow.reset()
+    local ns = wow.login(ADDON_DIR)
+    wow.advance(30)
+    eq(GreenFangToolkitDB.settings.realms["Player-0000-0000000A"], "測試伺服器", "remembered per character")
+    local saved = GreenFangToolkitDB
+    GreenFangToolkitDB.sync.outbox = {}
+    wow.reset({ player = noRealmPlayer("") })
+    ns = wow.login(ADDON_DIR, { GreenFangToolkitDB = saved })
+    wow.advance(30)
+    eq(realmsIn("character.self"), "測試伺服器/測試伺服器", "the remembered realm")
+    eq(ns.realmSource, "saved", "source")
+    ok(ns.Diag.versionText():find("伺服器 「測試伺服器」（存檔記住的）", 1, true), "diag: " .. ns.Diag.versionText())
+end)
+
+test("D23 realm: seeded from realms already in the SavedVariables; old empty entries repaired", function()
+    wow.reset()
+    wow.login(ADDON_DIR)
+    wow.advance(30)
+    wow.fire("GUILD_ROSTER_UPDATE"); wow.advance(5)
+    local saved = GreenFangToolkitDB
+    saved.settings.realms = nil -- a 0.9.6 file: no remembered realm
+    -- 0.9.5/0.9.6 queued entries with an empty realm; the roster snapshot still has it.
+    for _, e in ipairs(saved.sync.outbox) do e.game.realm = ""; e.uploader.realm = "" end
+    wow.reset({ player = noRealmPlayer("") })
+    local ns = wow.login(ADDON_DIR, { GreenFangToolkitDB = saved })
+    wow.advance(30)
+    wow.fire("GUILD_ROSTER_UPDATE"); wow.advance(5)
+    eq(realmsIn("character.self"), "測試伺服器/測試伺服器", "realm from the saved roster snapshot")
+    for _, e in ipairs(outbox()) do
+        eq(e.game.realm .. "/" .. e.uploader.realm, "測試伺服器/測試伺服器", "every queued entry repaired: " .. e.kind)
+    end
+end)
+
+test("D23 realm: GetNormalizedRealmName when nothing else; never a remembered realm it contradicts", function()
+    wow.reset({ player = noRealmPlayer("") })
+    GetNormalizedRealmName = function() return "測試伺服器2" end
+    local ns = wow.login(ADDON_DIR)
+    wow.advance(30)
+    eq(realmsIn("character.self"), "測試伺服器2/測試伺服器2", "normalized name")
+    -- Once a roster snapshot holds it, it is also "saved"; the value is what counts.
+    ok(ns.realmSource == "GetNormalizedRealmName" or ns.realmSource == "saved", "source: " .. ns.realmSource)
+    GreenFangToolkitDB.settings.realms["Player-0000-0000000A"] = "Other Realm"
+    eq(ns.realm(), "測試伺服器2", "remembered realm of another name is not used")
+    GreenFangToolkitDB.settings.realms["Player-0000-0000000A"] = "測試 伺服器2"
+    eq(ns.realm(), "測試 伺服器2", "the same realm with spaces wins over the normalized one")
+    GetNormalizedRealmName = nil
+end)
+
+test("D23 professions: unreadable names are not 'no professions'", function()
+    -- Names the client keeps secret: listed by GetProfessions, unreadable.
+    wow.reset({ player = crafter() })
+    local ns = wow.login(ADDON_DIR)
+    wow.advance(30)
+    eq(#entriesOf("character.self")[1].payload.professions, 5, "read normally")
+    for _, row in pairs(wow.state.player.professions) do wow.state.secrets[row[1]] = true end
+    ns.Sync.recordSelf(true)
+    eq(ns.Data.unreadableProfessions, 5, "five unreadable")
+    eq(#entriesOf("character.self")[1].payload.professions, 5, "last known professions kept")
+    -- None known before: the field is left out, never {}.
+    GreenFangToolkitDB.sync.outbox = {}
+    ns.Sync.recordSelf(true)
+    eq(entriesOf("character.self")[1].payload.professions, nil, "left out")
+    -- Really no professions: {} as before.
+    wow.reset()
+    wow.state.player.professions, wow.state.player.professionIndexes = {}, {}
+    wow.login(ADDON_DIR)
+    wow.advance(30)
+    local list = entriesOf("character.self")[1].payload.professions
+    eq(type(list) == "table" and #list, 0, "no professions: empty list")
+end)
+
+test("D23 shared data kept under an empty realm by 0.9.5/0.9.6 is merged back", function()
+    local ns = shareLogin()
+    shareFrom(ns, PEER, (rMsg(ns, A_PEER, 164, wow.state.now - 600, { 2660 })))
+    local saved = GreenFangToolkitDB
+    local guild = ns.Data.player().guild
+    local realKey = ns.guildKey("測試伺服器", guild)
+    ok(saved.share.guilds[realKey], "store under realm|guild")
+    -- What 0.9.6 did with an empty realm: a second store under "|guild".
+    saved.share.guilds["|" .. guild] = { rec = {
+        [A_PEER] = { R164 = { t = wow.state.now - 60, h = "x", v = "newer" } },
+        [A_THIRD] = { R197 = { t = wow.state.now - 60, h = "y", v = "only here" } },
+    }, tomb = {}, gone = {} }
+    saved.share.guilds[realKey].rec[A_PEER].R164.t = wow.state.now - 600
+    wow.reset()
+    ns = wow.login(ADDON_DIR, { GreenFangToolkitDB = saved })
+    ns.Share.rand = function(a) return a end
+    wow.advance(25)
+    ok(ns.Share.store(), "store")
+    eq(GreenFangToolkitDB.share.guilds["|" .. guild], nil, "the empty-realm store is gone")
+    eq(ns.Share.get(A_PEER, "R164").v, "newer", "newer record wins")
+    eq(ns.Share.get(A_THIRD, "R197").v, "only here", "records only there are kept")
+end)
+
+-- GF-001-D24: uploader.fullName ("名字 姓氏") for the site's roster match.
+local function surnameRoster()
+    local roster = wow.defaultRoster()
+    roster[1].name = "測試甲 長姓氏"         -- own character, as the guild roster shows it
+    roster[3].name = "測試丙 長姓氏-測試伺服器"
+    return roster
+end
+
+test("D24 fullName: character.self and roster.snapshot carry the roster's full name; name unchanged", function()
+    wow.reset({ roster = surnameRoster() })
+    local ns = wow.login(ADDON_DIR)
+    local selfE = entriesOf("character.self")[1]
+    ok(selfE, "character.self")
+    eq(selfE.uploader.fullName, "測試甲 長姓氏", "character.self uploader.fullName")
+    eq(selfE.uploader.name, "測試甲", "uploader.name stays UnitName")
+    local snap = entriesOf("roster.snapshot")[1]
+    eq(snap.uploader.fullName, "測試甲 長姓氏", "roster.snapshot uploader.fullName")
+    eq(GreenFangToolkitDB.settings.fullNames["Player-0000-0000000A"], "測試甲 長姓氏", "remembered per character")
+    ok(ns.Diag.versionText():find("角色全名 「測試甲 長姓氏」", 1, true), "diag: " .. ns.Diag.versionText())
+end)
+
+test("D24 fullName: member.share uploader and subject carry the roster's full name", function()
+    local ns = shareLogin({ roster = surnameRoster() })
+    shareFrom(ns, PEER, (vMsg(ns, A_THIRD, "B", wow.state.now - 600, { level = 40, classToken = "MAGE" })))
+    eq(ns.Sync.recordShares(), 1, "one subject")
+    local e = entriesOf("member.share")[1]
+    eq(e.uploader.fullName, "測試甲 長姓氏", "uploader.fullName")
+    eq(e.uploader.name, "測試甲", "uploader.name unchanged")
+    eq(e.payload.subject.guid, "Player-0000-0000000C", "subject guid")
+    eq(e.payload.subject.fullName, "測試丙 長姓氏", "subject fullName, no -Realm")
+end)
+
+test("D24 fullName: the login entry waits for the roster, then carries the full name", function()
+    wow.reset({ roster = {} }) -- roster not loaded yet
+    local ns = wow.login(ADDON_DIR)
+    eq(#entriesOf("character.self"), 0, "no character.self without the full name yet")
+    eq(ns.Data.player().fullName, nil, "unknown, never guessed")
+    ok(ns.Diag.versionText():find("角色全名 未取得", 1, true), "diag: " .. ns.Diag.versionText())
+    wow.state.roster = surnameRoster()
+    wow.fire("GUILD_ROSTER_UPDATE")
+    wow.advance(2)
+    local list = entriesOf("character.self")
+    eq(#list, 1, "written once the roster is in")
+    eq(list[1].uploader.fullName, "測試甲 長姓氏", "with the full name")
+    eq(entriesOf("roster.snapshot")[1].uploader.fullName, "測試甲 長姓氏", "first snapshot has it too")
+end)
+
+test("D24 fullName: roster never loads -> written without fullName after the wait, no guess", function()
+    wow.reset({ roster = {} })
+    wow.login(ADDON_DIR)
+    wow.advance(25)
+    local list = entriesOf("character.self")
+    eq(#list, 1, "still one per login")
+    eq(list[1].uploader.fullName, nil, "field left out")
+    eq(list[1].uploader.name, "測試甲", "name as before")
+end)
+
+test("D24 fullName: a plain space between the parts; -Realm dropped; nothing else changed", function()
+    wow.reset({ secrets = { ["秘密 名字"] = true } })
+    local ns = wow.loadAddon(ADDON_DIR)
+    eq(ns.Data.cleanFullName("測試甲\194\160長姓氏"), "測試甲 長姓氏", "no-break space")
+    eq(ns.Data.cleanFullName("測試甲\227\128\128長姓氏"), "測試甲 長姓氏", "ideographic space")
+    eq(ns.Data.cleanFullName("測試甲 長姓氏-測試伺服器"), "測試甲 長姓氏", "no realm")
+    eq(ns.Data.cleanFullName("甲  乙"), "甲  乙", "inner spaces kept as they are")
+    eq(ns.Data.cleanFullName("秘密 名字"), "", "secret -> unknown")
+end)
+
+test("D24 fullName: remembered at the next login; upgrade writes fresh entries with new ids", function()
+    wow.reset({ roster = surnameRoster() })
+    wow.login(ADDON_DIR)
+    -- What 0.9.7 left: entries without fullName (rejected by the site).
+    for _, e in ipairs(GreenFangToolkitDB.sync.outbox) do e.uploader.fullName = nil end
+    local oldSelf = entriesOf("character.self")[1].id
+    local oldSnap = entriesOf("roster.snapshot")[1].id
+    local saved = wow.logout()
+    wow.reset({ now = wow.state.now + 3600, roster = {} }) -- roster slow this time
+    local ns = wow.loadAddon(ADDON_DIR, saved)
+    wow.fire("PLAYER_LOGIN")
+    wow.advance(6)
+    local selfE = entriesOf("character.self")[1]
+    ok(selfE.id ~= oldSelf, "new character.self id")
+    eq(selfE.uploader.fullName, "測試甲 長姓氏", "remembered full name used at once")
+    wow.state.roster = surnameRoster()
+    wow.fire("GUILD_ROSTER_UPDATE")
+    wow.advance(2)
+    local snap = entriesOf("roster.snapshot")[1]
+    ok(snap.id ~= oldSnap, "new roster.snapshot id")
+    eq(snap.uploader.fullName, "測試甲 長姓氏", "snapshot has it")
+    eq(#entriesOf("character.self"), 1, "one character.self")
+    eq(#entriesOf("roster.snapshot"), 1, "one roster.snapshot")
+end)
+
+test("D24 fullName: a member without a GUID gets no subject fullName", function()
+    wow.reset({ roster = surnameRoster() })
+    local ns = wow.login(ADDON_DIR)
+    eq(ns.Data.memberFullName(nil), nil, "no guid -> nil")
+    eq(ns.Data.memberFullName("Player-0000-00000099"), nil, "unknown guid -> nil")
+    eq(ns.Data.memberFullName("Player-0000-0000000C"), "測試丙 長姓氏", "known guid, no -Realm")
+end)
 
 test("fixture: generated sample is up to date and free of zone/online in the outbox", function()
     local db = buildFixture()

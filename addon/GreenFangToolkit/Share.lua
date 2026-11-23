@@ -268,6 +268,28 @@ local function guildKey()
     return ns.guildKey(p.realm, p.guild)
 end
 
+-- GF-001-D23: records kept under "|<guild>" while the realm was empty,
+-- merged into the realm's store g (newer wins).
+local mergeChecked
+function Share.mergeLost(g, old)
+    for a, groups in pairs(type(old.rec) == "table" and old.rec or {}) do
+        g.rec[a] = g.rec[a] or {}
+        for gr, rec in pairs(groups) do
+            local mine = g.rec[a][gr]
+            if type(rec) == "table" and (not mine or (ns.num(rec.t) or 0) > (ns.num(mine.t) or 0)) then
+                g.rec[a][gr] = rec
+            end
+        end
+    end
+    for a, groups in pairs(type(old.tomb) == "table" and old.tomb or {}) do
+        g.tomb[a] = g.tomb[a] or {}
+        for gr, t in pairs(groups) do
+            if type(t) == "number" and t > (g.tomb[a][gr] or 0) then g.tomb[a][gr] = t end
+        end
+    end
+    if Share.recount then Share.recount() end
+end
+
 local function store()
     local db = ns.db
     if not db then return nil end
@@ -281,6 +303,19 @@ local function store()
     -- queued/idsSent/named: what this client last wrote to the outbox (phase 4).
     for _, k in ipairs({ "rec", "tomb", "gone", "queued", "idsSent", "named" }) do
         if type(g[k]) ~= "table" then g[k] = {} end
+    end
+    -- GF-001-D23: while GetRealmName() gave "", 0.9.5/0.9.6 kept this guild's
+    -- data under "|<guild>". Merge it in once the realm is known (newer wins).
+    -- What was written to the outbox from it (queued/idsSent/named) is not
+    -- merged: those members are simply written again.
+    -- Checked once per store key: store() is called very often.
+    if key ~= mergeChecked then
+        mergeChecked = key
+        local lost = "|" .. ns.str(ns.Sync.player().guild)
+        if key ~= lost and type(db.share.guilds[lost]) == "table" then
+            Share.mergeLost(g, db.share.guilds[lost])
+            db.share.guilds[lost] = nil
+        end
     end
     return g
 end
@@ -321,6 +356,11 @@ local function countRecords(s)
     for _, groups in pairs(s.rec) do for _ in pairs(groups) do n = n + 1 end end
     recordCount = n
     return n
+end
+-- After records were merged in (GF-001-D23): count again, rebuild indexes.
+function Share.recount()
+    recordCount = nil
+    Share.version = (Share.version or 0) + 1
 end
 
 -- Digest of everything we know about author a: records and tombstones.
@@ -463,7 +503,7 @@ local function updatePeer(a, direct)
     local key = ns.keyName(m.name)
     if not recs or not next(recs) then ns.db.peers[key] = nil; return end
     local peer = { name = m.name, guid = m.guid, guild = ns.targetGuildName(), receivedAt = ns.now() }
-    peer.realm = m.name:match("^.-%-(.+)$") or str((ns.call(GetRealmName)))
+    peer.realm = m.name:match("^.-%-(.+)$") or ns.realm()
     local newest = 0
     for g, r in pairs(recs) do
         if r.t > newest and (g == "B" or g == "P" or g == "Z") then newest = r.t end

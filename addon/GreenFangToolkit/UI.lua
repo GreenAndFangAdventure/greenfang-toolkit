@@ -25,14 +25,21 @@ local manualScan = false
 UI.sortKey, UI.sortAscending = "name", true
 UI.SORT_KEYS = { name = true, rank = true, race = true, class = true, professions = true,
     level = true, zone = true, online = true }
--- Professions cell (GF-001-D8): one line of text, "鍛造 34/75" per profession,
--- primary first, then cooking / first aid / fishing. What does not fit is
--- counted as "+N"; the hover tooltip lists everything. Row height is unchanged.
--- "－" (full-width; the em dash is not a glyph we know the game font has)
--- means no data.
-local LIST_SLOTS, LIST_GAP = 6, 8
+-- Professions cell (GF-001-D18, was text since D8): one line, the
+-- profession's built-in icon and its skill points ("[icon]300"), primary
+-- first. Cooking / first aid / fishing follow only while they fit whole;
+-- they are never counted, the tooltip has them. A primary that does not fit
+-- is counted as "+N". Members known only from the guild roster (no points)
+-- get the icon alone; a profession without an icon falls back to its name.
+-- "－" (full-width, faint) means no data. Row height is unchanged.
+-- GF-001-D19: icons 20 px (were 14), full colour for names-only members;
+-- each icon has its own short tooltip, and a click filters the roster.
+local LIST_SLOTS, LIST_GAP, GROUP_GAP = 6, 8, 6
+local ICON_SIZE, ICON_GAP, MORE_WIDTH = 20, 2, 20
 local NO_DATA = "－"
 local SECONDARY_COLOR, NAMES_COLOR, TEXT_COLOR = { 0.72, 0.8, 0.74 }, { 0.6, 0.6, 0.6 }, { 1, 1, 1 }
+local NO_DATA_COLOR = { 0.42, 0.42, 0.42 }
+local NAMES_ALPHA, SECONDARY_ALPHA = 1, 0.85
 local ONLINE_COLOR, OFFLINE_COLOR = { 0.4, 1, 0.4 }, { 0.55, 0.55, 0.55 }
 local RANK_COLOR = { 0.85, 0.82, 0.65 }
 
@@ -81,7 +88,36 @@ function UI.sortMembers(list, key, ascending)
     return list
 end
 
-function UI.filterMembers(members, query)
+-- skillLineIDs a member is known to have: shared or own skill points, and
+-- the names from the guild roster. { [id] = true }
+function UI.memberSkills(m)
+    local set = {}
+    local detail = UI.detailFor(m)
+    for _, prof in ipairs(detail and detail.professions or {}) do
+        local id = ns.Professions.skillLineOf(prof)
+        if id then set[id] = true end
+    end
+    for _, name in ipairs(type(m.professions) == "table" and m.professions or {}) do
+        local id = ns.Data.skillLineIDFor(str(name))
+        if id then set[id] = true end
+    end
+    return set
+end
+
+-- Roster filters (GF-001-D19): skill (skillLineID), class (class token),
+-- online (true = only online), minLevel (number). All optional.
+UI.filters = { skill = nil, class = nil, online = false, minLevel = nil }
+
+local function passes(m, f)
+    if not f then return true end
+    if f.online and m.online ~= true then return false end
+    if f.class and m.classToken ~= f.class then return false end
+    if f.minLevel and (type(m.level) ~= "number" or m.level < f.minLevel) then return false end
+    if f.skill and not UI.memberSkills(m)[f.skill] then return false end
+    return true
+end
+
+function UI.filterMembers(members, query, filters)
     local q = keyName(query)
     local out = {}
     for _, m in ipairs(members or {}) do
@@ -89,9 +125,47 @@ function UI.filterMembers(members, query)
             str(m.name), str(m.race), str(m.class), Export.professionText(m),
             str(m.zone), str(m.guildRank)
         }, " "))
-        if q == "" or blob:find(q, 1, true) then out[#out + 1] = m end
+        if (q == "" or blob:find(q, 1, true)) and passes(m, filters) then out[#out + 1] = m end
     end
     return out
+end
+
+-- Options for the filter buttons: what the current roster has.
+local PROFESSION_ORDER = { 164, 165, 171, 182, 186, 197, 202, 333, 393, 755, 773, 185, 129, 356 }
+
+function UI.professionOptions()
+    local s = ns.Roster.current()
+    local have = {}
+    for _, m in ipairs(s and s.members or {}) do
+        for id in pairs(UI.memberSkills(m)) do have[id] = true end
+    end
+    local list = { { value = nil, text = "全部專業" } }
+    for _, id in ipairs(PROFESSION_ORDER) do
+        if have[id] then list[#list + 1] = { value = id, text = ns.Data.skillName(nil, id) or ("專業 " .. id) } end
+    end
+    return list
+end
+
+function UI.classOptions()
+    local s = ns.Roster.current()
+    local seen, list = {}, {}
+    for _, m in ipairs(s and s.members or {}) do
+        local token = str(m.classToken)
+        if token ~= "" and not seen[token] then
+            seen[token] = true
+            list[#list + 1] = { value = token, text = str(m.class) ~= "" and m.class or token }
+        end
+    end
+    table.sort(list, function(a, b) return keyName(a.text) < keyName(b.text) end)
+    table.insert(list, 1, { value = nil, text = "全部職業" })
+    return list
+end
+
+-- Set the profession filter (icon click: the same one again clears it).
+function UI.setSkillFilter(id)
+    UI.filters.skill = id
+    if UI.skillChoice then UI.skillChoice.value = id; UI.skillChoice.refreshText() end
+    UI.refresh(true)
 end
 
 function UI.loadSettings()
@@ -163,47 +237,106 @@ local function newRow(i)
             row.profX, row.profW = col.x, col.w
             row.profSlots = {}
             for k = 1, LIST_SLOTS do
+                local icon = row:CreateTexture(nil, "ARTWORK")
+                icon:SetSize(ICON_SIZE, ICON_SIZE)
+                icon:Hide()
                 local label = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
                 label:SetHeight(ROW_HEIGHT)
                 label:SetJustifyH("LEFT")
                 label:SetWordWrap(false)
-                row.profSlots[k] = label
+                local slot = { icon = icon, label = label }
+                row.profSlots[k] = slot
             end
             row.profMore = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
             row.profMore:SetHeight(ROW_HEIGHT)
         end
     end
-    -- Hover: every profession with skill points and when it was updated.
+    -- Hover: over a profession, only that profession; elsewhere, the
+    -- member and each profession, short (GF-001-D19). No frame per icon: the
+    -- row follows the cursor while it is over it (a roster can have hundreds
+    -- of rows).
     row:EnableMouse(true)
     row:SetScript("OnEnter", function(self)
-        local detail = self.detail
-        if not detail then return end
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine(str(self.memberName))
-        local anyRecipes = false
-        for _, prof in ipairs(detail.professions) do
-            local c = ns.Professions.isSecondary(prof) and SECONDARY_COLOR or { 0.9, 0.9, 0.9 }
-            local note = UI.recipeNote(self.memberGuid, prof)
-            if note then anyRecipes = true end
-            GameTooltip:AddLine(UI.skillLabel(prof) .. (note and ("　" .. note) or ""), c[1], c[2], c[3])
-        end
-        GameTooltip:AddLine(UI.updatedText(detail), 0.75, 0.9, 0.75)
-        if detail.source == "本人" then
-            GameTooltip:AddLine("點自己的專業可以開啟技能視窗（戰鬥中不可用）", 0.75, 0.9, 0.75)
-        end
-        if anyRecipes then
-            GameTooltip:AddLine(detail.source == "本人" and "點這一列其他地方可以看自己的配方" or "點一下看他的配方",
-                0.75, 0.9, 0.75)
-        end
-        GameTooltip:Show()
+        self.hoverSlot = false
+        UI.hoverRow(self)
+        self:SetScript("OnUpdate", UI.hoverRow)
     end)
-    row:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    -- Click: that member's recipes (D-013); a plain frame, nothing secure.
+    row:SetScript("OnLeave", function(self)
+        self:SetScript("OnUpdate", nil)
+        self.hoverSlot = nil
+        GameTooltip:Hide()
+    end)
+    -- Click on a profession: filter the roster by it (again: clear).
+    -- Elsewhere: that member's recipes (D-013). A plain frame, nothing secure.
     row:SetScript("OnMouseUp", function(self)
-        if UI.hasRecipes(self.memberGuid) then ns.Recipes.show(self.memberGuid) end
+        local slot = UI.slotAt(self, UI.cursorX(self))
+        local id = slot and slot.entry.prof and ns.Professions.skillLineOf(slot.entry.prof)
+        if id then
+            UI.setSkillFilter(UI.filters.skill ~= id and id or nil)
+        elseif UI.hasRecipes(self.memberGuid) then
+            ns.Recipes.show(self.memberGuid)
+        end
     end)
     rowWidgets[i] = row
     return row
+end
+
+-- Cursor x from the row's left edge, or nil (offline tests: no cursor).
+function UI.cursorX(row)
+    if type(GetCursorPosition) ~= "function" or not row.GetLeft then return nil end
+    local x = ns.num((GetCursorPosition()))
+    local left = ns.num((row:GetLeft()))
+    local scale = ns.num((row:GetEffectiveScale())) or 1
+    if not (x and left and scale > 0) then return nil end
+    return x / scale - left
+end
+
+-- The profession slot at x (from the row's left edge), or nil.
+function UI.slotAt(row, x)
+    if not x then return nil end
+    for _, s in ipairs(row.profSlots or {}) do
+        if s.entry and s.x0 and x >= s.x0 and x <= s.x1 then return s end
+    end
+    return nil
+end
+
+-- Tooltip for a row: one profession when slot is given, else the member.
+function UI.showRowTooltip(row, slot)
+    if slot then
+        ns.tooltipAbove(row, slot.x0 or 0) -- right above that icon (GF-001-D21)
+    else
+        GameTooltip:SetOwner(row, "ANCHOR_TOP")
+    end
+    if slot then
+        ns.Professions.addTooltipLines(GameTooltip, slot.entry.prof, row.memberGuid)
+        GameTooltip:Show()
+        return
+    end
+    local detail, names = row.detail, row.rosterNames
+    if not detail and not (names and #names > 0) then
+        GameTooltip:Hide()
+        return
+    end
+    GameTooltip:AddLine(str(row.memberName))
+    if detail then
+        for _, prof in ipairs(detail.professions) do
+            local c = ns.Professions.isSecondary(prof) and SECONDARY_COLOR or { 0.9, 0.9, 0.9 }
+            local note = UI.recipeNote(row.memberGuid, prof)
+            GameTooltip:AddLine(UI.skillLabel(prof) .. (note and ("　" .. note) or ""), c[1], c[2], c[3])
+        end
+    else
+        for _, name in ipairs(names) do GameTooltip:AddLine(str(name), 0.9, 0.9, 0.9) end
+    end
+    GameTooltip:Show()
+end
+
+-- While the cursor is over a row: redraw the tooltip when it moves onto
+-- another profession (or off them).
+function UI.hoverRow(row)
+    local slot = UI.slotAt(row, UI.cursorX(row)) or nil
+    if slot == row.hoverSlot then return end
+    row.hoverSlot = slot
+    UI.showRowTooltip(row, slot)
 end
 
 -- "鍛造 34/75" (roster cell); just the name when the points are unknown.
@@ -216,12 +349,12 @@ function UI.shortLabel(prof)
     return string.format("%s %d", name, prof.rank)
 end
 
--- "配方 120 個（3 天前）" for a member's profession, or nil.
+-- "配方 120 個" for a member's profession, or nil.
 function UI.recipeNote(guid, prof)
     local id = ns.Professions.skillLineOf(prof)
     local r = id and ns.Recipes and ns.Recipes.of(guid, id)
     if not r then return nil end
-    return string.format("配方 %d 個（%s）", #r.ids, ns.Recipes.agoText(r.t))
+    return string.format("配方 %d 個", #r.ids)
 end
 
 function UI.hasRecipes(guid)
@@ -232,16 +365,16 @@ function UI.hasRecipes(guid)
     return false
 end
 
--- "釣魚 150 / 225" (tooltip)
+-- "釣魚 150 / 225" (tooltip); just the name when the points are unknown.
 function UI.skillLabel(prof)
-    local value = type(prof.rank) == "number" and tostring(prof.rank) or "?"
-    if type(prof.max) == "number" and prof.max > 0 then value = value .. " / " .. prof.max end
-    return str(prof.name) .. " " .. value
+    local value = ns.Professions.valueText(prof)
+    return value and (str(prof.name) .. " " .. value) or str(prof.name)
 end
 
-function UI.updatedText(detail)
-    local when = type(detail.at) == "number" and ns.localTime(detail.at) or "未知"
-    return string.format("更新時間：%s（%s）", when, detail.source)
+-- "2026-11-20 21:05" (header): the scan time without seconds.
+function UI.shortTime(s)
+    local t = Export.timestampText(s)
+    return (t:gsub("^(%d+%-%d+%-%d+ %d+:%d+):%d+$", "%1"))
 end
 
 -- Detailed professions for a roster member: the player's own character, or
@@ -328,12 +461,11 @@ function UI.refresh(resetScroll)
     elseif s then
         -- D-014 point 6: only what players use; scan details are in 「同步與診斷」.
         reportLine:SetText(string.format("%s｜%d 位成員｜%s 更新",
-            s.guild or "", s.total or #s.members, Export.timestampText(s)))
+            s.guild or "", s.total or #s.members, UI.shortTime(s)))
         summaryLine:SetText("")
-        matching = UI.sortMembers(UI.filterMembers(s.members, searchBox and searchBox:GetText() or ""),
+        matching = UI.sortMembers(UI.filterMembers(s.members, searchBox and searchBox:GetText() or "", UI.filters),
             UI.sortKey, UI.sortAscending)
-        statusLine:SetText(string.format("顯示 %d / %d 位｜點欄位標題排序｜點成員看他的配方",
-            #matching, #s.members))
+        statusLine:SetText(string.format("顯示 %d / %d 位", #matching, #s.members))
     else
         reportLine:SetText("尚無名冊；按「更新名冊」取得公會資料。")
         summaryLine:SetText("")
@@ -379,65 +511,133 @@ function UI.layoutRows()
     end
 end
 
--- Professions cell: one line, "鍛造 34/75" per profession (own record or what
--- the member shared, D-011). Members without that data: profession names
--- from the guild roster in grey, or "－". Own row: remember where each
--- profession is so UI.placeOwnButtons can put a secure button on it.
+-- Professions cell (D18): icon + skill points per profession (own record or
+-- what the member shared, D-011), primary first; secondary ones only while
+-- they fit. Members without that data: dimmed icons of the names in the
+-- guild roster, or a faint "－". Own row: remember where each profession is
+-- so UI.placeOwnButtons can put a secure button on it.
+--
+-- Every label is measured with SetWidth(0) first. Before D18 a reused label
+-- kept the fixed width of what it showed last, and the client measures text
+-- within that width, so a longer name came out as "剝…" or only "…".
+local function hideSlot(s)
+    s.icon:Hide()
+    s.label:SetText("")
+    s.label:Hide()
+    s.entry, s.x0, s.x1 = nil, nil, nil
+end
+
+-- Put one entry into slot s at x; returns its width, or nil when it does not
+-- fit in `room`. `first` may be cut to the cell (the cell is never empty).
+local function placeEntry(row, s, e, x, room, first)
+    local hasIcon = e.prof and Icons.setProfessionIcon(s.icon, e.prof) or false
+    local text
+    if hasIcon then
+        text = e.points or ""
+    else
+        text = e.points and (e.name .. " " .. e.points) or e.name
+    end
+    s.label:SetWidth(0)
+    s.label:SetText(text)
+    local textW = text ~= "" and (ns.num((s.label:GetStringWidth())) or 30) or 0
+    local iconW = hasIcon and (ICON_SIZE + (textW > 0 and ICON_GAP or 0)) or 0
+    local w = iconW + textW
+    if w > room and not first then
+        hideSlot(s)
+        return nil
+    end
+    local left = row.profX + x
+    if hasIcon then
+        s.icon:ClearAllPoints()
+        s.icon:SetPoint("LEFT", row, "LEFT", left, 0)
+        s.icon:SetAlpha(e.alpha)
+        s.icon:Show()
+    end
+    if textW > 0 then
+        s.label:ClearAllPoints()
+        s.label:SetPoint("LEFT", row, "LEFT", left + iconW, 0)
+        if w > room then s.label:SetWidth(math.max(1, room - iconW)) end
+        s.label:SetTextColor(e.color[1], e.color[2], e.color[3])
+        s.label:Show()
+    else
+        s.label:Hide()
+    end
+    -- Where this profession is, for its tooltip and click (not the "－").
+    s.entry = e.prof and e or nil
+    s.x0, s.x1 = left, left + math.min(w, room)
+    return math.min(w, room)
+end
+
 local function fillProfessions(row, cell, m)
     local detail = UI.detailFor(m)
+    local Prof = ns.Professions
     row.detail, row.memberName, row.memberGuid = detail, m.name, m.guid
+    row.rosterNames = nil
     row.ownList = nil
     cell:SetText("")
     local entries = {}
     if detail then
         for _, prof in ipairs(detail.professions) do
-            entries[#entries + 1] = { text = UI.shortLabel(prof), prof = prof,
-                color = ns.Professions.isSecondary(prof) and SECONDARY_COLOR or TEXT_COLOR }
+            local secondary = Prof.isSecondary(prof)
+            entries[#entries + 1] = { prof = prof, name = str(prof.name), secondary = secondary,
+                points = type(prof.rank) == "number" and tostring(prof.rank) or nil,
+                color = secondary and SECONDARY_COLOR or TEXT_COLOR,
+                alpha = secondary and SECONDARY_ALPHA or 1 }
         end
-    elseif type(m.professions) == "table" then
-        for _, name in ipairs(m.professions) do
-            entries[#entries + 1] = { text = str(name), color = NAMES_COLOR }
+    elseif type(m.professions) == "table" and #m.professions > 0 then
+        row.rosterNames = m.professions
+        local list = {}
+        for _, name in ipairs(m.professions) do list[#list + 1] = { name = str(name) } end
+        for _, prof in ipairs(Prof.ordered(list)) do
+            entries[#entries + 1] = { prof = prof, name = prof.name, secondary = Prof.isSecondary(prof),
+                color = NAMES_COLOR, alpha = NAMES_ALPHA }
         end
-    end
-    if #entries == 0 then
-        entries[1] = { text = NO_DATA, color = NAMES_COLOR }
     end
     local own = detail and detail.source == "本人"
     if own then row.ownList = {} end
-    local x, shown = 0, 0
     row.profMore:SetText("")
     row.profMore:Hide()
-    for k, label in ipairs(row.profSlots) do
-        local e = entries[k]
-        local fits = false
-        if e and shown == k - 1 then
-            label:SetText(e.text)
-            local w = ns.num((label:GetStringWidth())) or 60
-            -- Leave room for "+N" when more entries follow.
-            local reserve = entries[k + 1] and 18 or 0
-            if x + w + reserve <= row.profW or k == 1 then
-                fits = true
-                label:ClearAllPoints()
-                label:SetPoint("LEFT", row, "LEFT", row.profX + x, 0)
-                label:SetWidth(math.min(w + 2, row.profW - x))
-                label:SetTextColor(e.color[1], e.color[2], e.color[3])
-                label:Show()
+    local slots = row.profSlots
+    if #entries == 0 then
+        for k = 2, #slots do hideSlot(slots[k]) end
+        placeEntry(row, slots[1], { name = NO_DATA, color = NO_DATA_COLOR }, 0, row.profW, true)
+        return
+    end
+    -- Primaries left after entry i (room is kept for "+N" while there are).
+    local primariesAfter, count = {}, 0
+    for i = #entries, 1, -1 do
+        primariesAfter[i] = count
+        if not entries[i].secondary then count = count + 1 end
+    end
+    local x, used, hiddenPrimary, full = 0, 0, 0, false
+    local lastSecondary = false
+    for i, e in ipairs(entries) do
+        local s = slots[used + 1]
+        local w
+        if s and not full then
+            local gap = 0
+            if used > 0 then gap = LIST_GAP + ((e.secondary and not lastSecondary) and GROUP_GAP or 0) end
+            local reserve = primariesAfter[i] > 0 and MORE_WIDTH or 0
+            w = placeEntry(row, s, e, x + gap, row.profW - x - gap - reserve, used == 0)
+            if w then
                 if own and e.prof then
-                    row.ownList[#row.ownList + 1] = { prof = e.prof, x = row.profX + x, w = math.min(w + 2, row.profW - x) }
+                    row.ownList[#row.ownList + 1] = { prof = e.prof, x = row.profX + x + gap, w = w }
                 end
-                x = x + w + LIST_GAP
-                shown = k
+                x = x + gap + w
+                used = used + 1
+                lastSecondary = e.secondary
             end
         end
-        if not fits then
-            label:SetText("")
-            label:Hide()
+        if not w then
+            full = true
+            if not e.secondary then hiddenPrimary = hiddenPrimary + 1 end
         end
     end
-    if shown < #entries then
+    for k = used + 1, #slots do hideSlot(slots[k]) end
+    if hiddenPrimary > 0 then
         row.profMore:ClearAllPoints()
-        row.profMore:SetPoint("LEFT", row, "LEFT", row.profX + math.max(0, x - LIST_GAP + 2), 0)
-        row.profMore:SetText("+" .. (#entries - shown))
+        row.profMore:SetPoint("LEFT", row, "LEFT", row.profX + x + 4, 0)
+        row.profMore:SetText("+" .. hiddenPrimary)
         row.profMore:Show()
     end
 end
@@ -511,7 +711,7 @@ local function manualUpdate()
         return
     end
     manualScan = true
-    summaryLine:SetText("正在要求更新公會名冊，若資料尚未載入會保留前次報告。")
+    summaryLine:SetText("名冊更新中，請稍候。")
     -- Club info and guild roster can arrive separately.
     ns.after(2, function()
         if not manualScan then return end
@@ -538,6 +738,17 @@ function UI.afterAutoScan(count)
     if ns.Framework.isModuleShown("roster") then UI.refresh(true) end
 end
 
+-- 「清除」: search text and every filter.
+function UI.clearFilters()
+    UI.filters.skill, UI.filters.class, UI.filters.online, UI.filters.minLevel = nil, nil, false, nil
+    if UI.skillChoice then UI.skillChoice.value = nil; UI.skillChoice.refreshText() end
+    if UI.classChoice then UI.classChoice.value = nil; UI.classChoice.refreshText() end
+    if UI.onlineCheck then UI.onlineCheck.set(false) end
+    if UI.levelBox then UI.levelBox:SetText("") end
+    if searchBox then searchBox:SetText("") end
+    UI.refresh(true)
+end
+
 -- Build the roster page into the framework panel (same coordinates as the
 -- old stand-alone window, which the panel replaces).
 local function build(p)
@@ -552,19 +763,47 @@ local function build(p)
     summaryLine:SetWidth(940)
     summaryLine:SetJustifyH("LEFT")
     UI.updateButton = button(f, "更新名冊", 115, 26, 20, -80, manualUpdate)
-    local searchLabel = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    searchLabel:SetPoint("TOPLEFT", 160, -87)
-    searchLabel:SetText("搜尋")
+    -- GF-001-D20: one filter line with room between every control:
+    -- [更新名冊] 搜尋 [box]  [專業 ▼]  [職業 ▼]  [ ] 只看在線  等級 [  ] 以上  [清除]
+    local function label(text, x)
+        local l = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        l:SetPoint("TOPLEFT", f, "TOPLEFT", x, -87)
+        l:SetText(text)
+        return l
+    end
+    label("搜尋", 150)
     searchBox = ns.createFrame("EditBox", nil, f, "InputBoxTemplate")
-    searchBox:SetSize(318, 24)
-    searchBox:SetPoint("TOPLEFT", 206, -80)
+    searchBox:SetSize(150, 24)
+    searchBox:SetPoint("TOPLEFT", f, "TOPLEFT", 186, -80)
     searchBox:SetAutoFocus(false)
     searchBox:SetMaxLetters(100)
     searchBox:SetScript("OnTextChanged", function() UI.refresh(true) end)
     searchBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     UI.searchBox = searchBox
-    UI.clearButton = button(f, "清除", 74, 25, 544, -80, function() searchBox:SetText("") end)
-    rosterControls = { UI.updateButton, searchBox, UI.clearButton }
+    UI.skillChoice = ns.choiceButton(f, 110, 352, -80, UI.professionOptions,
+        function(value) UI.filters.skill = value; UI.refresh(true) end, "全部專業",
+        function(id) return ns.Data.skillName(nil, id) end)
+    UI.classChoice = ns.choiceButton(f, 100, 474, -80, UI.classOptions,
+        function(value) UI.filters.class = value; UI.refresh(true) end, "全部職業")
+    UI.onlineCheck = ns.checkBox(f, "只看在線", 588, -80,
+        function(on) UI.filters.online = on; UI.refresh(true) end)
+    UI.levelLabel = label("等級", 684)
+    UI.levelBox = ns.createFrame("EditBox", nil, f, "InputBoxTemplate")
+    UI.levelBox:SetSize(40, 24)
+    UI.levelBox:SetPoint("TOPLEFT", f, "TOPLEFT", 724, -80)
+    UI.levelBox:SetAutoFocus(false)
+    UI.levelBox:SetMaxLetters(2)
+    if UI.levelBox.SetNumeric then UI.levelBox:SetNumeric(true) end
+    UI.levelBox:SetScript("OnTextChanged", function(self)
+        local n = tonumber(str(self:GetText()))
+        UI.filters.minLevel = (n and n > 1) and n or nil
+        UI.refresh(true)
+    end)
+    UI.levelBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    UI.levelSuffix = label("以上", 776)
+    UI.clearButton = button(f, "清除", 60, 25, 816, -80, UI.clearFilters)
+    rosterControls = { UI.updateButton, searchBox, UI.clearButton, UI.skillChoice, UI.classChoice,
+        UI.onlineCheck, UI.levelBox }
     local header = CreateFrame("Frame", nil, f)
     header:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -119)
     header:SetSize(937, 25)
@@ -582,13 +821,6 @@ local function build(p)
         heading:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
         heading:SetScript("OnClick", function() changeSort(col) end)
         rosterControls[#rosterControls + 1] = heading
-        heading:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("依「" .. col.name .. "」排序")
-            GameTooltip:AddLine("再次點擊可切換升序／降序", 0.75, 0.9, 0.75)
-            GameTooltip:Show()
-        end)
-        heading:SetScript("OnLeave", function() GameTooltip:Hide() end)
         sortHeaders[#sortHeaders + 1] = { col = col, label = label }
     end
     updateSortHeaders()
@@ -648,10 +880,8 @@ end
 
 local function createExport()
     if exportWindow then return end
-    local f = ns.createFrame("Frame", "GreenFangToolkit_ExportWindow", UIParent, "BasicFrameTemplateWithInset")
-    f:SetSize(920, 560)
+    local f = ns.popupWindow("GreenFangToolkit_ExportWindow", 920, 560)
     f:SetPoint("CENTER", 0, 10)
-    f:SetFrameStrata("FULLSCREEN_DIALOG")
     f:SetMovable(true)
     f:EnableMouse(true)
     f:RegisterForDrag("LeftButton")

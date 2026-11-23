@@ -152,8 +152,15 @@ GreenFangToolkitDB = {
 	["schema"] = "gf.toolkit",
 	["schemaVersion"] = 2,
 	["settings"] = {
+		["fullNames"] = {
+			["Player-0000-0000000A"] = "測試甲",
+		},
 		["minimapAngle"] = 123,
 		["minimapLayoutVersion"] = 2,
+		["realms"] = {
+			["Player-0000-0000000A"] = "測試伺服器",
+			["Player-0000-0000000F"] = "測試伺服器",
+		},
 		["sortAscending"] = false,
 		["sortKey"] = "level",
 	},
@@ -276,6 +283,7 @@ GreenFangToolkitDB = {
 				},
 				["uploader"] = {
 					["faction"] = "Horde",
+					["fullName"] = "測試甲",
 					["guid"] = "Player-0000-0000000A",
 					["guild"] = "綠皮與獠牙冒險事務所",
 					["guildRank"] = "會員",
@@ -362,15 +370,15 @@ GreenFangToolkitDB = {
 				},
 			}, -- [2]
 			{
-				["capturedAt"] = 1763373605,
-				["capturedAtServer"] = 1763373605,
+				["capturedAt"] = 1763373610,
+				["capturedAtServer"] = 1763373610,
 				["game"] = {
 					["interface"] = 16001,
 					["locale"] = "zhTW",
 					["realm"] = "測試伺服器",
 					["world"] = "forever",
 				},
-				["id"] = "Player-0000-0000000F:1763373605:character.self",
+				["id"] = "Player-0000-0000000F:1763373610:character.self",
 				["kind"] = "character.self",
 				["payload"] = {
 					["class"] = "薩滿",
@@ -473,6 +481,7 @@ GreenFangToolkitDB = {
 						["via"] = "author",
 					},
 					["subject"] = {
+						["fullName"] = "測試乙",
 						["guid"] = "Player-0000-0000000B",
 						["name"] = "測試乙-測試伺服器",
 						["realm"] = "測試伺服器",

@@ -93,17 +93,29 @@ end
 local sets = {}
 Prof.sets = sets
 
+-- One profession in a tooltip: its name, "rank / max" and the number of
+-- recipes when known (GF-001-D19; roster icons and own-profession buttons).
+function Prof.valueText(p)
+    if type(p.rank) ~= "number" then return nil end
+    if type(p.max) == "number" and p.max > 0 then return p.rank .. " / " .. p.max end
+    return tostring(p.rank)
+end
+
+function Prof.addTooltipLines(tip, p, guid)
+    tip:AddLine(str(p.name))
+    local value = Prof.valueText(p)
+    if value then tip:AddLine(value, 0.9, 0.9, 0.9) end
+    local id = Prof.skillLineOf(p)
+    local r = id and guid and ns.Recipes and ns.Recipes.of(guid, id)
+    if r then tip:AddLine(string.format("配方 %d 個", #r.ids), 0.9, 0.9, 0.9) end
+end
+
 local function showTooltip(self)
     local p = self.gfProf
     if not p then return end
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:AddLine(str(p.name))
-    if type(p.rank) == "number" then
-        local value = tostring(p.rank)
-        if type(p.max) == "number" and p.max > 0 then value = value .. " / " .. p.max end
-        GameTooltip:AddLine("技能點：" .. value, 0.9, 0.9, 0.9)
-    end
-    GameTooltip:AddLine("點一下開啟技能視窗（戰鬥中不可用）", 0.75, 0.9, 0.75)
+    -- GF-001-D19: the profession only, no hints.
+    Prof.addTooltipLines(GameTooltip, p, ns.Data.player().guid)
     GameTooltip:Show()
 end
 
