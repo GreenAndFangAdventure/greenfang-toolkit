@@ -903,7 +903,8 @@ return function(T)
         ns.Framework.open("orders")
         local rows = ns.OrdersUI.shownRows()
         eq(#rows, 4, "two headers and two orders")
-        eq(rows[1].header, "收到的", "received first"); eq(rows[3].header, "我下的", "then placed")
+        ok(rows[1].header:find("收到的", 1, true), "received first"); ok(rows[3].header:find("我下的", 1, true), "then placed")
+        ok(rows[1].header:find("^|T"), "icon first (GF-002-C)")
         local actions = {}
         for _, r in ipairs(ns.OrdersUI.rowFrames()) do
             if r.view then
