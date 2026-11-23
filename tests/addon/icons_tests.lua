@@ -142,6 +142,30 @@ return function(T)
         eq(d.alt, "d", "second role by its icon")
     end)
 
+    test("GF-002-C fix: only one picker is open at a time (dungeon grid or quest menu)", function()
+        local ns = login()
+        local U = ns.AdventureUI
+        GetNumQuestLogEntries = function() return 1 end
+        GetQuestLogTitle = function() return "測試任務", 30, nil, false, false, false, nil, 1013 end
+        local menuName = ns.Framework.MENU_NAME
+        local function menuOpen() local m = _G[menuName]; return m ~= nil and m:IsShown() end
+        local d = U.openTicket()
+        U.pickDestination(UIParent)
+        local grid = U.grid()
+        ok(grid:IsShown(), "grid open"); ok(not menuOpen(), "no menu with it")
+        ok(grid.quest:IsShown(), "quest scroll in the grid")
+        wow.click(grid.quest)
+        ok(menuOpen(), "quest menu open"); ok(not grid:IsShown(), "grid closed")
+        U.pickDestination(UIParent)
+        ok(grid:IsShown() and not menuOpen(), "grid again; the menu closed")
+        U.pickTime(UIParent, "t")
+        ok(menuOpen() and not grid:IsShown(), "a time menu closes the grid")
+        GetNumQuestLogEntries, GetQuestLogTitle = nil, nil
+        U.pickDestination(UIParent)
+        ok(not grid.quest:IsShown(), "no quest log: no scroll")
+        ok(d, "draft")
+    end)
+
     test("GF-002-C orders: page arrows for the quantity, icons on the buttons and headers", function()
         local ns = login()
         local d = ns.OrdersUI.openOrder({ recipe = 2660, skill = 164, crafters = {} })

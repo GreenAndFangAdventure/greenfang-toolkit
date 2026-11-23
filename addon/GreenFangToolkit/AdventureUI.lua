@@ -580,7 +580,10 @@ function UI.draft() return draft end
 -- level (white fits, grey too low for me, red too high); click to pick or toggle.
 UI.GRID_NAME = "GreenFangToolkit_DungeonGrid"
 local grid
-function UI.dungeonGrid(owner, onClick, isOn)
+-- onQuest: when given, a quest scroll button closes the grid and opens the
+-- quest menu instead (only one of the two is ever open; GF-002-C fix).
+function UI.dungeonGrid(owner, onClick, isOn, onQuest)
+    if ns.Framework.closeMenu then ns.Framework.closeMenu() end
     if not grid then
         grid = CreateFrame("Frame", UI.GRID_NAME, UIParent)
         grid:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -594,7 +597,17 @@ function UI.dungeonGrid(owner, onClick, isOn)
             b.dungeon = d.id
             grid.buttons[i] = b
         end
-        grid:SetSize(6 + 9 * 34, 12 + math.ceil(#ns.AdventureData.DUNGEONS / 9) * 34)
+        local n = #ns.AdventureData.DUNGEONS
+        grid.quest = iconButton(grid, 30, "quest", "任務")
+        ns.GameIcons.set(grid.quest.tex, "quest")
+        grid.quest:SetPoint("TOPLEFT", grid, "TOPLEFT", 6 + (n % 9) * 34, -6 - math.floor(n / 9) * 34)
+        grid:SetSize(6 + 9 * 34, 12 + math.ceil((n + 1) / 9) * 34)
+    end
+    if onQuest then
+        grid.quest:SetScript("OnClick", function(self) grid:Hide(); onQuest(self) end)
+        grid.quest:Show()
+    else
+        grid.quest:Hide()
     end
     local level = A().myLevel()
     for _, b in ipairs(grid.buttons) do
@@ -618,9 +631,20 @@ function UI.dungeonGrid(owner, onClick, isOn)
 end
 function UI.grid() return grid end
 
--- Dungeons (grid), then my quest log (R-4.1).
+-- Every menu on this page goes through here: the dungeon grid closes first.
+function UI.menu(owner, items)
+    if grid then grid:Hide() end
+    return ns.showMenu(owner, items)
+end
+
+-- Dungeons (grid); its quest scroll opens my quest log instead (R-4.1).
 function UI.pickDestination(owner)
-    UI.dungeonGrid(owner, function(id) draft.dungeon = id; draft.quests = {}; drawTicket() end)
+    local hasQuests = A().questLog() ~= nil
+    return UI.dungeonGrid(owner, function(id) draft.dungeon = id; draft.quests = {}; drawTicket() end, nil,
+        hasQuests and function() UI.pickQuests(owner) end or nil)
+end
+
+function UI.pickQuests(owner)
     local items = {}
     local log = A().questLog()
     if log then
@@ -635,9 +659,8 @@ function UI.pickDestination(owner)
             end }
         end
     end
-    if #items == 0 then return grid end
     items[#items + 1] = { text = tex("no"), fn = function() draft.dungeon = nil; draft.quests = {}; drawTicket() end }
-    return ns.showMenu(owner, items)
+    return UI.menu(owner, items)
 end
 
 function UI.pickTime(owner, mode)
@@ -660,7 +683,7 @@ function UI.pickTime(owner, mode)
         end
     end
     drawTicket()
-    return ns.showMenu(owner, items)
+    return UI.menu(owner, items)
 end
 
 function UI.pickRoles(owner)
@@ -673,7 +696,7 @@ function UI.pickRoles(owner)
     else
         for n = 2, 5 do items[#items + 1] = { text = tex("any") .. " " .. n, fn = function() draft.size = n; drawTicket() end } end
     end
-    return ns.showMenu(owner, items)
+    return UI.menu(owner, items)
 end
 
 ---------------------------------------------------------------------------
@@ -793,7 +816,7 @@ function UI.pickWorkerQuests(owner)
             end }
         end
     end
-    return ns.showMenu(owner, items)
+    return UI.menu(owner, items)
 end
 
 function UI.pickWorkerRoles(owner)
@@ -804,7 +827,7 @@ function UI.pickWorkerRoles(owner)
     for _, r in ipairs(A().ROLES) do
         items[#items + 1] = { text = "(" .. tex(r) .. ")", fn = function() wdraft.alt = (wdraft.alt == r or wdraft.main == r) and nil or r; drawWorker() end }
     end
-    return ns.showMenu(owner, items)
+    return UI.menu(owner, items)
 end
 
 function UI.pickWorkerSlots(owner)
@@ -818,7 +841,7 @@ function UI.pickWorkerSlots(owner)
             drawWorker()
         end }
     end
-    return ns.showMenu(owner, items)
+    return UI.menu(owner, items)
 end
 
 ---------------------------------------------------------------------------
