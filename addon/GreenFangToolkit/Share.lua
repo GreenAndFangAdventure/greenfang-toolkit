@@ -695,6 +695,9 @@ local function canSend()
     return true
 end
 
+-- GF-006-B: the order and price ledgers (Ledger.lua) use the same rules.
+Share.canSend = canSend
+
 local function throttledCode(r)
     if r == false then return true end
     if type(r) ~= "number" or r == 0 then return false end
