@@ -50,7 +50,7 @@ Orders.now = now
 
 -- Numeric fields (base 36 on the wire); everything else is a string.
 local NUM = { ver = true, cr = true, rc = true, it = true, q = true, fe = true, fq = true, qt = true,
-    sk = true, sa = true, gt = true, gv = true, ac = true, dt = true, lt = true }
+    sk = true, sa = true, gt = true, gv = true, ac = true, dt = true, lt = true, rt = true }
 
 function Orders.encodeEntry(e)
     local keys = {}
@@ -186,6 +186,7 @@ Orders.ledger = ns.Ledger.new({
     changeDelay = 2,
     onChange = function() cache.version = -1; if Orders.onChanged then Orders.onChanged() end end,
     onCustom = function(...) return Orders.onCustom(...) end,
+    mergeSelf = function(g, v) return Orders.mergeSelf(g, v) end,
 })
 local led = Orders.ledger
 
@@ -207,6 +208,31 @@ local function listOf(a, g)
     return rec and Orders.decodeList(rec.v) or {}
 end
 Orders.listOf = listOf
+
+-- Review 3-3: another computer of mine wrote an older copy (by time) of my
+-- W or J that we did not have. Merge it: every id from both, the entry with
+-- the later state time (sa) wins; then write it as ours again.
+function Orders.mergeSelf(g, v)
+    if g ~= "W" and g ~= "J" then return false end
+    local incoming = Orders.decodeList(v)
+    if not incoming then return false end
+    local me = S().selfAuthor()
+    local mine = listOf(me, g)
+    local byId = {}
+    for _, e in ipairs(mine) do byId[e.id] = e end
+    local changed = false
+    for _, e in ipairs(incoming) do
+        local m = byId[e.id]
+        if not m or (e.sa or 0) > (m.sa or 0) then
+            if m then for i, x in ipairs(mine) do if x.id == e.id then mine[i] = e end end
+            else mine[#mine + 1] = e end
+            byId[e.id] = e
+            changed = true
+        end
+    end
+    if changed then led:put(g, Orders.encodeList(mine)) end
+    return changed
+end
 
 ---------------------------------------------------------------------------
 -- Services and fees (R-4.2 – R-4.5)
@@ -315,6 +341,17 @@ end
 -- w: the customer's entry (from W, or from M for a web order without a W
 -- entry yet); jobs: { [crafter author] = J entry for this order }; cust: the
 -- customer's author. Returns the view (see the fields below).
+-- v1.4a tie rule: GUID strings compared byte by byte (never locale order).
+function Orders.guidLess(x, y)
+    local n = math.min(#x, #y)
+    for i = 1, n do
+        local a, b = x:byte(i), y:byte(i)
+        if a ~= b then return a < b end
+    end
+    return #x < #y
+end
+local function authorLess(x, y) return Orders.guidLess(S().guidOf(x), S().guidOf(y)) end
+
 function Orders.view(w, jobs, cust)
     local v = {
         id = w.id, customer = cust, src = w.src or "g", created = w.cr or 0, recipe = w.rc, item = w.it,
@@ -329,13 +366,19 @@ function Orders.view(w, jobs, cust)
         crafter = w.cf
         job = jobs[crafter]
     else
-        if w.lk and jobs[w.lk] and not (jobs[w.lk].st == "b" and (jobs[w.lk].sa or 0) >= (w.lt or 0)) then
-            crafter, job = w.lk, jobs[w.lk]
+        -- v1.4a: the lock wins; the locked crafter dropping it (statusAt >= lockedAt)
+        -- puts it back to 等接單. Only crafters who accept after that drop can
+        -- take it (review 3-1: it is never handed to someone who was too late).
+        local lockedJob = w.lk and jobs[w.lk]
+        local dropped = lockedJob and lockedJob.st == "b" and (lockedJob.sa or 0) >= (w.lt or 0)
+        if w.lk and lockedJob and not dropped then
+            crafter, job = w.lk, lockedJob
         else
+            local after = dropped and (lockedJob.sa or 0) or nil
             local best
             for a, j in pairs(jobs) do
-                if (j.st == "a" or j.st == "d" or j.st == "m" or j.st == "c") and j.ac then
-                    if not best or j.ac < best.ac or (j.ac == best.ac and a < best.a) then best = { a = a, ac = j.ac } end
+                if (j.st == "a" or j.st == "d" or j.st == "m" or j.st == "c") and j.ac and (not after or j.ac > after) then
+                    if not best or j.ac < best.ac or (j.ac == best.ac and authorLess(a, best.a)) then best = { a = a, ac = j.ac } end
                 end
             end
             if best then crafter, job = best.a, jobs[best.a] end
@@ -343,11 +386,16 @@ function Orders.view(w, jobs, cust)
     end
     v.crafter = crafter
     v.declined = {}
-    for a, j in pairs(jobs) do if j.st == "n" or j.st == "b" then v.declined[a] = true end end
+    for a, j in pairs(jobs) do
+        if j.st == "n" or j.st == "b" then v.declined[a] = true end
+        if j.st == "b" and (j.sa or 0) > (v.droppedAt or 0) then v.droppedAt = j.sa end
+    end
     if job then v.gave = job.gv or 0 end
     v.progress = math.max(v.got, v.gave)
     v.paid = (w.pd == "1") or (job and job.pd == "1") or false
 
+    -- returnedAt (rt); 0.11.0 wrote only st = "r" with its time in sa.
+    local returnedAt = w.rt or (w.st == "r" and w.sa) or 0
     -- Closes: the earliest one wins (R-6.6).
     local closes = {}
     if w.st == "x" then closes[#closes + 1] = { close = "cancel", by = "customer", how = "manual", at = w.sa or 0 } end
@@ -355,12 +403,19 @@ function Orders.view(w, jobs, cust)
     if job and not v.guild and (job.st == "n" or job.st == "b") then
         closes[#closes + 1] = { close = "cancel", by = "crafter", how = "manual", at = job.sa or 0 }
     end
+    -- v1.4a: valid only when closedAt - deliveredAt >= 14 days and the last
+    -- return (returnedAt) is not after the delivery.
     if job and job.st == "c" and job.dt and (job.sa or 0) - job.dt >= Orders.CRAFTER_CLOSE
-        and not (w.st == "r" and (w.sa or 0) > job.dt) then
+        and not (returnedAt > job.dt) then
         closes[#closes + 1] = { close = "deal", by = "crafter", how = "timeout", at = job.sa or 0 }
     end
     if #closes > 0 then
-        table.sort(closes, function(x, y) return x.at < y.at end)
+        -- v1.4a: the earliest closedAt; the same second -> the customer's.
+        local rank = { customer = 0, web = 1, crafter = 2 }
+        table.sort(closes, function(x, y)
+            if x.at ~= y.at then return x.at < y.at end
+            return rank[x.by] < rank[y.by]
+        end)
         local c = closes[1]
         v.state = c.close
         v.close, v.closedBy, v.closeHow, v.closedAt = c.close, c.by, c.how, c.at
@@ -373,13 +428,13 @@ function Orders.view(w, jobs, cust)
         return v
     end
     local delivered = (job.st == "d" or job.st == "m" or job.st == "c") and job.dt
-    if delivered and not (w.st == "r" and (w.sa or 0) > job.dt) then
+    if delivered and not (returnedAt > job.dt) then
         v.state, v.since = "checking", job.dt
         v.deliveredHow = job.st == "m" and "mail" or (job.ch or "manual")
     elseif w.st == "p" then
         v.state, v.since, v.uncertain = "checking", w.sa or 0, true
-    elseif w.st == "r" then
-        v.state, v.since, v.returned = "making", w.sa or 0, true
+    elseif returnedAt > 0 and (w.st == "r" or returnedAt > (job.dt or 0)) then
+        v.state, v.since, v.returned = "making", returnedAt, true
     else
         v.state, v.since = "making", job.ac or job.sa or 0
     end
@@ -439,9 +494,41 @@ local function myList(g)
     return list
 end
 
-local function saveList(g, list)
-    return led:put(g, Orders.encodeList(list))
+-- Review 1-2: a write can fail (12,000 bytes). Make room by moving the
+-- oldest closed rows to history first; if it still does not fit, report it.
+Orders.MAX_VALUE = 12000
+local function isClosedEntry(g, e, views)
+    if g == "W" then return e.st == "x" or e.st == "d" end
+    local v = views[e.id]
+    return v ~= nil and (v.state == "deal" or v.state == "cancel")
 end
+local function saveList(g, list)
+    local v = Orders.encodeList(list)
+    if #v > Orders.MAX_VALUE then
+        local views = Orders.all()
+        local closed = {}
+        for i, e in ipairs(list) do if isClosedEntry(g, e, views) then closed[#closed + 1] = { i = i, at = e.sa or 0 } end end
+        table.sort(closed, function(x, y) if x.at ~= y.at then return x.at < y.at end return x.i < y.i end)
+        local drop = {}
+        local k = 0
+        while #v > Orders.MAX_VALUE and k < #closed do
+            k = k + 1
+            drop[closed[k].i] = true
+            local kept = {}
+            for i, e in ipairs(list) do if not drop[i] then kept[#kept + 1] = e end end
+            v = Orders.encodeList(kept)
+        end
+        if #v > Orders.MAX_VALUE then return "full" end
+        for i in pairs(drop) do
+            local view = views[list[i].id]
+            if view then Orders.toHistory(view) end
+        end
+    end
+    local r = led:put(g, v)
+    if r == "stored" or r == "same" then return r end
+    return r
+end
+local function saved(r) return r == "stored" or r == "same" end
 
 local function findIn(list, id)
     for i, e in ipairs(list) do if e.id == id then return e, i end end
@@ -452,8 +539,16 @@ local seq = 0
 -- Contract (savedvariables §crafting): only [0-9a-z.], at most 64 characters.
 -- The customer's part is a hash of their author id; time + sequence make it unique.
 function Orders.newId()
-    seq = (seq + 1) % 36
-    return "g" .. S().hash(S().selfAuthor()) .. "." .. b36(S().serverNow()) .. b36(seq)
+    -- GF-006-B2: the sequence no longer wraps at 36 (two orders in the same
+    -- second could get the same id); an id already in my W is never reused.
+    local mine = {}
+    for _, e in ipairs(listOf(S().selfAuthor(), "W")) do mine[e.id] = true end
+    local id
+    repeat
+        seq = seq + 1
+        id = "g" .. S().hash(S().selfAuthor()) .. "." .. b36(S().serverNow()) .. b36(seq)
+    until not mine[id]
+    return id
 end
 
 -- R-5.2: o = { recipe, item, skill, qty, crafter (author or "*"), mats = { [itemID] = n },
@@ -462,8 +557,13 @@ function Orders.place(o)
     local me = S().selfAuthor()
     if not me then return nil, "no-author" end
     local list = myList("W")
+    -- Review 7-6: declined or dropped orders are not "open".
     local open = 0
-    for _, e in ipairs(list) do if e.st ~= "x" and e.st ~= "d" then open = open + 1 end end
+    local views = Orders.all()
+    for _, e in ipairs(list) do
+        local v = views[e.id]
+        if e.st ~= "x" and e.st ~= "d" and not (v and (v.state == "deal" or v.state == "cancel")) then open = open + 1 end
+    end
     if open >= Orders.MAX_OPEN then return nil, "too-many" end
     if not o.recipe then return nil, "no-recipe" end
     local t = now()
@@ -474,7 +574,8 @@ function Orders.place(o)
         qt = o.quote, st = "o", sa = t,
     }
     list[#list + 1] = e
-    saveList("W", list)
+    local r = saveList("W", list)
+    if not saved(r) then return nil, r == "full" and "full" or r end
     return e.id
 end
 
@@ -488,7 +589,7 @@ function Orders.customer(id, action, arg)
     local t = now()
     if action == "cancel" then e.st, e.sa = "x", t
     elseif action == "deal" then e.st, e.sa, e.ch = "d", t, arg or "manual"
-    elseif action == "return" then e.st, e.sa = "r", t
+    elseif action == "return" then e.st, e.sa, e.rt = "r", t, t
     elseif action == "unsure" then e.st, e.sa = "p", t
     elseif action == "got" then e.gt = (e.gt or 0) + (arg or 0)
     elseif action == "paid" then e.pd = "1"
@@ -501,9 +602,13 @@ end
 -- Crafter actions on order v (a view): "accept", "decline", "release",
 -- "delivered" (how), "mailed", "gave" (n), "close" (R-6.5), "paid".
 function Orders.crafter(v, action, arg)
+    -- Review 3-4 / R-6.6: nothing changes after the order closed.
+    local current = Orders.get(v.id)
+    if current and (current.state == "deal" or current.state == "cancel") then return false, "closed" end
     local list = myList("J")
     local e = findIn(list, v.id)
     local t = now()
+    if action ~= "gave" and action ~= "paid" then Orders.local_().unsure[v.id] = nil end
     if not e then
         e = { id = v.id, cu = v.customer }
         list[#list + 1] = e
@@ -520,7 +625,8 @@ function Orders.crafter(v, action, arg)
         e.st, e.sa = "c", t
     elseif action == "paid" then e.pd = "1"
     else return false, "action" end
-    saveList("J", list)
+    local r = saveList("J", list)
+    if not saved(r) then return false, r == "full" and "full" or r end
     return true
 end
 
@@ -596,10 +702,29 @@ function Orders.maintain()
         local v = views[j.id]
         local old = v and (v.state == "deal" or v.state == "cancel") and t - (v.closedAt or t) >= Orders.KEEP_CLOSED
         local gone = not v and t - (j.sa or t) >= 30 * Orders.DAY
-        if old then Orders.toHistory(v) end
+        -- Review 7-6: a guild order someone else got is not my history.
+        if old and v.crafter == me then Orders.toHistory(v) end
         if old or gone then changedJ = true else kept[#kept + 1] = j end
     end
     if changedJ then saveList("J", kept) end
+    -- Review 1-7: forget reminders of orders that are gone; unsure marks after 10 minutes.
+    local o = Orders.local_()
+    views = Orders.all()
+    for key in pairs(o.seen) do
+        local id = key:match("^(.-)|")
+        if not (id and views[id]) then o.seen[key] = nil end
+    end
+    for id, at in pairs(o.unsure) do
+        if not views[id] or ns.now() - (at or 0) > 600 then o.unsure[id] = nil end
+    end
+    -- Review 1-8: records of members no longer on the roster (every client drops them alike).
+    if ns.Roster.current() then
+        for _, a in ipairs(led:authors()) do
+            if not S().memberFor(a) then
+                for _, g in ipairs({ "O", "W", "J", "M" }) do led:drop(a, g) end
+            end
+        end
+    end
 end
 
 -- Local data: GreenFangToolkitDB.orders (history, seen, trades, unsure).
@@ -675,6 +800,10 @@ function Orders.attention(v, me, myGuid, t, days)
     end
     if v.state == "waiting" then
         if isCustomer then
+            -- Review 7-6 / R-6.9: a crafter dropped my guild order (it is open again).
+            if v.guild and v.droppedAt then
+                return { key = v.id .. "|dropped|" .. v.droppedAt, decide = false, code = "dropped" }
+            end
             local n = stale("waiting")
             if n then return { key = v.id .. "|stale|" .. n, decide = false, code = "stale", red = true } end
             return nil
@@ -685,6 +814,11 @@ function Orders.attention(v, me, myGuid, t, days)
             return { key = v.id .. "|new", decide = false, code = "new" }
         end
         return nil
+    end
+    -- Review 7-4: a trade cut off after both accepted: the crafter decides too.
+    if isCrafter and (v.state == "making" or v.state == "checking") then
+        local at = Orders.local_().unsure[v.id]
+        if at and ns.now() - at <= 600 then return { key = v.id .. "|unsure", decide = true, code = "unsure" } end
     end
     if v.state == "making" then
         if isCrafter and v.returned then return { key = v.id .. "|returned|" .. (v.since or 0), decide = false, code = "returned" } end
@@ -785,6 +919,7 @@ function Orders.wHalf(e, a, t)
         recordedAt = t, src = SRC[e.src] and e.src or "g", ver = e.ver or 1, created = num(e.cr),
         customer = guidOf(a), crafter = (e.cf == nil or e.cf == "*") and "*" or guidOf(e.cf),
         lock = e.lk and guidOf(e.lk) or nil, lockedAt = e.lk and num(e.lt) or nil,
+        returnedAt = num(e.rt),
         recipe = num(e.rc), item = num(e.it),
         qty = math.max(1, num(e.q) or 1), fee = num(e.fe) or 0, feeQuoted = num(e.fq), quote = num(e.qt),
         cst = CST[e.st or "o"] or "open", got = num(e.gt) or 0,
@@ -804,7 +939,7 @@ end
 
 function Orders.jHalf(e, t, view)
     local h = { recordedAt = t, jst = JST[e.st or "a"] or "accept", gave = num(e.gv) or 0,
-        acceptedAt = num(e.ac), deliveredAt = num(e.dt) }
+        acceptedAt = num(e.ac), deliveredAt = num(e.dt), statusAt = num(e.sa) }
     if h.deliveredAt then
         h.deliveredHow = e.st == "m" and "mail" or (HOW[e.ch] and e.ch or "manual")
     end
@@ -874,7 +1009,8 @@ function Orders.craftingFor(a)
     end
     local views = Orders.all()
     for _, e in ipairs(jrec and Orders.decodeList(jrec.v) or {}) do
-        if validId(e.id) then
+        -- Review 5-4: a job whose order is not known any more is not uploaded.
+        if validId(e.id) and views[e.id] then
             local v = views[e.id]
             local closed = v ~= nil and (v.state == "deal" or v.state == "cancel")
             entries[#entries + 1] = { id = e.id, j = e, view = v, closed = closed,
@@ -942,7 +1078,7 @@ function Orders.onCustom(kind, fields, _, channel)
         if not recipe then return "malformed" end
         answering[recipe] = nil -- someone answered
         local r = ns.Prices and ns.Prices.decodeReagents(fields[2])
-        if r then ns.Prices.storeReagents(recipe, r, "guild") end
+        if r and asked[recipe] and not ns.Prices.cachedReagents(recipe) then ns.Prices.storeReagents(recipe, r, "guild") end
         return "ok"
     end
     return "unknown-type"

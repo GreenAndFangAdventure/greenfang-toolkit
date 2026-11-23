@@ -236,9 +236,17 @@ crafting = {
   - `fee`：客人實際寫的工錢（銅幣，可以是 0）；`feeQuoted`：下單時工匠的報價，**工匠沒填就不寫**，`0` 是免費；`quote`：下單時材料的自動估價（銅幣，算不出就不寫）。
   - `cst`：`"open"`、`"review"`（交付判斷不確定，客人那邊是待驗收，規格 R-7.1）、`"deal"`、`"cancel"`、`"returned"`（退回製作中）；`got`：已收到的數量。
   - `lockedAt`：公會單寫定給誰的伺服器時間（還沒寫定就不寫）。
+  - `returnedAt`：客人最後一次按「退回」的伺服器時間（沒退回過就不寫）。
   - `note`：第二版才有，目前不寫。`ext`（網站參考號）只存在網站上，**AddOn 不寫也不上傳**。
-- **`j`（工匠）**：`jst`：`"accept"`、`"decline"`、`"drop"`（退單）、`"delivered"`；`gave`：已交付的數量；`acceptedAt`：接單的伺服器時間（公會單「最早接的人拿到」要用，規格 R-5.3）；`deliveredAt`：最後一次交付的伺服器時間（14 天工匠結案、太久沒動的提醒要用，R-6.5、R-6.9）；`deliveredHow`：`"trade"`、`"mail"`、`"manual"`（工匠按 📨）。
+- **`j`（工匠）**：`jst`：`"accept"`、`"decline"`、`"drop"`（退單）、`"delivered"`；`gave`：已交付的數量；`acceptedAt`：接單的伺服器時間（公會單「最早接的人拿到」要用，規格 R-5.3）；`deliveredAt`：最後一次交付的伺服器時間（14 天工匠結案、太久沒動的提醒要用，R-6.5、R-6.9）；`deliveredHow`：`"trade"`、`"mail"`、`"manual"`（工匠按 📨）。`statusAt`：`jst` 最後一次改變的伺服器時間（接、不接、退單、交付都算）。
 - **結案欄位**（寫在結案的那一方）：`close`：`"deal"`／`"cancel"`；`closedBy`：`"customer"`／`"crafter"`／`"web"`；`closeHow`：`"trade"`／`"mail"`／`"manual"`／`"timeout"`（待驗收 14 天後工匠結案，規格 R-6.5）；`closedAt`：伺服器時間。
+- **`j` 的作者**：`j` 裡沒有作者欄位，作者就是所在那一筆的 `uploader`（`character.self`）或 `subject`（`member.share`）的 GUID。公會單可能有好幾位工匠各寫一份 `j`，所以**每張單、每位工匠各一份 `j`**（以「訂單 `id`＋作者 GUID」區分）。沒搶到公會單的工匠的 `j` 照樣可以上傳，網站依下面的規則判斷誰是接單者。
+- **決勝規則**（遊戲和網站要算出同樣的結果）：
+  - 公會單的接單者：有 `w.lock` 時以它為準；沒有時，在 `jst` 是 `"accept"` 或 `"delivered"`、有 `acceptedAt`、而且 `statusAt` 之後沒有退單的工匠裡，取 `acceptedAt` 最早的；**時間相同時取 GUID 字串（逐位元組比較）較小的**。
+  - `lock` 的工匠退單（`jst = "drop"` 且 `statusAt ≥ lockedAt`）：這張公會單回到「等接單」，不會自動轉給別人。
+  - 兩份結案（`w` 和 `j` 都有 `close`）：`closedAt` 早的為準；**相同時以客人的（`w`）為準**。結案後不能再改。
+  - 工匠 14 天結案（`closeHow = "timeout"`）只在 `j.closedAt − j.deliveredAt ≥ 14 天`，而且 `w.returnedAt` 不晚於 `j.deliveredAt` 時成立；否則網站當作沒有結案。
+  - 同一半、同一位作者的兩份 `recordedAt` 相同但內容不同（同一秒寫兩次，很少見）：網站把兩份轉成鍵排序過的 JSON 字串，取**逐位元組比較較大**的那份。AddOn 不會依賴這條規則。
 - **誰可以寫哪一半**：`w` 只能由 `w.customer` 本人寫，`j` 只能由這張單的工匠（`crafter`，公會單是 `lock` 或接單的人）本人寫。`character.self` 的 `w`／`j` 必須屬於 `uploader`；`member.share` 的必須屬於 `subject`。不屬於的那一半，網站略過（只略過那一半，不讓整筆失敗）。
 - **不放的東西**：角色名字、帳號、信箱、備註以外的文字、價格資料（`prices` 一律不上傳，規格 R-9.2）。
 - **上限**：每位作者最多 100 張單；`services.value` 最多 12 個專業，每個專業最多 500 個配方報價。超過時：訂單先丟 `closedAt` 最舊的結案單，還超過再丟 `created` 最舊的進行中單；專業和配方報價保留 ID 最小的（每次結果一樣）。

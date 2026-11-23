@@ -316,7 +316,8 @@ local function fillRow(row, data, i)
         m:Show()
     end
     for j = k + 1, #row.mats do row.mats[j]:Hide() end
-    showFee(row.coin, row.fee, v.fee > 0 and v.fee or v.feeQuoted)
+    -- Review 5-3: the fee the customer wrote; at 0 the quote only says free / not filled in.
+    showFee(row.coin, row.fee, v.fee > 0 and v.fee or (v.feeQuoted == nil and nil or 0))
     if v.paid then row.fee:SetText(row.fee:GetText() .. " " .. UI.tex("deal", 12)) end
     -- State icon; a crafter's close carries a small hammer, a cancel the canceller's class.
     setIcon(row.state.tex, v.state)
@@ -526,8 +527,15 @@ function UI.submit(d)
         if d.mats[x.id] then mats[x.id] = x.n * crafts end
     end
     local est = UI.estimateOf(d)
-    local id = O().place({ recipe = d.recipe, item = d.item, skill = d.skill, qty = d.qty, crafter = d.crafter,
-        mats = mats, fee = d.fee, feeQuoted = d.feeQuoted, quote = est.total })
+    -- Review 5-1 (contract): no quote when it cannot be computed (no list, or a price missing).
+    local quote = (not est.noList and not est.unknown) and est.total or nil
+    local id, why = O().place({ recipe = d.recipe, item = d.item, skill = d.skill, qty = d.qty, crafter = d.crafter,
+        mats = mats, fee = d.fee or 0, feeQuoted = d.feeQuoted, quote = quote })
+    if not id then
+        -- Review 1-2: never pretend; the popup stays open with a red cross.
+        if popup and popup.total then popup.total:SetText(UI.tex("cancel", 16)) end
+        return nil, why
+    end
     if popup then popup:Hide() end
     UI.refresh()
     return id
@@ -550,9 +558,11 @@ local function moneyBoxes(parent, x, y, onChange)
         e:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
         boxes[i] = e
     end
+    -- Review 5-2: all three empty = nothing entered (nil), so 「確定」 keeps "not filled in".
     function boxes.get()
-        local g, s, c = tonumber(boxes[1]:GetText()) or 0, tonumber(boxes[2]:GetText()) or 0, tonumber(boxes[3]:GetText()) or 0
-        return g * 10000 + s * 100 + c
+        local a, b, c = str(boxes[1]:GetText()), str(boxes[2]:GetText()), str(boxes[3]:GetText())
+        if a == "" and b == "" and c == "" then return nil end
+        return (tonumber(a) or 0) * 10000 + (tonumber(b) or 0) * 100 + (tonumber(c) or 0)
     end
     function boxes.set(c)
         c = math.floor(c or 0)
@@ -768,7 +778,7 @@ function UI.recipeMenuItems(data)
     if #others > 0 then
         items[#items + 1] = { text = "下單", fn = function()
             local pick = UI.pendingCrafter
-        UI.pendingCrafter = nil
+        UI.pendingCrafter, UI.pendingMark = nil, nil
         UI.openOrder({ recipe = data.id, skill = data.skill, crafters = data.crafters, crafter = pick })
         end }
     end
@@ -785,7 +795,11 @@ function UI.rosterMenuItems(member, skill)
     return { { text = "下單給 " .. ns.shortName(member.name), fn = function()
         local a = S().authorOf(member.guid)
         ns.Recipes.show(member.guid, skill)
+        -- Review 7-6: used by the next 下單 only, and forgotten after two minutes.
         UI.pendingCrafter = a
+        local mark = {}
+        UI.pendingMark = mark
+        ns.after(120, function() if UI.pendingMark == mark then UI.pendingCrafter = nil end end)
     end } }
 end
 

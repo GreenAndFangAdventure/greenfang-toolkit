@@ -1,4 +1,4 @@
-# 契約：GF Sync ↔ 網站上傳 API（v1.4）
+# 契約：GF Sync ↔ 網站上傳 API（v1.4a）
 
 - 版本：
   - v1（2026-11-17 claude-pm 依 Q-005 與實作結果定稿）
@@ -13,6 +13,7 @@
 
     依據：GF Sync 的 `docs/UPDATE_MANIFEST.md` §2
   - **v1.3（2026-11-22 claude-addon，GF-001-D24，AddOn 0.9.8／0.10.0；與 GearBot 議定）**：新增選填欄位 `uploader.fullName`（每一種 kind）與 `member.share`／`member.report` 的 `payload.subject.fullName`：角色全名「名字 姓氏」，和網站名冊（Blizzard API）的寫法一樣。用來修正 `character_not_in_roster`（§3 第 2、6 點）。格式其餘不變
+  - **v1.4a（2026-11-23 claude-pm，GearBot 與審查的回饋）**：`j` 每位工匠一份；決勝規則；新增 `w.returnedAt`、`j.statusAt`
   - **v1.4（2026-11-23 claude-pm，GF-006-B，AddOn 0.11.0）**：`character.self` 和 `member.share` 的 payload 多一個選填欄位 `crafting`（製作服務與訂單，格式見 savedvariables §crafting）。網站的處理規則見 §3 第 10 點，上線順序見 §5。不是新的 kind，舊的用戶端照舊能用
 - 實作位置：網站 repo `green-and-fang-site`，位於 `functions/api/sync/*`（D-002）。PR 送到 `dev`
 - 資料表一律用 `migrations/00xx_*.sql` 建立，不在執行時用 `CREATE TABLE IF NOT EXISTS` 建表
@@ -158,7 +159,8 @@ Content-Type: application/json; charset=utf-8
 
 10. **`crafting`**（v1.4，GF-006-B；savedvariables §crafting）：
     - **歸屬**：`character.self` 的 `w`／`j` 必須屬於 `uploader`，`member.share` 的必須屬於 `subject`（`w.customer` 是本人；`j` 的本人是這張單的 `crafter`，公會單是 `lock` 或接單的人）。不屬於的那一半略過，不讓整筆失敗。
-    - **合併**：依訂單 `id` 存一份訂單，`w`、`j`（第 1.5 版起還有網站自己的那一份）各自依 `recordedAt` 比新舊，只採用比較新的那一半；整筆比較新不代表每一半都採用。和順序無關：同一半收到舊的就忽略。
+    - **合併**：依訂單 `id` 存一份訂單；`w` 只有一份，`j` **每位工匠一份**（訂單 `id`＋作者 GUID，作者就是那一筆的 uploader 或 subject）。各份依 `recordedAt` 比新舊，只採用比較新的；整筆比較新不代表每一份都採用。和順序無關：收到舊的就忽略。`j` 比 `w` 先到時先存起來，`w` 到了再算狀態。第 1.5 版起還有網站自己的那一份。
+    - **決勝規則**：照 savedvariables §crafting「決勝規則」（公會單接單者、`lock` 退單、兩份結案、14 天工匠結案、`recordedAt` 相同）。
     - **狀態**：照規格 R-6.1～R-6.6 由各半算出（等接單、製作中、待驗收、成交、取消）。成交和取消要分開顯示；成交裡「客人確認或自動判斷」和「工匠結案」（`closedBy = "crafter"`、`closeHow = "timeout"`）也要分開。結案之後收到的非結案資料不能把訂單改回進行中。
     - **製作服務**：`services` 依 `recordedAt` 整份比新舊。工匠服務頁：接單中（`active`）排前面；工錢分三種顯示：**沒有鍵＝沒填**、`0`＝免費、數字＝金額。`feeQuoted` 也一樣。
     - **檢查**：GUID、訂單 `id` 的格式；列舉值只接受契約列出的；數字是非負整數；`qty` ≥ 1。不合格的那張單或那個專業略過。

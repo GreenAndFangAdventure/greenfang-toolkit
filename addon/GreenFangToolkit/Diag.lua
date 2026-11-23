@@ -59,7 +59,9 @@ function Diag.versionText()
 end
 
 -- GF-006-B (R-7.5, R-7.6, R-8.4, R-8.6, spec §12 item 12): orders and prices.
-local function onOff(v) return v and "可用" or "改成手動" end
+-- Review 2-2 / R-7.5: 可用 only once this client produced the evidence; before that 未確認.
+local STATUS = { ok = "可用", unconfirmed = "未確認", manual = "改成手動" }
+local function statusOf(kind) return STATUS[ns.Delivery.status(kind)] end
 
 function Diag.ordersText()
     local O, D = ns.Orders, ns.Delivery
@@ -74,7 +76,7 @@ function Diag.ordersText()
     local parts = {
         string.format("訂單 %d 張進行中、%d 張已結案｜記錄 %d 筆｜這次登入：送出 %d、收到 %d、佇列 %d",
             open, closed, led:count(), st.sent, st.received, led:queued()),
-        string.format("交易判斷 %s｜寄信判斷 %s｜收信判斷 %s", onOff(f.trade), onOff(f.mailSend), onOff(f.mailTake)),
+        string.format("交易判斷 %s｜寄信判斷 %s｜收信判斷 %s", statusOf("trade"), statusOf("mailSend"), statusOf("mailTake")),
         string.format("提醒天數：等接單 %d、製作中 %d、待驗收 %d（/gftk orders days <等接單> <製作中> <待驗收>）",
             days.waiting, days.making, days.checking),
     }
