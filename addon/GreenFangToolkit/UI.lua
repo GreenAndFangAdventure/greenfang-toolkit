@@ -106,7 +106,7 @@ end
 
 -- Roster filters (GF-001-D19): skill (skillLineID), class (class token),
 -- online (true = only online), minLevel (number). All optional.
-UI.filters = { skill = nil, class = nil, online = false, minLevel = nil }
+UI.filters = { skill = nil, class = nil, online = false, minLevel = nil, active = false }
 
 local function passes(m, f)
     if not f then return true end
@@ -114,6 +114,8 @@ local function passes(m, f)
     if f.class and m.classToken ~= f.class then return false end
     if f.minLevel and (type(m.level) ~= "number" or m.level < f.minLevel) then return false end
     if f.skill and not UI.memberSkills(m)[f.skill] then return false end
+    -- GF-006-B (R-4.2): only crafters taking orders.
+    if f.active and not (ns.Orders and ns.Orders.isActiveAny(m.guid)) then return false end
     return true
 end
 
@@ -244,7 +246,12 @@ local function newRow(i)
                 label:SetHeight(ROW_HEIGHT)
                 label:SetJustifyH("LEFT")
                 label:SetWordWrap(false)
-                local slot = { icon = icon, label = label }
+                -- GF-006-B (R-4.2): gold hammer corner on an active profession.
+                local badge = row:CreateTexture(nil, "OVERLAY")
+                badge:SetSize(10, 10)
+                badge:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", 3, -3)
+                badge:Hide()
+                local slot = { icon = icon, label = label, badge = badge }
                 row.profSlots[k] = slot
             end
             row.profMore = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -268,9 +275,15 @@ local function newRow(i)
     end)
     -- Click on a profession: filter the roster by it (again: clear).
     -- Elsewhere: that member's recipes (D-013). A plain frame, nothing secure.
-    row:SetScript("OnMouseUp", function(self)
+    row:SetScript("OnMouseUp", function(self, mouse)
         local slot = UI.slotAt(self, UI.cursorX(self))
         local id = slot and slot.entry.prof and ns.Professions.skillLineOf(slot.entry.prof)
+        -- GF-006-B (R-5.1): right-click someone's profession = 「下單給〈名字〉」.
+        if mouse == "RightButton" and id and ns.OrdersUI then
+            local m = { guid = self.memberGuid, name = self.memberName }
+            ns.showMenu(self, ns.OrdersUI.rosterMenuItems(m, id))
+            return
+        end
         if id then
             UI.setSkillFilter(UI.filters.skill ~= id and id or nil)
         elseif UI.hasRecipes(self.memberGuid) then
@@ -522,6 +535,7 @@ end
 -- within that width, so a longer name came out as "剝…" or only "…".
 local function hideSlot(s)
     s.icon:Hide()
+    if s.badge then s.badge:Hide() end
     s.label:SetText("")
     s.label:Hide()
     s.entry, s.x0, s.x1 = nil, nil, nil
@@ -552,6 +566,14 @@ local function placeEntry(row, s, e, x, room, first)
         s.icon:SetPoint("LEFT", row, "LEFT", left, 0)
         s.icon:SetAlpha(e.alpha)
         s.icon:Show()
+    end
+    if s.badge then
+        local skill = e.prof and ns.Professions.skillLineOf(e.prof)
+        if hasIcon and skill and ns.Orders and ns.Orders.isActive(row.memberGuid, skill) and ns.OrdersUI then
+            ns.OrdersUI.setIcon(s.badge, "hammer")
+        else
+            s.badge:Hide()
+        end
     end
     if textW > 0 then
         s.label:ClearAllPoints()
@@ -741,6 +763,8 @@ end
 -- 「清除」: search text and every filter.
 function UI.clearFilters()
     UI.filters.skill, UI.filters.class, UI.filters.online, UI.filters.minLevel = nil, nil, false, nil
+    UI.filters.active = false
+    if UI.activeCheck then UI.activeCheck.set(false) end
     if UI.skillChoice then UI.skillChoice.value = nil; UI.skillChoice.refreshText() end
     if UI.classChoice then UI.classChoice.value = nil; UI.classChoice.refreshText() end
     if UI.onlineCheck then UI.onlineCheck.set(false) end
@@ -802,6 +826,9 @@ local function build(p)
     UI.levelBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     UI.levelSuffix = label("以上", 776)
     UI.clearButton = button(f, "清除", 60, 25, 816, -80, UI.clearFilters)
+    -- GF-006-B (R-4.2): 只看接單中 (gold hammer).
+    UI.activeCheck = ns.checkBox(f, (ns.OrdersUI and ns.OrdersUI.tex("hammer", 14) or "") .. " 接單中", 884, -80,
+        function(on) UI.filters.active = on; UI.refresh(true) end)
     rosterControls = { UI.updateButton, searchBox, UI.clearButton, UI.skillChoice, UI.classChoice,
         UI.onlineCheck, UI.levelBox }
     local header = CreateFrame("Frame", nil, f)

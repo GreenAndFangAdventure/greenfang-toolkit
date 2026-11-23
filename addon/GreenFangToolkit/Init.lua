@@ -2,6 +2,10 @@
 
 local _, ns = ...
 local Sync, Roster, UI, Comm, Share = ns.Sync, ns.Roster, ns.UI, ns.Comm, ns.Share
+local Orders, Prices, Delivery, Ledger = ns.Orders, ns.Prices, ns.Delivery, ns.Ledger
+
+-- GF-006-B: order and price ledgers start a while after the D-014 sharing.
+local ORDERS_DELAY, PRICES_DELAY, MAINTAIN_EVERY = 30, 120, 60
 
 local scanQueued, selfQueued, loginSelfRecorded = false, false, false
 local loginAt = 0
@@ -28,6 +32,14 @@ local function collectSoon(delay)
             -- D-014 sharing: once per session, a while after login.
             if not ns.shareStarted and ns.now() - loginAt >= Share.LOGIN_DELAY then
                 ns.shareStarted = Share.login()
+            end
+            -- GF-006-B: orders (GFTKO) and shared prices (GFTKP), later and slower.
+            if not ns.ordersStarted and ns.now() - loginAt >= ORDERS_DELAY then
+                ns.ordersStarted = Orders.ledger:announce()
+                Delivery.checkPending()
+            end
+            if not ns.pricesStarted and ns.now() - loginAt >= PRICES_DELAY then
+                ns.pricesStarted = Prices.login()
             end
         end
     end)
@@ -63,6 +75,9 @@ local function help()
     ns.say("/gftk sync：查看同步狀態（開啟「同步與診斷」視窗）")
 end
 
+-- Test builds ("dev" or a version with a suffix such as 0.11.0-beta1) only.
+function ns.isTestBuild() return ns.VERSION == "dev" or ns.VERSION:find("-", 1, true) ~= nil end
+
 local function handleSlash(msg)
     local text = ns.str(msg):gsub("^%s+", ""):gsub("%s+$", "")
     local cmd, rest = text:match("^(%S+)%s*(.*)$")
@@ -71,6 +86,19 @@ local function handleSlash(msg)
         ns.Framework.toggle()
     elseif cmd == "sync" then
         Sync.command(rest)
+    elseif cmd == "orders" and rest:match("^days") then
+        -- GF-006-B (R-6.9): reminder days, shown in 同步與診斷.
+        local a, b, c = rest:match("^days%s+(%d+)%s+(%d+)%s+(%d+)")
+        if Orders.setStaleDays(a, b, c) then ns.Diag.open() else help() end
+    elseif cmd == "orders" and rest:match("^shift") and ns.isTestBuild() then
+        -- Test builds only (spec §12 item 5).
+        local days = tonumber(rest:match("^shift%s+(%-?%d+)")) or 0
+        Orders.local_().debugShift = days * 86400
+        ns.Diag.open()
+    elseif cmd == "prices" and rest:match("^fake") and ns.isTestBuild() then
+        local id, copper = rest:match("^fake%s+(%d+)%s+(%d+)")
+        Prices.fake(id, copper)
+        ns.Diag.open()
     elseif ns.Framework.get(cmd) then
         ns.Framework.open(cmd)
     else
@@ -101,6 +129,10 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
         Sync.purgeForeign()
         Comm.register()
         Share.register()
+        -- GF-006-B: new prefixes; 0.10.0 never registers them (spec §12 item 10).
+        Orders.ledger:register()
+        Prices.ledger:register()
+        Delivery.install()
         UI.loadSettings()
         return
     end
@@ -113,6 +145,17 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
         ns.after(2, Roster.request)
         loginAt = ns.now()
         ns.after(Share.LOGIN_DELAY + 1, function() collectSoon(0) end)
+        ns.after(ORDERS_DELAY + 1, function() collectSoon(0) end)
+        ns.after(PRICES_DELAY + 1, function() collectSoon(0) end)
+        -- GF-006-B: lock guild orders, move closed rows to history, badge.
+        local function maintain()
+            if ns.guildState() == "target" then
+                pcall(Orders.maintain)
+                if ns.OrdersUI then pcall(ns.OrdersUI.updateBadge) end
+            end
+            ns.after(MAINTAIN_EVERY, maintain)
+        end
+        ns.after(ORDERS_DELAY + 5, maintain)
         collectSoon(5)
         selfSoon(5)
         ns.after(GUILD_WAIT + 1, function()
@@ -130,7 +173,7 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
         end
     elseif event == "CHAT_MSG_ADDON" then
         if arg1 == Share.PREFIX then Share.onMessage(arg1, arg2, arg3, arg4)
-        else Comm.onMessage(arg1, arg2, arg3, arg4) end
+        elseif not Ledger.dispatch(arg1, arg2, arg3, arg4) then Comm.onMessage(arg1, arg2, arg3, arg4) end
     elseif event == "ZONE_CHANGED_NEW_AREA" then
         Share.ownChanged(true)
     elseif event == "TRADE_SKILL_SHOW" or event == "TRADE_SKILL_LIST_UPDATE"
@@ -165,5 +208,47 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
         if ns.Character and ns.Framework.isModuleShown("character") then
             ns.after(1, ns.Character.refresh)
         end
+    end
+end)
+
+---------------------------------------------------------------------------
+-- GF-006-B: trade, mail, merchant and auction house events. Registered one
+-- by one under pcall: an event the client does not know (16001 not
+-- verified) is skipped and listed in 同步與診斷 (R-7.5).
+---------------------------------------------------------------------------
+
+local orderEvents = CreateFrame("Frame")
+ns.orderEventFrame = orderEvents
+ns.missingEvents = {}
+for _, e in ipairs({ "TRADE_SHOW", "TRADE_CLOSED", "TRADE_ACCEPT_UPDATE", "TRADE_PLAYER_ITEM_CHANGED",
+    "TRADE_TARGET_ITEM_CHANGED", "TRADE_REQUEST_CANCEL", "UI_INFO_MESSAGE", "UI_ERROR_MESSAGE",
+    "BAG_UPDATE_DELAYED", "MAIL_SEND_SUCCESS", "MAIL_FAILED", "MERCHANT_SHOW", "MERCHANT_UPDATE",
+    "AUCTION_HOUSE_SHOW", "AUCTION_HOUSE_CLOSED", "REPLICATE_ITEM_LIST_UPDATE",
+    "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED", "AUCTION_HOUSE_BROWSE_RESULTS_ADDED",
+    "COMMODITY_SEARCH_RESULTS_UPDATED", "ITEM_SEARCH_RESULTS_UPDATED" }) do
+    local ok = pcall(orderEvents.RegisterEvent, orderEvents, e)
+    if not ok then ns.missingEvents[#ns.missingEvents + 1] = e end
+end
+
+orderEvents:SetScript("OnEvent", function(_, event, arg1, arg2)
+    if not ns.db or ns.guildState() ~= "target" then return end
+    if event == "TRADE_SHOW" then Delivery.onTradeShow()
+    elseif event == "TRADE_PLAYER_ITEM_CHANGED" or event == "TRADE_TARGET_ITEM_CHANGED" then Delivery.snapshot()
+    elseif event == "TRADE_ACCEPT_UPDATE" then Delivery.onAccept(arg1, arg2)
+    elseif event == "UI_INFO_MESSAGE" or event == "UI_ERROR_MESSAGE" then Delivery.onInfoMessage(arg1, arg2)
+    elseif event == "TRADE_CLOSED" or event == "TRADE_REQUEST_CANCEL" then
+        Delivery.onTradeClosed()
+        if ns.OrdersUI then ns.OrdersUI.tradeHidden() end
+    elseif event == "BAG_UPDATE_DELAYED" then Delivery.onBagsSettled()
+    elseif event == "MAIL_SEND_SUCCESS" then Delivery.onMailSent()
+    elseif event == "MAIL_FAILED" then Delivery.onMailFailed()
+    elseif event == "MERCHANT_SHOW" or event == "MERCHANT_UPDATE" then Prices.readMerchant()
+    elseif event == "AUCTION_HOUSE_SHOW" then Prices.onAuctionShow()
+    elseif event == "AUCTION_HOUSE_CLOSED" then Prices.onAuctionClosed()
+    elseif event == "REPLICATE_ITEM_LIST_UPDATE" then Prices.onReplicate()
+    elseif event == "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED" or event == "AUCTION_HOUSE_BROWSE_RESULTS_ADDED" then
+        Prices.onBrowseResults()
+    elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" or event == "ITEM_SEARCH_RESULTS_UPDATED" then
+        Prices.onSearchResult(arg1)
     end
 end)

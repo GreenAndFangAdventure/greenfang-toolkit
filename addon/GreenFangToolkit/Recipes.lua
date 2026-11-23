@@ -179,6 +179,8 @@ function Recipes.scan()
         for id in pairs(set) do ids[#ids + 1] = id end
     end
     local r = Share.ownRecord(g, Share.encodeValue(g, ids))
+    -- GF-006-B (R-8.5): remember the reagent lists of our own recipes.
+    if ns.Prices then ns.Prices.cacheOwn(ids) end
     return r
 end
 
@@ -426,6 +428,8 @@ function Recipes.rows(index, skill, query, onlyGuid, opts)
             if keep then list[#list + 1] = m end
         end
         if #list > 0 and (opts.who ~= "mine" or mine) then
+            -- GF-006-B (R-4.2): active crafters first (active+online, active, online, others).
+            if ns.Orders and #list > 1 then ns.Orders.sortCrafters(list, skill) end
             local name = Recipes.name(id)
             if q == "" or ns.keyName(name):find(q, 1, true) then
                 rows[#rows + 1] = { id = id, name = name, crafters = list, mine = mine, skill = skill } -- online first
@@ -454,10 +458,14 @@ function Recipes.rowsFor(index, skills, query, onlyGuid, opts)
     return out
 end
 
--- "測試甲、測試乙 +2" (online first, at most 3 names).
-function Recipes.crafterText(list)
+-- "測試甲、測試乙 +2" (online first, at most 3 names). GF-006-B (R-4.2): a
+-- gold hammer in front of crafters who are taking orders.
+function Recipes.crafterText(list, skill)
     local names = {}
-    for i = 1, math.min(3, #list) do names[i] = ns.shortName(list[i].name) end
+    for i = 1, math.min(3, #list) do
+        local hammer = ns.Orders and skill and ns.Orders.isActive(list[i].guid, skill)
+        names[i] = (hammer and (ns.OrdersUI.tex("hammer", 12) .. " ") or "") .. ns.shortName(list[i].name)
+    end
     local text = table.concat(names, "、")
     if #list > 3 then text = text .. " +" .. (#list - 3) end
     return text
@@ -584,7 +592,10 @@ function Recipes.click(row, button)
     local data = row and row.data
     if not data then return "none" end
     if button == "RightButton" then
-        return ns.showMenu(row, Recipes.whisperItems(data)) and "menu" or "none"
+        -- GF-006-B (R-5.1): 「下單」 and 「我的工錢」 first, then the whispers.
+        local items = ns.OrdersUI and ns.OrdersUI.recipeMenuItems(data) or {}
+        for _, it in ipairs(Recipes.whisperItems(data)) do items[#items + 1] = it end
+        return ns.showMenu(row, items) and "menu" or "none"
     end
     if type(IsShiftKeyDown) == "function" and IsShiftKeyDown() then
         return Recipes.insertLink(data.id) and "link" or "none"
@@ -736,7 +747,7 @@ function Recipes.layoutRows()
                 row.bg:SetColorTexture(0.17, 0.2, 0.18, i % 2 == 0 and 0.35 or 0.09)
                 Recipes.setIcon(row.icon, data.id, data.skill)
                 row.name:SetText(data.name)
-                row.who:SetText(Recipes.crafterText(data.crafters))
+                row.who:SetText(Recipes.crafterText(data.crafters, data.skill))
                 local online = data.crafters[1] and data.crafters[1].online
                 if online then row.who:SetTextColor(0.4, 1, 0.4) else row.who:SetTextColor(0.8, 0.8, 0.8) end
                 row:Show()

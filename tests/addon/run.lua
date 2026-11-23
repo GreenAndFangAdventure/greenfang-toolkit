@@ -127,7 +127,7 @@ test("fresh install creates schema v2 defaults", function()
     local db = GreenFangToolkitDB
     eq(db.schema, "gf.toolkit", "schema")
     eq(db.schemaVersion, 2, "schemaVersion")
-    eq(db.addonVersion, "0.10.0", "addonVersion")
+    eq(db.addonVersion, "0.11.0", "addonVersion")
     eq(db.sync.enabled, true, "sync.enabled default")
     eq(db.sync.noticeShown, false, "noticeShown before login")
     eq(#db.sync.outbox, 0, "outbox empty")
@@ -153,7 +153,7 @@ test("TOC declares the agreed names and loads every file", function()
     ok(toc:find("## Interface: 16001", 1, true), "Interface")
     ok(toc:find("## Title: 綠皮冒險工具箱", 1, true), "Title")
     ok(toc:find("## Author: 綠皮與獠牙冒險事務所", 1, true), "Author")
-    ok(toc:find("## Version: 0.10.0", 1, true), "Version")
+    ok(toc:find("## Version: 0.11.0", 1, true), "Version")
     ok(toc:find("## SavedVariables: GreenFangToolkitDB\r?\n"), "SavedVariables")
     local listed = {}
     for line in toc:gmatch("[^\r\n]+") do
@@ -425,7 +425,7 @@ test("unknown fields in an existing v2 table are preserved", function()
         sync = { enabled = false, noticeShown = true, outbox = {} },
     } })
     eq(GreenFangToolkitDB.futureModule.keep, true, "unknown field kept")
-    eq(GreenFangToolkitDB.addonVersion, "0.10.0", "addonVersion updated")
+    eq(GreenFangToolkitDB.addonVersion, "0.11.0", "addonVersion updated")
     eq(GreenFangToolkitDB.sync.enabled, true, "old off ignored (D-015)")
 end)
 
@@ -475,7 +475,7 @@ test("TSV/JSON export keep the v0.3.1 format", function()
     local s = ns.Roster.current()
     local json = ns.Export.jsonParts(s)
     eq(#json, 1, "one part")
-    ok(json[1]:find('^{"schema":"gfguildroster.report","schemaVersion":1,"addonVersion":"0.10.0"'), "json header")
+    ok(json[1]:find('^{"schema":"gfguildroster.report","schemaVersion":1,"addonVersion":"0.11.0"'), "json header")
     ok(json[1]:find('"part":1,"partCount":1', 1, true), "parts")
     ok(json[1]:find('"onlineAtCapture":true', 1, true), "member online in manual export")
     ok(not json[1]:find('"guid":', 1, true), "no guid in v1 export")
@@ -546,7 +546,7 @@ test("framework: unavailable or broken modules are hidden", function()
         create = function() error("build failed") end })
     wow.fire("PLAYER_LOGIN"); wow.advance(10)
     SlashCmdList.GREENFANGTOOLKIT("")
-    eq(shownNav(ns), "roster,recipes,character,sleepingbag,crash", "only available modules listed")
+    eq(shownNav(ns), "roster,recipes,orders,character,sleepingbag,crash", "only available modules listed")
     SlashCmdList.GREENFANGTOOLKIT("soon")
     eq(ns.Framework.current(), "roster", "hidden module cannot be opened; falls back")
     eq(built, false, "hidden module never built")
@@ -639,13 +639,13 @@ test("sleepingbag: module visible for Horde, hidden for Alliance", function()
     wow.reset()
     local ns = wow.login(ADDON_DIR)
     SlashCmdList.GREENFANGTOOLKIT("")
-    eq(shownNav(ns), "roster,recipes,character,sleepingbag", "Horde sees the route")
+    eq(shownNav(ns), "roster,recipes,orders,character,sleepingbag", "Horde sees the route")
     local alliance = wow.defaultPlayer()
     alliance.faction = "Alliance"
     wow.reset({ player = alliance })
     ns = wow.login(ADDON_DIR)
     SlashCmdList.GREENFANGTOOLKIT("")
-    eq(shownNav(ns), "roster,recipes,character", "Alliance has no route yet")
+    eq(shownNav(ns), "roster,recipes,orders,character", "Alliance has no route yet")
 end)
 
 test("sleepingbag: RPG hides coordinates until revealed; normal shows all", function()
@@ -2658,7 +2658,7 @@ test("D10 diag window: sections, sharing stats, export moved here, /gftk sync st
     ok(has(all, "GF Sync 只是補充來源"), "site note")
     ok(has(all, "記錄 ") and has(all, "這次登入：送出"), "sharing statistics")
     ok(has(all, "掃描時間："), "roster scan")
-    ok(has(all, "工具箱 0.10.0"), "version")
+    ok(has(all, "工具箱 0.11.0"), "version")
     wow.click(ns.Diag.exportJSONButton)
     ok(_G.GreenFangToolkit_ExportWindow and _G.GreenFangToolkit_ExportWindow:IsShown(), "export from the window")
     GreenFangToolkitDB.settings.minimapAngle = 10
@@ -3983,12 +3983,19 @@ test("D20 recipe clicks: mine opens, others pinned, Shift links, right-click whi
     ok(menu.gfOpaque, "menu is opaque")
     local items = {}
     for _, b in ipairs(menu.items) do if b:IsShown() then items[#items + 1] = b:GetText() end end
-    eq(table.concat(items, "|"), "密語 測試乙", "only the online crafter")
-    wow.click(menu.items[1])
+    -- GF-006-B (R-5.1): 「下單」 comes first, then one 密語 per online crafter.
+    eq(table.concat(items, "|"), "下單|密語 測試乙", "下單, then only the online crafter")
+    wow.click(menu.items[2])
     eq(calls[#calls], "tell:" .. PEER .. ":可以幫我做|cffffd000|Henchant:2153|h[配方2153]|h|r嗎？", "whisper opened")
     ok(not menu:IsShown(), "closed after the pick")
     local onlyMine = rowOf(2149)
-    eq(ns.Recipes.click(onlyMine, "RightButton"), "none", "nobody else online: no menu")
+    -- Nobody else online: no 密語 line; my own recipe still offers 「我的工錢」 (GF-006-B, R-4.3).
+    eq(ns.Recipes.click(onlyMine, "RightButton"), "menu", "my recipe: fee menu")
+    local mineItems = {}
+    for _, b in ipairs(menu.items) do if b:IsShown() then mineItems[#mineItems + 1] = b:GetText() end end
+    ok(not table.concat(mineItems, "|"):find("密語", 1, true), "no whisper line: " .. table.concat(mineItems, "|"))
+    ok(table.concat(mineItems, "|"):find("我的工錢", 1, true), "fee item on my recipe")
+    ns.Framework.closeMenu()
     -- The row stays shown while hovered and after the cursor leaves (0.9.4 hid it).
     theirs._scripts.OnEnter(theirs)
     ok(theirs:IsShown(), "shown while hovered")
@@ -4562,6 +4569,10 @@ test("fixture: generated sample is up to date and free of zone/online in the out
         ok(current == text, "fixture out of date; run with --fixture")
     end
 end)
+
+-- GF-006-B: crafting and orders (tests/addon/orders_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/orders_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------
 

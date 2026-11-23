@@ -58,12 +58,75 @@ function Diag.versionText()
         skew and (skew .. " 秒") or "不明")
 end
 
+-- GF-006-B (R-7.5, R-7.6, R-8.4, R-8.6, spec §12 item 12): orders and prices.
+local function onOff(v) return v and "可用" or "改成手動" end
+
+function Diag.ordersText()
+    local O, D = ns.Orders, ns.Delivery
+    local led = O.ledger
+    local views, open, closed = O.all(), 0, 0
+    for _, v in pairs(views) do
+        if v.state == "deal" or v.state == "cancel" then closed = closed + 1 else open = open + 1 end
+    end
+    local f = D.features()
+    local st = led.stats
+    local days = O.staleDays()
+    local parts = {
+        string.format("訂單 %d 張進行中、%d 張已結案｜記錄 %d 筆｜這次登入：送出 %d、收到 %d、佇列 %d",
+            open, closed, led:count(), st.sent, st.received, led:queued()),
+        string.format("交易判斷 %s｜寄信判斷 %s｜收信判斷 %s", onOff(f.trade), onOff(f.mailSend), onOff(f.mailTake)),
+        string.format("提醒天數：等接單 %d、製作中 %d、待驗收 %d（/gftk orders days <等接單> <製作中> <待驗收>）",
+            days.waiting, days.making, days.checking),
+    }
+    local shift = ns.num(O.local_().debugShift) or 0
+    if shift ~= 0 then parts[#parts + 1] = string.format("測試：訂單時間往前 %d 天", shift / 86400) end
+    if #(ns.missingEvents or {}) > 0 then
+        parts[#parts + 1] = "客戶端沒有的事件：" .. table.concat(ns.missingEvents, "、")
+    end
+    local log = O.local_().trades
+    local items = {}
+    for i = 1, math.min(5, #log) do
+        local e = log[i]
+        items[#items + 1] = string.format("%s %s %s", ns.localTime(e.at), str(e.kind), str(e.code))
+    end
+    if #items > 0 then parts[#parts + 1] = "最近的判斷：" .. table.concat(items, "；") end
+    return table.concat(parts, "｜")
+end
+
+function Diag.pricesText()
+    local P = ns.Prices
+    local db = P.db()
+    local items, keys = 0, {}
+    for rk, list in pairs(db.ah) do
+        local n = 0
+        for _ in pairs(list) do n = n + 1 end
+        items = items + n
+        keys[#keys + 1] = string.format("%s %d", rk, n)
+    end
+    local vendor = 0
+    for _ in pairs(db.vendor) do vendor = vendor + 1 end
+    local last = db.scan.last
+    local led = P.ledger
+    local st = led.stats
+    local scan = last and string.format("上次掃描 %s，%s，%d 個物品，%s 秒", ns.localTime(last.at),
+        last.how == "replicate" and "整個拍賣場" or "分類瀏覽", last.items or 0, tostring(last.seconds or "?")) or "還沒有掃描"
+    local ahKinds = P.canReplicate() and "整個拍賣場" or (P.canBrowse() and "分類瀏覽" or "不能掃描")
+    return table.concat({
+        string.format("拍賣場價格 %d 個物品（%s）｜商人價格 %d 個｜%s｜這台客戶端：%s",
+            items, #keys > 0 and table.concat(keys, "、") or "無", vendor, scan, ahKinds),
+        string.format("價格分享：記錄 %d 筆｜這次登入送出 %d／上限 %d、收到 %d、排隊 %d、超過上限 %d",
+            led:count(), st.sent, led.cfg.maxPerSession, st.received, led:queued(), st.capped),
+    }, "｜")
+end
+
 Diag.SITE_NOTE = "GF Sync 會在你下線後讀取存檔並上傳。公會網站的名冊主要由 Blizzard API 自動更新，GF Sync 只是補充來源：沒有安裝或關閉同步，網站照樣會更新。"
 
 local SECTIONS = {
     { title = "上傳到公會網站", text = function() return ns.Sync.statusText() end },
     { title = "說明", text = function() return Diag.SITE_NOTE end },
     { title = "遊戲內分享（公會成員之間自動轉傳）", text = Diag.shareText },
+    { title = "訂單（製作與訂單）", text = Diag.ordersText },
+    { title = "價格（拍賣場、商人、公會分享）", text = Diag.pricesText },
     { title = "公會名冊", text = Diag.rosterText },
     { title = "版本", text = Diag.versionText },
 }
@@ -89,7 +152,7 @@ end
 local function create()
     if window then return window end
     -- GF-001-D20: opaque and above the toolkit window (was see-through).
-    local f = ns.popupWindow(Diag.WINDOW_NAME, 640, 470)
+    local f = ns.popupWindow(Diag.WINDOW_NAME, 640, 620)
     f:SetPoint("CENTER", 0, 20)
     f:SetMovable(true)
     f:EnableMouse(true)
@@ -111,7 +174,7 @@ local function create()
         body:SetWidth(590)
         body:SetJustifyH("LEFT")
         lines[i] = body
-        y = y - 66
+        y = y - (i == 3 and 80 or 66)
     end
     Diag.exportTSVButton = button(f, "匯出名冊 TSV", 130, 20, 16, function() ns.UI.startExport("tsv") end)
     Diag.exportJSONButton = button(f, "匯出名冊 JSON", 130, 158, 16, function() ns.UI.startExport("json") end)
