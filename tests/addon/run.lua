@@ -4576,6 +4576,9 @@ assert(loadfile(ROOT .. "/tests/addon/orders_tests.lua"))()({ test = test, eq = 
 -- GF-006-B2: fixes from the 0.11.0 review (tests/addon/fixes_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/fixes_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-006-C: web orders (tests/addon/web_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/web_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------
 

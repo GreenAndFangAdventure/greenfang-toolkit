@@ -92,6 +92,8 @@ function Diag.ordersText()
         items[#items + 1] = string.format("%s %s %s", ns.localTime(e.at), str(e.kind), str(e.code))
     end
     if #items > 0 then parts[#parts + 1] = "最近的判斷：" .. table.concat(items, "；") end
+    -- GF-006-C: web orders (Inbox and import codes).
+    if ns.WebOrders then parts[#parts + 1] = "網站訂單：" .. ns.WebOrders.diagText() end
     return table.concat(parts, "｜")
 end
 

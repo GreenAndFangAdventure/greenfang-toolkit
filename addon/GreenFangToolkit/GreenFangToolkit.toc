@@ -22,6 +22,7 @@ Ledger.lua
 Orders.lua
 Prices.lua
 Delivery.lua
+WebOrders.lua
 Export.lua
 Framework.lua
 UI.lua
