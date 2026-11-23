@@ -377,11 +377,11 @@ return function(T)
         ok(b.adventureBadge ~= b.ordersBadge, "two badges")
         ns.Framework.open("adventure")
         local rows = ns.AdventureUI.shownRows()
-        eq(rows[1].header, "冒險單", "adventure header")
+        ok(rows[1].header:find("冒險單", 1, true) and rows[1].header:find("^|T"), "adventure header with an icon")
         local row
         for _, r in ipairs(ns.AdventureUI.rowFrames()) do if r.view and r.view.id == "t1" then row = r end end
         ok(row, "row")
-        eq(row.dest._texture, ns.AdventureUI.ICON.dungeon, "starts with the destination icon (R-8.3)")
+        eq(row.dest._texture, "Interface\\LFGFrame\\LFGIcon-ScarletMonastery", "starts with the dungeon art (R-8.3, GF-002-C)")
         local actions = {}
         for _, x in ipairs(row.buttons) do if x:IsShown() then actions[#actions + 1] = x.action end end
         eq(table.concat(actions, ","), "accept,refuse", "invited: accept / refuse")
@@ -412,7 +412,8 @@ return function(T)
         peer(ns, B, "T", { ticket("t1", { cr = t }) })
         local s = Adv.summary()
         eq(s.dungeon, "smg", "SM"); eq(s.count, 3, "3 people"); ok(s.lack.h and s.lack.t, "lacks a tank and a healer")
-        ok(ns.AdventureUI.summaryText():find("3 人想去", 1, true), "text")
+        local st = ns.AdventureUI.summaryText()
+        ok(st:find("墓地", 1, true) and st:find("|t3", 1, true) and not st:find("人想去", 1, true), "icons and numbers: " .. st)
     end)
 
     ---------------------------------------------------------------------------

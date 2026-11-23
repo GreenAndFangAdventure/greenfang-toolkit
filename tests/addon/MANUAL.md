@@ -635,6 +635,31 @@ python tests/addon/run_lupa.py         # 預期最後一行：N passed, 0 failed
 
 - □ 一個角色用 0.11.x：沒有 Lua 錯誤，訂單和名冊照常
 
+## 3x. 冒險與訂單的遊戲圖示：截圖確認（GF-002-C，0.12.1 起）
+
+ForeverAPI 沒有材質清單，下面的材質都**還沒在 16001 確認**。讀不到時工具箱會退回下一個（最後一個都是 1.x 一定有的圖示），不會變成綠色方塊。請截圖貼回來；看到綠色方塊或空白，請說是哪一個。
+
+**要截圖的畫面**
+
+1. 「冒險」頁：一張地城單、一張任務單（列的開頭圖示、每個位置一個職責圖示、時間的圖示）
+2. 按冒險單的「＋」→ 目的地：地城圖示的格子（白色、灰色、紅色三種等級顏色都要看到）
+3. 職工單的「＋」視窗：地城格子、職責圖示（大的是主職責、小的是副職責）
+4. 摘要列（地城圖示、人數、缺的職責圖示）
+5. 「訂單」頁的「收到的」「我下的」標題、下單視窗的數量箭頭、「下單」「匯入」按鈕
+6. 小地圖按鈕的兩個數字（左上冒險、右上訂單）和滑鼠提示
+
+**用到的材質**（括號是讀不到時的退路）
+
+- 職責：`Interface\LFGFrame\UI-LFG-ICON-ROLES`，坦 0-19／22-41、補 20-39／1-20、輸出 20-39／22-41（64 分之幾）（`Ability_Defend`、`Spell_Holy_Heal`、`INV_Sword_04`）
+- 任務單的人形：`Interface\Icons\INV_Misc_Head_Human_01`（`INV_Misc_Bag_10`）
+- 地城：`Interface\LFGFrame\LFGIcon-<名稱>`：RagefireChasm、WailingCaverns、Deadmines、ShadowFangKeep、BlackfathomDeeps、StormwindStockades、Gnomeregan、RazorfenKraul、ScarletMonastery（四翼共用）、RazorfenDowns、Uldaman、ZulFarak、Maraudon、SunkenTemple、BlackrockDepths、BlackrockSpire（上下層共用）、DireMaul（三翼共用）、Stratholme、Scholomance（`INV_Misc_Key_03`）
+- 任務：`Interface\Icons\INV_Misc_Note_01`
+- 時間：現在 `Spell_Nature_TimeStop`；今天 `INV_Misc_PocketWatch_01`（`Spell_Nature_TimeStop`）；之後 `Interface\Calendar\UI-Calendar-Button`（`INV_Misc_Book_09`、`INV_Misc_Note_01`）
+- 數量箭頭：`Interface\Buttons\UI-SpellbookIcon-PrevPage-Up／Down／Disabled`、`NextPage-…`（讀不到時是「－」「＋」文字按鈕）
+- 標題與按鈕：冒險 `Ability_Warrior_BattleShout`（`INV_Sword_04`）、職工 `INV_Misc_Bag_10`、收到的 `INV_Letter_15`、我下的 `INV_Misc_Note_02`、勾與叉 `Interface\RaidFrame\ReadyCheck-Ready／NotReady`、匯入 `INV_Scroll_03`
+
+- □ 如果地城圖示全部是鑰匙：輸入 `/run local t=UIParent:CreateTexture() print(t:SetTexture("Interface\\LFGFrame\\LFGIcon-Deadmines"))`，把印出的 true 或 false 貼回來
+
 ## 3b. 睡袋路線（GF-008-A，0.6.0 起；部落角色）
 
 - □ 左側清單有「睡袋路線」；聯盟角色看不到這一項

@@ -43,12 +43,22 @@ UI.ICON = {
 UI.ROLE_NAME = { t = "坦", h = "補", d = "輸出", any = "隊員" }
 UI.TAG_KEYS = { "quest", "farm", "slow", "fast", "voice" }
 
-local function tex(key, size) return "|T" .. (UI.ICON[key] or key) .. ":" .. tostring(size or 14) .. "|t" end
+-- GF-002-C: role, person, time and quest marks use the game's own art (GameIcons, with fallbacks).
+UI.GAME = { t = "role_t", h = "role_h", d = "role_d", any = "person", now = "now", today = "today", future = "future",
+    quest = "quest", dungeon = "key", worker = "worker", yes = "yes", no = "no", adventure = "adventure" }
+local function tex(key, size)
+    local g = UI.GAME[key]
+    if g then return ns.GameIcons.markup(g, size) end
+    return "|T" .. (UI.ICON[key] or key) .. ":" .. tostring(size or 14) .. "|t"
+end
 UI.tex = tex
 local function setIcon(t, key)
+    local g = UI.GAME[key]
+    if g then return ns.GameIcons.set(t, g) end
     if Icons.set(t, UI.ICON[key] or key) then t:Show(); return true end
     t:Hide(); return false
 end
+UI.setIcon = setIcon
 
 ---------------------------------------------------------------------------
 -- Pure helpers
@@ -69,9 +79,27 @@ end
 function UI.timeText(v)
     if v.timeMode == "n" then return tex("now") end
     local s = UI.clock(v.start) .. "～" .. UI.clock(v.finish)
-    if v.timeMode == "f" then s = UI.day(v.start) .. " " .. s end
-    return s
+    if v.timeMode == "f" then return tex("future") .. " " .. UI.day(v.start) .. " " .. s end
+    return tex("today") .. " " .. s
 end
+
+-- GF-002-C item 2: one entry per seat, in role order: { role, filled }.
+-- Dungeon tickets: tank, healer, dps; quest tickets: one person per seat.
+function UI.slotList(v)
+    local out = {}
+    if v.capacity.any then
+        local filled = v.capacity.any - (v.seats.any or 0)
+        for i = 1, v.capacity.any do out[#out + 1] = { role = "any", filled = i <= filled } end
+        return out
+    end
+    for _, r in ipairs(A().ROLES) do
+        local cap = v.capacity[r] or 0
+        local filled = cap - (v.seats[r] or 0)
+        for i = 1, cap do out[#out + 1] = { role = r, filled = i <= filled } end
+    end
+    return out
+end
+UI.MAX_SLOTS = 12
 
 -- Role gaps as icons: a filled seat bright, an empty one grey (R-8.3).
 function UI.roleText(v)
@@ -96,9 +124,32 @@ function UI.tagText(tags)
     return table.concat(out, "")
 end
 
+-- GF-002-C items 3, 4: the short name next to the dungeon art; a quest
+-- ticket shows the scroll and the number of quests (names in the tooltip).
 function UI.destText(v)
-    if v.dungeon then return ns.AdventureData.name(v.dungeon) end
+    if v.dungeon then return ns.AdventureData.short(v.dungeon) end
     return "x" .. #v.quests
+end
+
+function UI.setDest(t, v)
+    if v.dungeon then return ns.GameIcons.set(t, ns.GameIcons.dungeonKey(v.dungeon)) end
+    return ns.GameIcons.set(t, "quest")
+end
+
+-- Tooltip lines for a ticket: the full destination, quest names, the note.
+function UI.ticketTooltip(v)
+    local lines = {}
+    if v.dungeon then
+        local d = ns.AdventureData.byId[v.dungeon]
+        lines[#lines + 1] = d and (d.name .. "  " .. d.min .. "-" .. d.max) or v.dungeon
+    end
+    local log = A().questLog() or {}
+    for _, q in ipairs(v.quests) do
+        local info = log[tonumber(q) or q]
+        lines[#lines + 1] = tex("quest") .. " " .. ((info and info.title) or ("#" .. tostring(q)))
+    end
+    if v.note and v.note ~= "" then lines[#lines + 1] = v.note end
+    return lines
 end
 
 ---------------------------------------------------------------------------
@@ -113,11 +164,11 @@ function UI.pageRows()
     local tickets, matched = A().rowsFor()
     local out = {}
     if #tickets > 0 then
-        out[#out + 1] = { header = "冒險單" }
+        out[#out + 1] = { header = tex("adventure", 16) .. " 冒險單" }
         for _, r in ipairs(tickets) do out[#out + 1] = r end
     end
     if #matched > 0 then
-        out[#out + 1] = { header = "職工單" }
+        out[#out + 1] = { header = tex("worker", 16) .. " 職工單" }
         for _, r in ipairs(matched) do r.isWorker = true; out[#out + 1] = r end
     end
     return out
@@ -215,6 +266,15 @@ local function newRow(i)
     row.time:SetPoint("LEFT", row, "LEFT", 244, 0); row.time:SetWidth(150); row.time:SetJustifyH("LEFT")
     row.roles = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     row.roles:SetPoint("LEFT", row, "LEFT", 398, 0); row.roles:SetWidth(170); row.roles:SetJustifyH("LEFT")
+    -- GF-002-C item 2: one icon per seat, bright when taken, grey when open.
+    row.slots = {}
+    for k = 1, UI.MAX_SLOTS do
+        local s = row:CreateTexture(nil, "ARTWORK")
+        s:SetSize(16, 16)
+        s:SetPoint("LEFT", row, "LEFT", 398 + (k - 1) * 17, 0)
+        s:Hide()
+        row.slots[k] = s
+    end
     row.tags = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     row.tags:SetPoint("LEFT", row, "LEFT", 572, 0); row.tags:SetWidth(90); row.tags:SetJustifyH("LEFT")
     row.cls = row:CreateTexture(nil, "ARTWORK"); row.cls:SetSize(16, 16); row.cls:SetPoint("LEFT", row, "LEFT", 666, 0)
@@ -238,9 +298,11 @@ local function newRow(i)
     end)
     row:SetScript("OnEnter", function(self)
         local v = self.view
-        if not v or not v.note or v.note == "" then return end
+        if not v then return end
+        local lines = UI.ticketTooltip(v)
+        if #lines == 0 then return end
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine(v.note, 1, 1, 1, true)
+        for _, l in ipairs(lines) do GameTooltip:AddLine(l, 1, 1, 1, true) end
         GameTooltip:Show()
     end)
     row:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -260,6 +322,7 @@ local function fillRow(row, data, i)
     row.bg:SetColorTexture(0.2, 0.15, 0.15, i % 2 == 0 and 0.35 or 0.09)
     local parts = { row.att, row.dest, row.name, row.time, row.roles, row.tags, row.cls, row.who }
     row.view = nil
+    for _, s in ipairs(row.slots) do s:Hide() end
     if data.header then
         for _, w in ipairs(parts) do w:Hide() end
         row.off:Hide()
@@ -273,12 +336,12 @@ local function fillRow(row, data, i)
     if data.isWorker then
         -- A worker matching one of my tickets: invite (R-6.4).
         local w, v = data.w, data.ticket
-        setIcon(row.dest, "worker")
+        UI.setDest(row.dest, v)
         row.name:SetText(UI.destText(v))
         local slotText = {}
         for _, sl in ipairs(w.slots) do slotText[#slotText + 1] = sl.now and tex("now") or (UI.clock(sl.s) .. "～" .. UI.clock(sl.e)) end
         row.time:SetText(table.concat(slotText, " "))
-        row.roles:SetText(tex(w.main or "d") .. (w.alt and ("(" .. tex(w.alt) .. ")") or ""))
+        row.roles:SetText(tex(w.main or "d", 16) .. (w.alt and (" " .. tex(w.alt, 12)) or ""))
         row.tags:SetText("")
         fillWho(row, data.worker)
         if w.online then setIcon(row.off, "online") else setIcon(row.off, "offline") end
@@ -293,11 +356,23 @@ local function fillRow(row, data, i)
     end
     local v = data.view
     row.view = v
-    setIcon(row.dest, v.dungeon and "dungeon" or "quest")
+    UI.setDest(row.dest, v)
     row.name:SetText(UI.destText(v))
     row.name:SetTextColor(v.closed and 0.5 or 1, v.closed and 0.5 or 1, v.closed and 0.5 or 1)
     row.time:SetText(UI.timeText(v))
-    row.roles:SetText(v.closed and tex(v.state == "done" and "yes" or "no") or UI.roleText(v))
+    if v.closed then
+        row.roles:SetText(tex(v.state == "done" and "yes" or "no"))
+    else
+        row.roles:SetText("")
+        for k, sl in ipairs(UI.slotList(v)) do
+            local s = row.slots[k]
+            if not s then break end
+            ns.GameIcons.set(s, UI.GAME[sl.role])
+            if s.SetDesaturated then s:SetDesaturated(not sl.filled) end
+            s:SetAlpha(sl.filled and 1 or 0.45)
+            s.filled = sl.filled
+        end
+    end
     row.tags:SetText(UI.tagText(v.tags) .. (v.mode == "c" and tex("consent") or ""))
     fillWho(row, v.leader)
     -- R-4.7: the leader is offline (委託者離線中).
@@ -339,13 +414,14 @@ function UI.rowFrames() return rowWidgets end
 function UI.shownRows() return shownRows end
 
 -- R-11.3: "🏰 SM 3 人想去 缺🩹".
+-- GF-002-C item 9: dungeon art, the number of people, the missing role icons (no words).
 function UI.summaryText()
     local s = A().summary()
     if not s then return "" end
     local lack = {}
-    for _, r in ipairs(A().ROLES) do if s.lack[r] then lack[#lack + 1] = tex(r) end end
-    return tex("dungeon") .. " " .. ns.AdventureData.name(s.dungeon) .. " " .. s.count .. " 人想去"
-        .. (#lack > 0 and ("  缺" .. table.concat(lack, "")) or "")
+    for _, r in ipairs(A().ROLES) do if s.lack[r] then lack[#lack + 1] = tex(r, 16) end end
+    return ns.GameIcons.markup(ns.GameIcons.dungeonKey(s.dungeon), 18) .. " " .. ns.AdventureData.short(s.dungeon)
+        .. "  " .. tex("any", 14) .. s.count .. (#lack > 0 and ("   " .. table.concat(lack, " ")) or "")
 end
 
 function UI.refresh()
@@ -360,11 +436,16 @@ end
 local function build(p)
     UI.newButton = ns.createFrame("Button", nil, p, "UIPanelButtonTemplate")
     UI.newButton:SetSize(110, 24); UI.newButton:SetPoint("TOPLEFT", p, "TOPLEFT", 24, -40)
-    UI.newButton:SetText("＋冒險單")
+    UI.newButton:SetText(tex("adventure", 16) .. " ＋") -- GF-002-C item 6
+    UI.newButton.tooltipText = "冒險單"
+    UI.newButton:SetScript("OnEnter", function(self) GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:AddLine("冒險單"); GameTooltip:Show() end)
+    UI.newButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
     UI.newButton:SetScript("OnClick", function() UI.openTicket() end)
     UI.workerButton = ns.createFrame("Button", nil, p, "UIPanelButtonTemplate")
     UI.workerButton:SetSize(110, 24); UI.workerButton:SetPoint("LEFT", UI.newButton, "RIGHT", 10, 0)
-    UI.workerButton:SetText("＋職工單")
+    UI.workerButton:SetText(tex("worker", 16) .. " ＋")
+    UI.workerButton:SetScript("OnEnter", function(self) GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:AddLine("職工單"); GameTooltip:Show() end)
+    UI.workerButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
     UI.workerButton:SetScript("OnClick", function() UI.openWorker() end)
     summaryLine = p:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     summaryLine:SetPoint("LEFT", UI.workerButton, "RIGHT", 24, 0)
@@ -424,7 +505,7 @@ end
 
 local function drawTicket()
     if not (popup and draft) then return end
-    popup.dest:SetText(draft.dungeon and ns.AdventureData.name(draft.dungeon)
+    popup.dest:SetText(draft.dungeon and (ns.GameIcons.markup(ns.GameIcons.dungeonKey(draft.dungeon), 18) .. " " .. ns.AdventureData.short(draft.dungeon))
         or (#draft.quests > 0 and (tex("quest") .. " x" .. #draft.quests)) or tex("dungeon"))
     for _, m in ipairs({ "n", "t", "f" }) do popup.timeButtons[m]:SetAlpha(draft.timeMode == m and 1 or 0.4) end
     popup.timeText:SetText(draft.timeMode == "n" and "" or UI.timeText({ timeMode = draft.timeMode, start = draft.start, finish = draft.finish }))
@@ -451,8 +532,8 @@ function UI.openTicket()
         f.dest:SetScript("OnClick", function(self) UI.pickDestination(self) end)
         f.timeButtons = {}
         for i, m in ipairs({ "n", "t", "f" }) do
-            local b = iconButton(f, 26, m == "n" and "now" or m == "t" and "wait" or "invite",
-                m == "n" and "現在" or m == "t" and "今天" or "之後", function(self) UI.pickTime(self, m) end)
+            local b = iconButton(f, 26, "now", m == "n" and "現在" or m == "t" and "今天" or "之後", function(self) UI.pickTime(self, m) end)
+            ns.GameIcons.set(b.tex, m == "n" and "now" or m == "t" and "today" or "future")
             b:SetPoint("TOPLEFT", f, "TOPLEFT", 18 + (i - 1) * 34, -68)
             f.timeButtons[m] = b
         end
@@ -482,7 +563,7 @@ function UI.openTicket()
         f.note:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
         f.result = f:CreateFontString(nil, "ARTWORK", "GameFontHighlight"); f.result:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 18, 18)
         f.go = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.go:SetSize(90, 24)
-        f.go:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -18, 14); f.go:SetText("開單")
+        f.go:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -18, 14); f.go:SetText(tex("yes", 16) .. " 開單")
         f.go:SetScript("OnClick", function() UI.submitTicket() end)
         f:Hide()
         popup = f
@@ -495,14 +576,52 @@ function UI.openTicket()
 end
 function UI.draft() return draft end
 
--- Dungeons for my level, then my quest log (R-4.1).
-function UI.pickDestination(owner)
-    local items = {}
-    for _, d in ipairs(ns.AdventureData.forLevel(A().myLevel())) do
-        items[#items + 1] = { text = d.name .. "  " .. d.min .. "-" .. d.max, fn = function()
-            draft.dungeon = d.id; drawTicket()
-        end }
+-- GF-002-C items 7, 8: every dungeon as its own art in a grid, coloured by
+-- level (white fits, grey too low for me, red too high); click to pick or toggle.
+UI.GRID_NAME = "GreenFangToolkit_DungeonGrid"
+local grid
+function UI.dungeonGrid(owner, onClick, isOn)
+    if not grid then
+        grid = CreateFrame("Frame", UI.GRID_NAME, UIParent)
+        grid:SetFrameStrata("FULLSCREEN_DIALOG")
+        ns.makeOpaque(grid, 0)
+        grid:EnableMouse(true)
+        grid.buttons = {}
+        if UISpecialFrames then table.insert(UISpecialFrames, UI.GRID_NAME) end
+        for i, d in ipairs(ns.AdventureData.DUNGEONS) do
+            local b = iconButton(grid, 30, "dungeon", d.name)
+            b:SetPoint("TOPLEFT", grid, "TOPLEFT", 6 + ((i - 1) % 9) * 34, -6 - math.floor((i - 1) / 9) * 34)
+            b.dungeon = d.id
+            grid.buttons[i] = b
+        end
+        grid:SetSize(6 + 9 * 34, 12 + math.ceil(#ns.AdventureData.DUNGEONS / 9) * 34)
     end
+    local level = A().myLevel()
+    for _, b in ipairs(grid.buttons) do
+        local d = ns.AdventureData.byId[b.dungeon]
+        ns.GameIcons.set(b.tex, ns.GameIcons.dungeonKey(b.dungeon))
+        local r, g, bl = ns.GameIcons.levelColor(b.dungeon, level)
+        if b.tex.SetVertexColor then b.tex:SetVertexColor(r, g, bl) end
+        b.levelColor = { r, g, bl }
+        b.tip = d.name .. "  " .. d.min .. "-" .. d.max
+        if isOn and isOn(b.dungeon) then ns.GameIcons.set(b.badge, "yes") else b.badge:Hide() end
+        b:SetScript("OnClick", function(self)
+            onClick(self.dungeon)
+            if isOn and isOn(self.dungeon) then ns.GameIcons.set(self.badge, "yes") else self.badge:Hide() end
+            if not isOn then grid:Hide() end
+        end)
+    end
+    grid:ClearAllPoints()
+    grid:SetPoint("TOPLEFT", owner or UIParent, "BOTTOMLEFT", 0, -2)
+    grid:Show()
+    return grid
+end
+function UI.grid() return grid end
+
+-- Dungeons (grid), then my quest log (R-4.1).
+function UI.pickDestination(owner)
+    UI.dungeonGrid(owner, function(id) draft.dungeon = id; draft.quests = {}; drawTicket() end)
+    local items = {}
     local log = A().questLog()
     if log then
         local n = 0
@@ -516,6 +635,7 @@ function UI.pickDestination(owner)
             end }
         end
     end
+    if #items == 0 then return grid end
     items[#items + 1] = { text = tex("no"), fn = function() draft.dungeon = nil; draft.quests = {}; drawTicket() end }
     return ns.showMenu(owner, items)
 end
@@ -573,11 +693,15 @@ end
 
 local function drawWorker()
     if not (wpopup and wdraft) then return end
-    local names = {}
-    for _, d in ipairs(wdraft.dungeons) do names[#names + 1] = ns.AdventureData.name(d) end
-    wpopup.dungeons:SetText(#names > 0 and table.concat(names, "、") or tex("dungeon"))
+    local marks = {}
+    for _, d in ipairs(wdraft.dungeons) do marks[#marks + 1] = ns.GameIcons.markup(ns.GameIcons.dungeonKey(d), 18) end
+    wpopup.dungeons:SetText(#marks > 0 and table.concat(marks, " ") or tex("dungeon"))
+    for _, r in ipairs(A().ROLES) do
+        local m, a = wpopup.mainRoles[r], wpopup.altRoles[r]
+        m:SetAlpha(wdraft.main == r and 1 or 0.35)
+        a:SetAlpha(wdraft.alt == r and 1 or 0.35)
+    end
     wpopup.quests:SetText(tex("quest") .. " " .. (wdraft.allQuests and "*" or ("x" .. #wdraft.quests)))
-    wpopup.roles:SetText(tex(wdraft.main or "d") .. (wdraft.alt and ("(" .. tex(wdraft.alt) .. ")") or ""))
     local slots = {}
     for _, sl in ipairs(wdraft.slots) do slots[#slots + 1] = sl.now and tex("now") or (UI.clock(sl.s) .. "～" .. UI.clock(sl.e)) end
     wpopup.slots:SetText(table.concat(slots, "  "))
@@ -596,16 +720,30 @@ function UI.openWorker()
         f.quests = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.quests:SetSize(120, 24)
         f.quests:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -64)
         f.quests:SetScript("OnClick", function(self) UI.pickWorkerQuests(self) end)
-        f.roles = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.roles:SetSize(120, 24)
-        f.roles:SetPoint("LEFT", f.quests, "RIGHT", 10, 0)
-        f.roles:SetScript("OnClick", function(self) UI.pickWorkerRoles(self) end)
+        -- Main role: three big role icons; the second role: three small ones (click again to clear).
+        f.mainRoles, f.altRoles = {}, {}
+        for i, r in ipairs(A().ROLES) do
+            local m = iconButton(f, 26, "dungeon", UI.ROLE_NAME[r], function()
+                wdraft.main = r; if wdraft.alt == r then wdraft.alt = nil end; drawWorker()
+            end)
+            ns.GameIcons.set(m.tex, UI.GAME[r])
+            m:SetPoint("LEFT", f.quests, "RIGHT", 12 + (i - 1) * 30, 0)
+            f.mainRoles[r] = m
+            local a = iconButton(f, 16, "dungeon", UI.ROLE_NAME[r], function()
+                wdraft.alt = (wdraft.alt == r or wdraft.main == r) and nil or r; drawWorker()
+            end)
+            ns.GameIcons.set(a.tex, UI.GAME[r])
+            a:SetPoint("LEFT", f.quests, "RIGHT", 112 + (i - 1) * 20, -4)
+            f.altRoles[r] = a
+        end
+        f.roles = f.mainRoles.t
         f.slots = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.slots:SetSize(380, 24)
         f.slots:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -96)
         f.slots:SetScript("OnClick", function(self) UI.pickWorkerSlots(self) end)
         f.remove = iconButton(f, 24, "no", "移除", function() A().removeWorker(); f:Hide(); UI.refresh() end)
         f.remove:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 18, 14)
         f.save = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.save:SetSize(90, 24)
-        f.save:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -18, 14); f.save:SetText("登記")
+        f.save:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -18, 14); f.save:SetText(tex("yes", 16) .. " 登記")
         f.save:SetScript("OnClick", function() UI.saveWorker() end)
         f:Hide()
         wpopup = f
@@ -624,18 +762,18 @@ function UI.saveWorker(d)
     return ok
 end
 
+function UI.toggleWorkerDungeon(id)
+    for i, x in ipairs(wdraft.dungeons) do if x == id then table.remove(wdraft.dungeons, i); drawWorker(); return false end end
+    wdraft.dungeons[#wdraft.dungeons + 1] = id
+    drawWorker()
+    return true
+end
+
 function UI.pickWorkerDungeons(owner)
-    local items = {}
-    for _, d in ipairs(ns.AdventureData.forLevel(A().myLevel())) do
-        local on = false
-        for _, x in ipairs(wdraft.dungeons) do if x == d.id then on = true end end
-        items[#items + 1] = { text = (on and tex("yes") or "") .. d.name, fn = function()
-            for i, x in ipairs(wdraft.dungeons) do if x == d.id then table.remove(wdraft.dungeons, i); drawWorker(); return end end
-            wdraft.dungeons[#wdraft.dungeons + 1] = d.id
-            drawWorker()
-        end }
-    end
-    return ns.showMenu(owner, items)
+    return UI.dungeonGrid(owner, function(id) UI.toggleWorkerDungeon(id) end, function(id)
+        for _, x in ipairs(wdraft.dungeons) do if x == id then return true end end
+        return false
+    end)
 end
 
 function UI.pickWorkerQuests(owner)

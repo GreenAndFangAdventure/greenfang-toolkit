@@ -198,11 +198,11 @@ function UI.pageRows()
     local received, placed = O().rowsFor(me, ns.Data.player().guid)
     local out = {}
     if #received > 0 then
-        out[#out + 1] = { header = "收到的", count = #received }
+        out[#out + 1] = { header = ns.GameIcons.markup("received", 16) .. " 收到的", count = #received } -- GF-002-C
         for _, r in ipairs(received) do out[#out + 1] = r end
     end
     if #placed > 0 then
-        out[#out + 1] = { header = "我下的", count = #placed }
+        out[#out + 1] = { header = ns.GameIcons.markup("placed", 16) .. " 我下的", count = #placed }
         for _, r in ipairs(placed) do out[#out + 1] = r end
     end
     return out
@@ -478,7 +478,7 @@ function UI.openPaste()
         f.result = f:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
         f.result:SetPoint("TOPLEFT", f, "TOPLEFT", 60, -80)
         f.go = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.go:SetSize(90, 24)
-        f.go:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -18, 14); f.go:SetText("匯入")
+        f.go:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -18, 14); f.go:SetText(ns.GameIcons.markup("paste", 16) .. " 匯入")
         f.go:SetScript("OnClick", function() UI.pasteImport() end)
         f:Hide()
         pastePopup = f
@@ -602,6 +602,25 @@ function UI.submit(d)
     return id
 end
 
+-- An arrow button: the game's page arrow art, else a small text button.
+function UI.arrowButton(parent, which, fallbackText)
+    local up = "Interface\\Buttons\\UI-SpellbookIcon-" .. (which == "prev" and "Prev" or "Next") .. "Page-"
+    if ns.GameIcons.has(up .. "Up") then
+        local b = CreateFrame("Button", nil, parent)
+        b:SetSize(26, 26)
+        if b.SetNormalTexture then b:SetNormalTexture(up .. "Up") end
+        if b.SetPushedTexture then b:SetPushedTexture(up .. "Down") end
+        if b.SetDisabledTexture then b:SetDisabledTexture(up .. "Disabled") end
+        if b.SetHighlightTexture then b:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD") end
+        b.art = up .. "Up"
+        return b
+    end
+    local b = ns.createFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    b:SetSize(24, 22)
+    b:SetText(fallbackText)
+    return b
+end
+
 local function moneyBoxes(parent, x, y, onChange)
     local boxes = {}
     for i, unit in ipairs({ "gold", "silver", "copper" }) do
@@ -687,11 +706,10 @@ local function createPopup()
     f.market = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     f.market:SetPoint("LEFT", f.marketIcon, "RIGHT", 4, 0)
     -- Quantity
-    f.minus = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.minus:SetSize(24, 22)
-    f.minus:SetPoint("TOPLEFT", f, "TOPLEFT", 66, -36); f.minus:SetText("－")
+    -- GF-002-C: the game's previous / next page arrows (text buttons when the client lacks them).
+    f.minus = UI.arrowButton(f, "prev", "－"); f.minus:SetPoint("TOPLEFT", f, "TOPLEFT", 66, -36)
     f.qty = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightLarge"); f.qty:SetPoint("LEFT", f.minus, "RIGHT", 10, 0)
-    f.plus = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.plus:SetSize(24, 22)
-    f.plus:SetPoint("LEFT", f.minus, "RIGHT", 40, 0); f.plus:SetText("＋")
+    f.plus = UI.arrowButton(f, "next", "＋"); f.plus:SetPoint("LEFT", f.minus, "RIGHT", 40, 0)
     local function step(n)
         local y = draft.reagents and draft.reagents.yield or 1
         draft.qty = math.max(y, math.min(200, draft.qty + n * y))
@@ -739,7 +757,7 @@ local function createPopup()
     f.total = f:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     f.total:SetPoint("LEFT", f.sumIcon, "RIGHT", 8, 0)
     f.send = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.send:SetSize(90, 24)
-    f.send:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -18, 14); f.send:SetText("下單")
+    f.send:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -18, 14); f.send:SetText(ns.GameIcons.markup("yes", 16) .. " 下單")
     f.send:SetScript("OnClick", function() UI.submit() end)
     f:Hide()
     popup = f
@@ -795,10 +813,10 @@ function UI.editFee(target)
         f.icon:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -30)
         f.boxes = moneyBoxes(f, 56, -34, function() end)
         f.save = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.save:SetSize(60, 22)
-        f.save:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 12); f.save:SetText("確定")
+        f.save:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 12); f.save:SetText(ns.GameIcons.markup("yes", 16) .. " 確定")
         f.save:SetScript("OnClick", function() UI.saveFee(f.boxes.get()) end)
         f.clear = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.clear:SetSize(60, 22)
-        f.clear:SetPoint("RIGHT", f.save, "LEFT", -8, 0); f.clear:SetText("清除")
+        f.clear:SetPoint("RIGHT", f.save, "LEFT", -8, 0); f.clear:SetText(ns.GameIcons.markup("no", 16) .. " 清除")
         f.clear:SetScript("OnClick", function() UI.saveFee(nil) end)
         f:Hide()
         feePopup = f
