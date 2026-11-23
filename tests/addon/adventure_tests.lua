@@ -416,6 +416,111 @@ return function(T)
     end)
 
     ---------------------------------------------------------------------------
+    -- Upload (savedvariables §adventure), R-7.3 entering the dungeon
+    ---------------------------------------------------------------------------
+
+    local function strings(x, acc)
+        acc = acc or {}
+        for k, v in pairs(x) do
+            if type(k) == "string" then acc[#acc + 1] = k end
+            if type(v) == "string" then acc[#acc + 1] = v elseif type(v) == "table" then strings(v, acc) end
+        end
+        return acc
+    end
+
+    test("GF-002 R-10.1 character.self.adventure: tickets, worker, actions in the contract shape", function()
+        local ns = login()
+        local Adv = ns.Adventure
+        local t = ns.Share.serverNow()
+        local id = Adv.open({ dungeon = "sfk", timeMode = "t", start = t + 3600, finish = t + 7200,
+            roles = { t = 1, h = 1, d = 3 }, tags = 3, note = "慢" .. string.char(10) .. "慢打", mode = "c", leaderRole = "d" })
+        ok(id:sub(1, 1) == "a", "ids start with a: " .. id)
+        Adv.leader(id, "invite", B)
+        Adv.leader(id, "kick", B) -- one decision per worker: the last
+        local qid = Adv.open({ quests = { 1013, 1014 }, size = 4, leaderRole = "d" })
+        Adv.setWorker({ dungeons = { "sfk", "rfk" }, quests = { 1013 }, main = "h", alt = "d",
+            slots = { { now = true }, { s = t + 100, e = t + 200 } } })
+        peer(ns, B, "T", { ticket("abbb.1", { cr = t - 10 }) })
+        Adv.worker("abbb.1", "apply")
+        Adv.worker("abbb.1", "withdraw")
+        ns.Sync.recordSelf(true)
+        local entry
+        for _, e in ipairs(GreenFangToolkitDB.sync.outbox) do if e.kind == "character.self" then entry = e end end
+        local adv = entry.payload.adventure
+        ok(adv, "adventure written")
+        local tk = adv.tickets.value[id]
+        eq(tk.dungeon, "sfk", "dungeon code"); eq(tk.time.mode, "today", "today"); eq(tk.time.from, t + 3600, "from")
+        eq(tk.slots.tank .. tk.slots.healer .. tk.slots.dps, "113", "slots"); eq(tk.size, nil, "no size on a dungeon ticket")
+        eq(table.concat(tk.tags, ","), "quest,repeat", "tags as names"); eq(tk.note, "慢 慢打", "clean note")
+        eq(tk.admit, "consent", "admit"); eq(tk.status, "open", "status")
+        eq(tk.decisions["Player-" .. B].d, "kick", "last decision only")
+        local q = adv.tickets.value[qid]
+        eq(q.size, 4, "quest ticket size"); eq(q.slots, nil, "no slots"); eq(q.quests[2], 1014, "quest ids"); eq(q.time.mode, "now", "now")
+        local w = adv.worker.value
+        eq(w.main, "healer", "main"); eq(w.alt, "dps", "alt"); eq(#w.times, 2, "two times"); eq(w.times[1].mode, "now", "now")
+        eq(w.times[2].mode, "today", "a slot today")
+        local a = adv.actions.value["abbb.1"]
+        eq(a.a, "withdraw", "action"); ok(a.firstAt and a.firstAt <= a.at, "firstAt"); eq(a.role, "healer", "role")
+        for _, str in ipairs(strings(adv)) do
+            ok(not str:find("測試", 1, true), "no names: " .. str)
+        end
+    end)
+
+    test("GF-002 R-10.1 member.share.adventure: only the subject's part; caps", function()
+        local ns = login()
+        local Adv = ns.Adventure
+        local t = ns.Share.serverNow()
+        local list = {}
+        for i = 1, 20 do list[i] = ticket("abbb." .. i, { cr = t - i, sa = t - i }) end
+        peer(ns, B, "T", list)
+        local acts = {}
+        for i = 1, 60 do acts[i] = act("accc." .. i, "ap", t - i, "d") end
+        peer(ns, B, "A", acts)
+        ns.Share.offer(B, "B", t, ns.Share.hash("60.WARRIOR"), "60.WARRIOR", true, B)
+        ns.Sync.recordShares()
+        local e
+        for _, x in ipairs(GreenFangToolkitDB.sync.outbox) do
+            if x.kind == "member.share" and x.payload.subject.guid == "Player-" .. B then e = x end
+        end
+        ok(e and e.payload.adventure, "B's adventure")
+        local n = 0
+        for _ in pairs(e.payload.adventure.tickets.value) do n = n + 1 end
+        eq(n, 20, "20 tickets")
+        n = 0
+        for _ in pairs(e.payload.adventure.actions.value) do n = n + 1 end
+        eq(n, 50, "50 actions")
+        local first = e.id
+        ns.Sync.recordShares()
+        local again
+        for _, x in ipairs(GreenFangToolkitDB.sync.outbox) do
+            if x.kind == "member.share" and x.payload.subject.guid == "Player-" .. B then again = x end
+        end
+        eq(again.id, first, "nothing changed: not rewritten")
+    end)
+
+    test("GF-002 R-7.3 entering the ticket's dungeon counts as departing (instance ID, then name)", function()
+        local ns = login()
+        local Adv = ns.Adventure
+        local id = Adv.open({ dungeon = "sml", leaderRole = "d" })
+        local other = Adv.open({ dungeon = "rfk", leaderRole = "d" })
+        IsInInstance = function() return true end
+        GetInstanceInfo = function() return "x", "party", 1, "", 5, 0, false, 189 end
+        eq(Adv.onEnterWorld(), 1, "one ticket")
+        eq(Adv.get(id).state, "departed", "SM ticket departed"); eq(Adv.get(other).state, "open", "RFK untouched")
+        -- No usable ID: the name.
+        local id2 = Adv.open({ dungeon = "rfk", leaderRole = "d" })
+        GetInstanceInfo = function() return "剃刀沼澤", "party", 1, "", 5, 0, false, nil end
+        Adv.onEnterWorld()
+        eq(Adv.get(id2).state, "departed", "by name")
+        -- A raid or the open world: nothing.
+        GetInstanceInfo = function() return "黑翼之巢", "raid", 1, "", 40, 0, false, 469 end
+        local id3 = Adv.open({ dungeon = "brd", leaderRole = "d" })
+        eq(Adv.onEnterWorld(), 0, "raid: nothing"); eq(Adv.get(id3).state, "open", "still open")
+        IsInInstance, GetInstanceInfo = nil, nil
+        eq(Adv.onEnterWorld(), 0, "outside: nothing")
+    end)
+
+    ---------------------------------------------------------------------------
     -- Compatibility and performance
     ---------------------------------------------------------------------------
 

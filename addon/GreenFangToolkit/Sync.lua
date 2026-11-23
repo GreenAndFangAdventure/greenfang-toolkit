@@ -274,6 +274,8 @@ function Sync.recordSelf(force, opts)
         recipes = Sync.ownRecipes(),
         -- GF-006-B (savedvariables §crafting): my own services and order halves.
         crafting = ns.Orders and ns.Orders.craftingFor(ns.Share.selfAuthor()) or nil,
+        -- GF-002-B (savedvariables §adventure): my tickets, worker ticket and actions.
+        adventure = ns.Adventure and ns.Adventure.uploadFor(ns.Share.selfAuthor()) or nil,
     }
     local existing = Sync.find("character.self", function(e)
         return type(e.uploader) == "table" and e.uploader.guid == p.guid
@@ -413,6 +415,8 @@ local function sharePayload(m, a, recs, tombs, realm, idsFor)
     end
     -- GF-006-B (savedvariables §crafting): the halves the subject wrote.
     payload.crafting = ns.Orders and ns.Orders.craftingFor(a) or nil
+    -- GF-002-B: the subject's adventure part.
+    payload.adventure = ns.Adventure and ns.Adventure.uploadFor(a) or nil
     return payload
 end
 
@@ -423,6 +427,7 @@ local function fieldState(recs, tombs, a)
     for g, t in pairs(tombs) do out[g] = { t = t, h = "x" } end
     -- GF-006-B: the subject's order records count as fields too.
     if a and ns.Orders then for g, f in pairs(ns.Orders.uploadState(a)) do out[g] = f end end
+    if a and ns.Adventure then for g, f in pairs(ns.Adventure.uploadState(a)) do out[g] = f end end
     return out
 end
 
@@ -491,7 +496,8 @@ function Sync.recordShares()
         local a = m.guid and Share.authorOf(m.guid)
         local recs, tombs = a and s.rec[a] or {}, a and s.tomb[a] or {}
         local orderState = a and ns.Orders and ns.Orders.uploadState(a) or {}
-        if a and a ~= selfA and (next(recs) or next(tombs) or next(orderState)) then
+        local advState = a and ns.Adventure and ns.Adventure.uploadState(a) or {}
+        if a and a ~= selfA and (next(recs) or next(tombs) or next(orderState) or next(advState)) then
             local current = fieldState(recs, tombs, a)
             local diff = compareState(current, s.queued[a])
             local old = existing[m.guid]

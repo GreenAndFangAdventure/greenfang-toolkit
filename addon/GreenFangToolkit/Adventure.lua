@@ -478,7 +478,8 @@ function Adv.newId()
     local id
     repeat
         seq = seq + 1
-        id = "g" .. S().hash(me()) .. "." .. b36(now()) .. b36(seq)
+        -- Contract (savedvariables §adventure): game tickets start with "a" (x/y: website/Discord).
+        id = "a" .. S().hash(me()) .. "." .. b36(now()) .. b36(seq)
     until not mine[id]
     return id
 end
@@ -541,7 +542,8 @@ function Adv.leader(id, action, arg)
         local list = Adv.decodeDecisions(e.dc)
         local k = action == "kick" and "k" or action == "approve" and "p" or "i"
         local kept = {}
-        for _, d in ipairs(list) do if not (d.a == arg and d.k == k) then kept[#kept + 1] = d end end
+        -- Contract: one decision per worker (the last one); the game replays the same.
+        for _, d in ipairs(list) do if d.a ~= arg then kept[#kept + 1] = d end end
         kept[#kept + 1] = { a = arg, k = k, t = t }
         e.dc = Adv.encodeDecisions(kept)
     else return false, "action" end
@@ -907,6 +909,171 @@ function Adv.summary()
         end
     end
     return { dungeon = best, count = n, lack = lack }
+end
+
+---------------------------------------------------------------------------
+-- R-7.3: entering the dungeon counts as departing
+---------------------------------------------------------------------------
+
+-- The dungeon I am in (an adventure code), or nil. GetInstanceInfo's
+-- instance ID first (16001 IDs not verified), then the name.
+function Adv.currentDungeon()
+    if ns.call(IsInInstance) ~= true then return nil end
+    local name, kind, _, _, _, _, _, instanceID = ns.call(GetInstanceInfo)
+    if kind ~= nil and kind ~= "party" then return nil end
+    local list = {}
+    local id = ns.num(instanceID)
+    for _, d in ipairs(ns.AdventureData.DUNGEONS) do
+        if id and d.instance == id then list[#list + 1] = d.id end
+    end
+    if #list == 0 and str(name) ~= "" then
+        for _, d in ipairs(ns.AdventureData.DUNGEONS) do
+            local base = d.name:match("^(.-)：") or d.name
+            if str(name):find(base, 1, true) then list[#list + 1] = d.id end
+        end
+    end
+    return #list > 0 and list or nil
+end
+
+-- My open tickets for the dungeon I just entered become "departed".
+function Adv.onEnterWorld()
+    local here = Adv.currentDungeon()
+    if not here then return 0 end
+    local set = {}
+    for _, d in ipairs(here) do set[d] = true end
+    local n = 0
+    for _, e in ipairs(listOf(me(), "T")) do
+        if e.st == "o" and set[e.ds] then
+            if Adv.leader(e.id, "depart") then n = n + 1 end
+        end
+    end
+    return n
+end
+
+---------------------------------------------------------------------------
+-- Upload (savedvariables §adventure): the readable shape
+---------------------------------------------------------------------------
+
+Adv.UPLOAD_TICKETS, Adv.UPLOAD_ACTIONS, Adv.UPLOAD_DECISIONS = 20, 50, 40
+local ROLE = { t = "tank", h = "healer", d = "dps" }
+local STATUS = { o = "open", g = "departed", c = "done", x = "cancel" }
+local ACT = { ap = "apply", wd = "withdraw", ia = "accept", ir = "refuse" }
+local DEC = { k = "kick", p = "approve", i = "invite" }
+local TAG_NAMES = { { "quest", 1 }, { "repeat", 2 }, { "slow", 4 }, { "fast", 8 }, { "voice", 16 } }
+local function validId(id) return type(id) == "string" and #id <= 64 and id:match("^[0-9a-z.]+$") ~= nil end
+
+local function timeOf(mode, from, to)
+    if mode == "n" or not (from and to) then return { mode = "now" } end
+    return { mode = mode == "f" and "future" or "today", from = from, to = to }
+end
+
+function Adv.ticketUpload(e)
+    local quests = {}
+    for _, q in ipairs(splitDots(e.qs)) do if tonumber(q) then quests[#quests + 1] = tonumber(q) end end
+    local tags = {}
+    for _, tg in ipairs(TAG_NAMES) do if math.floor((e.tg or 0) / tg[2]) % 2 == 1 then tags[#tags + 1] = tg[1] end end
+    local out = {
+        src = "g", ver = e.ver or 1, created = e.cr, dungeon = e.ds ~= "" and e.ds or nil,
+        quests = #quests > 0 and quests or nil, time = timeOf(e.tm, e.s, e.e),
+        tags = #tags > 0 and tags or nil, note = (e.nt and e.nt ~= "") and Adv.cleanNote(e.nt) or nil,
+        admit = e.md == "c" and "consent" or "direct", status = STATUS[e.st] or "open", statusAt = e.sa,
+    }
+    if out.dungeon then out.slots = { tank = e.rt or 1, healer = e.rh or 1, dps = e.rd or 3 }
+    else out.size = e.sz or 5 end
+    local list = Adv.decodeDecisions(e.dc)
+    table.sort(list, function(x, y) return x.t > y.t end)
+    for i = 1, math.min(#list, Adv.UPLOAD_DECISIONS) do
+        local d = list[i]
+        out.decisions = out.decisions or {}
+        local guid = S().guidOf(d.a)
+        if not out.decisions[guid] then out.decisions[guid] = { d = DEC[d.k], at = d.t } end
+    end
+    return out
+end
+
+-- The author's adventure part, or nil when there is nothing.
+function Adv.uploadFor(a)
+    if not a then return nil end
+    local out = {}
+    local t = now()
+    local trec = led:get(a, "T")
+    if trec then
+        local entries = {}
+        for _, e in ipairs(Adv.decodeList(trec.v) or {}) do
+            local ended = e.st == "x" or e.st == "c"
+            if validId(e.id) and e.id:sub(1, 1) == "a" and not (ended and t - (e.sa or t) >= Adv.KEEP_CLOSED) then
+                entries[#entries + 1] = { e = e, ended = ended, at = e.sa or 0 }
+            end
+        end
+        -- Over the cap: the ones that ended longest ago go first.
+        table.sort(entries, function(x, y)
+            if x.ended ~= y.ended then return not x.ended end
+            if x.at ~= y.at then return x.at > y.at end
+            return x.e.id < y.e.id
+        end)
+        local value, n = {}, 0
+        for _, it in ipairs(entries) do
+            if n >= Adv.UPLOAD_TICKETS then break end
+            value[it.e.id] = Adv.ticketUpload(it.e)
+            n = n + 1
+        end
+        if n > 0 then out.tickets = { recordedAt = trec.t, value = value } end
+    end
+    local wrec = led:get(a, "W")
+    local w = wrec and (Adv.decodeList(wrec.v) or {})[1]
+    if w and w.st ~= "x" and (w.ex or 0) > t then
+        local quests = {}
+        for _, q in ipairs(splitDots(w.qs)) do if tonumber(q) then quests[#quests + 1] = tonumber(q) end end
+        local times = {}
+        for _, sl in ipairs(Adv.decodeSlots(w.sl)) do
+            if sl.now then times[#times + 1] = { mode = "now" }
+            else
+                local today = math.floor(sl.s / 86400) == math.floor(t / 86400)
+                times[#times + 1] = { mode = today and "today" or "future", from = sl.s, to = sl.e }
+            end
+        end
+        out.worker = { recordedAt = wrec.t, value = { dungeons = splitDots(w.ds), quests = quests, allQuests = w.qa == "1",
+            main = ROLE[w.rm] or "dps", alt = ROLE[w.ra], times = times, expires = w.ex } }
+        if #out.worker.value.dungeons == 0 then out.worker.value.dungeons = nil end
+        if #quests == 0 then out.worker.value.quests = nil end
+    end
+    local arec = led:get(a, "A")
+    if arec then
+        local views = Adv.all()
+        local entries = {}
+        for _, e in ipairs(Adv.decodeList(arec.v) or {}) do
+            local v = views[e.id]
+            local recent = v and not (v.closed and v.closedAt and t - v.closedAt >= Adv.KEEP_CLOSED)
+            if validId(e.id) and ACT[e.ac] and (recent or t - (e.at or 0) < Adv.KEEP_CLOSED) then
+                entries[#entries + 1] = { e = e, ended = not v or v.closed, at = e.at or 0 }
+            end
+        end
+        table.sort(entries, function(x, y)
+            if x.ended ~= y.ended then return not x.ended end
+            if x.at ~= y.at then return x.at > y.at end
+            return x.e.id < y.e.id
+        end)
+        local value, n = {}, 0
+        for _, it in ipairs(entries) do
+            if n >= Adv.UPLOAD_ACTIONS then break end
+            local e = it.e
+            value[e.id] = { a = ACT[e.ac], at = e.at, firstAt = e.ap or e.at, role = ROLE[e.ro] }
+            n = n + 1
+        end
+        if n > 0 then out.actions = { recordedAt = arec.t, value = value } end
+    end
+    if not out.tickets and not out.worker and not out.actions then return nil end
+    return out
+end
+
+-- { aT, aW, aA = { t, h } }: member.share change detection.
+function Adv.uploadState(a)
+    local out = {}
+    for _, g in ipairs({ "T", "W", "A" }) do
+        local r = a and led:get(a, g)
+        if r then out["a" .. g] = { t = r.t, h = r.h } end
+    end
+    return out
 end
 
 ---------------------------------------------------------------------------
