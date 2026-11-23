@@ -141,6 +141,27 @@ function Adv.decodeDecisions(s)
     return out
 end
 
+-- Quest levels on a ticket (in-game only, not uploaded): "216:24;217:s" (s = scaling).
+Adv.QUEST_SLACK = 3
+function Adv.encodeQuestLevels(qs, log)
+    if not log then return nil end
+    local out = {}
+    for _, q in ipairs(qs or {}) do
+        local info = log[tonumber(q) or q]
+        if info then
+            if info.scaling then out[#out + 1] = tostring(q) .. ":s"
+            elseif info.level and info.level > 0 then out[#out + 1] = tostring(q) .. ":" .. info.level end
+        end
+    end
+    return #out > 0 and table.concat(out, ";") or nil
+end
+function Adv.decodeQuestLevels(s)
+    if not s or s == "" then return nil end
+    local out = {}
+    for id, lv in tostring(s):gmatch("(%d+):([%ds]+)") do out[tonumber(id)] = lv == "s" and "s" or tonumber(lv) end
+    return out
+end
+
 -- R-10.2: one short line: no control characters or line breaks, at most 40 characters.
 function Adv.cleanNote(s)
     -- Explicit byte tests (as Share.lua): control bytes 0-31 and 127 become spaces.
@@ -233,7 +254,7 @@ end
 function Adv.view(t, leader, actions, opts)
     opts = opts or {}
     local v = { id = t.id, leader = leader, src = t.src or "g", created = t.cr or 0, dungeon = t.ds ~= "" and t.ds or nil,
-        quests = splitDots(t.qs), timeMode = t.tm or "n", start = t.s, finish = t.e, tags = t.tg or 0,
+        quests = splitDots(t.qs), questLevels = Adv.decodeQuestLevels(t.ql), timeMode = t.tm or "n", start = t.s, finish = t.e, tags = t.tg or 0,
         note = t.nt, mode = t.md or "a", state = "open", members = {}, waitlist = {}, pending = {}, invited = {},
         kicked = {}, level = t.lv, leaderRole = t.lr }
     local cap = Adv.capacity(t)
@@ -449,8 +470,22 @@ function Adv.matches(v, w, level, questLog)
         local need = function(r) return r and (v.seats[r] or 0) > 0 end
         if not (need(w.main) or need(w.alt)) then return false, "role" end
     end
-    -- Level (dungeons; quests carry no level here).
+    -- Level (R-6.1 point 3): dungeons by their range; quest tickets by the shared
+    -- quests' levels (the leader's log). Scaling quests follow the character: never excluded.
     if v.dungeon and level and not ns.AdventureData.fits(v.dungeon, level) then return false, "level" end
+    if not v.dungeon and level and v.questLevels then
+        local anyFits, anyChecked = false, false
+        for _, q in ipairs(v.quests) do
+            local id = tonumber(q) or q
+            local shared = w.quests[id] or (w.allQuests and questLog and questLog[id])
+            if shared then
+                local ql = v.questLevels[id]
+                if ql == nil or ql == "s" or level >= ql - Adv.QUEST_SLACK then anyFits = true end
+                anyChecked = true
+            end
+        end
+        if anyChecked and not anyFits then return false, "level" end
+    end
     if not Adv.timeOverlap(v, w.slots) then return false, "time" end
     return true
 end
@@ -512,6 +547,7 @@ function Adv.open(o)
     for i, q in ipairs(o.quests or {}) do if i <= Adv.MAX_QUESTS then qs[#qs + 1] = tostring(q) end end
     local e = {
         id = Adv.newId(), src = "g", ver = Adv.VERSION, cr = t, ds = o.dungeon or "", qs = table.concat(qs, "."),
+        ql = Adv.encodeQuestLevels(qs, Adv.questLog()),
         tm = tm, s = tm ~= "n" and o.start or nil, e = tm ~= "n" and o.finish or nil,
         rt = o.roles and o.roles.t, rh = o.roles and o.roles.h, rd = o.roles and o.roles.d,
         sz = (not o.dungeon) and (o.size or 5) or nil, tg = o.tags or 0, nt = Adv.cleanNote(o.note),
@@ -799,8 +835,12 @@ function Adv.questLog()
         local n = ns.num((ns.call(C_QuestLog.GetNumQuestLogEntries))) or 0
         for i = 1, n do
             local info = ns.call(C_QuestLog.GetInfo, i)
-            if type(info) == "table" and not info.isHeader and ns.num(info.questID) then
-                set[info.questID] = { title = info.title, level = info.level }
+            -- 16001 (owner, 2026-11-23): isHeader skips the zone rows; questID 0 is the fallback.
+            -- level, else difficultyLevel; isScaling quests follow the character's level.
+            local qid = type(info) == "table" and ns.num(info.questID) or nil
+            if qid and qid > 0 and info.isHeader ~= true then
+                set[qid] = { title = info.title, level = ns.num(info.level) or ns.num(info.difficultyLevel),
+                    scaling = info.isScaling == true }
                 found = true
             end
         end
@@ -808,7 +848,7 @@ function Adv.questLog()
         local n = ns.num((ns.call(GetNumQuestLogEntries))) or 0
         for i = 1, n do
             local title, level, _, isHeader, _, _, _, questID = ns.call(GetQuestLogTitle, i)
-            if not isHeader and ns.num(questID) then set[questID] = { title = title, level = level }; found = true end
+            if not isHeader and ns.num(questID) and questID > 0 then set[questID] = { title = title, level = level }; found = true end
         end
     else
         return nil

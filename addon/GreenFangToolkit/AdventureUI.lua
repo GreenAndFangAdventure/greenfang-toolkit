@@ -249,8 +249,8 @@ function UI.leaderMenu(v)
     return items
 end
 
-local function iconButton(parent, size, key, tip, onClick)
-    local b = ns.OrdersUI.iconButton(parent, size, UI.ICON[key] or key, tip, onClick)
+local function iconButton(parent, size, key, tip, onClick, label)
+    local b = ns.OrdersUI.iconButton(parent, size, UI.ICON[key] or key, tip, onClick, label)
     return b
 end
 
@@ -277,14 +277,14 @@ local function newRow(i)
     end
     row.tags = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     row.tags:SetPoint("LEFT", row, "LEFT", 572, 0); row.tags:SetWidth(90); row.tags:SetJustifyH("LEFT")
-    row.cls = row:CreateTexture(nil, "ARTWORK"); row.cls:SetSize(16, 16); row.cls:SetPoint("LEFT", row, "LEFT", 666, 0)
+    row.cls = row:CreateTexture(nil, "ARTWORK"); row.cls:SetSize(16, 16); row.cls:SetPoint("LEFT", row, "LEFT", 640, 0)
     row.off = row:CreateTexture(nil, "OVERLAY"); row.off:SetSize(10, 10); row.off:SetPoint("BOTTOMRIGHT", row.cls, "BOTTOMRIGHT", 3, -3)
     row.who = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    row.who:SetPoint("LEFT", row, "LEFT", 686, 0); row.who:SetWidth(130); row.who:SetJustifyH("LEFT"); row.who:SetWordWrap(false)
+    row.who:SetPoint("LEFT", row, "LEFT", 660, 0); row.who:SetWidth(96); row.who:SetJustifyH("LEFT"); row.who:SetWordWrap(false)
     row.buttons = {}
     for k = 1, 3 do
         local b = iconButton(row, 22, "yes", nil)
-        b:SetPoint("LEFT", row, "LEFT", 830 + (k - 1) * 28, 0)
+        b:SetPoint("LEFT", row, "LEFT", 760 + (k - 1) * 58, 0) -- GF-002-D: room for the names
         row.buttons[k] = b
     end
     row.head = row:CreateFontString(nil, "ARTWORK", "GameFontNormal"); row.head:SetPoint("LEFT", row, "LEFT", 6, 0)
@@ -348,6 +348,7 @@ local function fillRow(row, data, i)
         for k, b in ipairs(row.buttons) do
             if k == 1 then
                 Icons.set(b.tex, UI.ICON.invite); b.tip = "邀請"; b.action = "invite"
+                ns.OrdersUI.setLabel(b, "邀請")
                 b:SetScript("OnClick", function() A().leader(v.id, "invite", data.worker); UI.refresh() end)
                 b:Show()
             else b:Hide(); b.action = nil end
@@ -383,6 +384,7 @@ local function fillRow(row, data, i)
         if name then
             local spec = UI.BUTTON[name]
             Icons.set(b.tex, UI.ICON[spec.icon]); b.tip = spec.tip; b.action = name
+            ns.OrdersUI.setLabel(b, spec.tip) -- GF-002-D: the name next to the icon
             b:SetScript("OnClick", function(self) UI.press(v, name, self) end)
             b:Show()
         else b:Hide(); b.action = nil end
@@ -431,19 +433,21 @@ function UI.refresh()
     content:SetHeight(math.max(1, #shownRows * ROW_HEIGHT))
     UI.layoutRows()
     summaryLine:SetText(UI.summaryText())
+    UI.emptyLine:SetText(#shownRows == 0 and "沒有冒險單" or "") -- GF-002-D
+    if #A().pendingInvites() > 0 then UI.nextInvite:Show() else UI.nextInvite:Hide() end
 end
 
 local function build(p)
     UI.newButton = ns.createFrame("Button", nil, p, "UIPanelButtonTemplate")
-    UI.newButton:SetSize(110, 24); UI.newButton:SetPoint("TOPLEFT", p, "TOPLEFT", 24, -40)
-    UI.newButton:SetText(tex("adventure", 16) .. " ＋") -- GF-002-C item 6
+    UI.newButton:SetSize(124, 24); UI.newButton:SetPoint("TOPLEFT", p, "TOPLEFT", 24, -40)
+    UI.newButton:SetText(tex("adventure", 16) .. " ＋冒險單") -- GF-002-D: icon + name
     UI.newButton.tooltipText = "冒險單"
     UI.newButton:SetScript("OnEnter", function(self) GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:AddLine("冒險單"); GameTooltip:Show() end)
     UI.newButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
     UI.newButton:SetScript("OnClick", function() UI.openTicket() end)
     UI.workerButton = ns.createFrame("Button", nil, p, "UIPanelButtonTemplate")
-    UI.workerButton:SetSize(110, 24); UI.workerButton:SetPoint("LEFT", UI.newButton, "RIGHT", 10, 0)
-    UI.workerButton:SetText(tex("worker", 16) .. " ＋")
+    UI.workerButton:SetSize(124, 24); UI.workerButton:SetPoint("LEFT", UI.newButton, "RIGHT", 10, 0)
+    UI.workerButton:SetText(tex("worker", 16) .. " ＋職工單")
     UI.workerButton:SetScript("OnEnter", function(self) GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:AddLine("職工單"); GameTooltip:Show() end)
     UI.workerButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
     UI.workerButton:SetScript("OnClick", function() UI.openWorker() end)
@@ -456,8 +460,11 @@ local function build(p)
     content:SetSize(930, 1)
     scroll:SetScrollChild(content)
     scroll:HookScript("OnVerticalScroll", function() UI.layoutRows() end)
-    UI.nextInvite = iconButton(p, 24, "form", "邀請下一位", function() A().inviteNext() end)
-    UI.nextInvite:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -170, 10)
+    UI.nextInvite = iconButton(p, 24, "form", "邀請下一位", function() A().inviteNext(); UI.refresh() end, "邀請下一位")
+    UI.nextInvite:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -250, 10)
+    UI.nextInvite:Hide() -- only while names wait for a click (R-7.2 fallback)
+    UI.emptyLine = p:CreateFontString(nil, "ARTWORK", "GameFontDisable")
+    UI.emptyLine:SetPoint("TOP", p, "TOP", 0, -180)
     ns.Diag.smallButton(p, "BOTTOMRIGHT", -24, 10)
     panel = p
 end
@@ -496,73 +503,121 @@ function UI.submitTicket(d)
 end
 
 -- Times every 15 minutes from now (R-4.2).
-function UI.quarterTimes(from, count)
+-- GF-002-D: aligned to :00 :15 :30 :45 of the clock the player sees (the
+-- local clock may be off the server by a minute; 0.12.1 showed 01:14).
+function UI.skew() return (ns.num((ns.call(GetServerTime))) or ns.now()) - ns.now() end
+function UI.quarterTimes(from, count, step)
+    step = step or 900
+    local skew = UI.skew()
     local out = {}
-    local t = math.ceil(from / 900) * 900
-    for i = 0, count - 1 do out[#out + 1] = t + i * 900 end
+    local t = math.ceil((from - skew) / step) * step + skew
+    for i = 0, count - 1 do out[#out + 1] = t + i * step end
     return out
 end
+UI.DURATIONS = { 1, 2, 3 }
+
+UI.TAG_NAME = { quest = "解任務", farm = "連刷", slow = "慢慢打", fast = "速刷", voice = "語音" }
+UI.TIME_NAME = { n = "現在", t = "今天", f = "之後" }
 
 local function drawTicket()
     if not (popup and draft) then return end
     popup.dest:SetText(draft.dungeon and (ns.GameIcons.markup(ns.GameIcons.dungeonKey(draft.dungeon), 18) .. " " .. ns.AdventureData.short(draft.dungeon))
-        or (#draft.quests > 0 and (tex("quest") .. " x" .. #draft.quests)) or tex("dungeon"))
-    for _, m in ipairs({ "n", "t", "f" }) do popup.timeButtons[m]:SetAlpha(draft.timeMode == m and 1 or 0.4) end
-    popup.timeText:SetText(draft.timeMode == "n" and "" or UI.timeText({ timeMode = draft.timeMode, start = draft.start, finish = draft.finish }))
+        or (#draft.quests > 0 and (tex("quest") .. " 任務 " .. #draft.quests)) or "選擇目的地")
+    for _, m in ipairs({ "n", "t", "f" }) do
+        popup.timeButtons[m]:SetAlpha(draft.timeMode == m and 1 or 0.4)
+        if popup.timeButtons[m].label then popup.timeButtons[m].label:SetAlpha(draft.timeMode == m and 1 or 0.5) end
+    end
+    popup.timeText:SetText(draft.timeMode == "n" and "" or ("～" .. UI.clock(draft.finish)))
+    local timed = draft.timeMode ~= "n"
+    for _, w in ipairs({ popup.startField, popup.startButton, popup.durField, popup.durButton }) do if timed then w:Show() else w:Hide() end end
+    for _, w in ipairs({ popup.dayField, popup.dayButton }) do if draft.timeMode == "f" then w:Show() else w:Hide() end end
+    if timed then
+        popup.startButton:SetText(UI.clock(draft.start))
+        popup.durButton:SetText((draft.dur or 2) .. " 小時")
+        popup.dayButton:SetText(draft.start and UI.day(draft.start) or "")
+    end
     local parts = {}
     if draft.dungeon then
         for _, r in ipairs(A().ROLES) do parts[#parts + 1] = tex(r) .. draft.roles[r] end
     else parts[#parts + 1] = tex("any") .. draft.size end
     popup.roleText:SetText(table.concat(parts, " "))
-    popup.modeButton.tex:SetTexture(UI.ICON[draft.mode == "c" and "consent" or "direct"])
-    popup.modeButton.tip = draft.mode == "c" and "團長同意" or "直接錄取"
-    for k, b in pairs(popup.tagButtons) do b:SetAlpha(math.floor(draft.tags / A().TAGS[k]) % 2 == 1 and 1 or 0.35) end
+    popup.direct:SetAlpha(draft.mode == "c" and 0.4 or 1); popup.direct.label:SetAlpha(draft.mode == "c" and 0.5 or 1)
+    popup.consent:SetAlpha(draft.mode == "c" and 1 or 0.4); popup.consent.label:SetAlpha(draft.mode == "c" and 1 or 0.5)
+    for k, b in pairs(popup.tagButtons) do
+        local on = math.floor(draft.tags / A().TAGS[k]) % 2 == 1
+        b:SetAlpha(on and 1 or 0.35); b.label:SetAlpha(on and 1 or 0.5)
+    end
 end
 UI.drawTicket = drawTicket
 
+-- GF-002-D layout: a field name in front of every row; every choice has its name.
+UI.TICKET_FIELDS = { "目的地", "時間", "開始", "時長", "日期", "人數", "錄取", "標籤", "備註" }
 function UI.openTicket()
     draft = UI.newDraft()
     if not popup then
-        local f = ns.popupWindow(UI.TICKET_NAME, 420, 270)
+        local f = ns.popupWindow(UI.TICKET_NAME, 540, 370)
         f:SetPoint("CENTER", 0, 60)
         f:EnableMouse(true)
+        ns.exclusivePopup(f)
         if UISpecialFrames then table.insert(UISpecialFrames, UI.TICKET_NAME) end
+        local X = 84
+        local field = ns.OrdersUI.fieldLabel
+        field(f, "目的地", 18, -40)
         f.dest = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.dest:SetSize(220, 24)
-        f.dest:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -32)
+        f.dest:SetPoint("TOPLEFT", f, "TOPLEFT", X, -34)
         f.dest:SetScript("OnClick", function(self) UI.pickDestination(self) end)
+        field(f, "時間", 18, -78)
         f.timeButtons = {}
         for i, m in ipairs({ "n", "t", "f" }) do
-            local b = iconButton(f, 26, "now", m == "n" and "現在" or m == "t" and "今天" or "之後", function(self) UI.pickTime(self, m) end)
+            local b = iconButton(f, 24, "now", UI.TIME_NAME[m], function(self) UI.pickTime(self, m) end, UI.TIME_NAME[m])
             ns.GameIcons.set(b.tex, m == "n" and "now" or m == "t" and "today" or "future")
-            b:SetPoint("TOPLEFT", f, "TOPLEFT", 18 + (i - 1) * 34, -68)
+            b:SetPoint("TOPLEFT", f, "TOPLEFT", X + (i - 1) * 72, -72)
             f.timeButtons[m] = b
         end
-        f.timeText = f:CreateFontString(nil, "ARTWORK", "GameFontHighlight"); f.timeText:SetPoint("TOPLEFT", f, "TOPLEFT", 130, -74)
-        f.roleText = f:CreateFontString(nil, "ARTWORK", "GameFontHighlight"); f.roleText:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -112)
-        f.roleButton = iconButton(f, 22, "any", "人數", function(self) UI.pickRoles(self) end)
-        f.roleButton:SetPoint("TOPLEFT", f, "TOPLEFT", 240, -106)
-        f.modeButton = iconButton(f, 26, "direct", "直接錄取", function()
-            draft.mode = draft.mode == "c" and "a" or "c"; drawTicket()
-        end)
-        f.modeButton:SetPoint("TOPLEFT", f, "TOPLEFT", 280, -104)
+        f.timeText = f:CreateFontString(nil, "ARTWORK", "GameFontHighlight"); f.timeText:SetPoint("TOPLEFT", f, "TOPLEFT", X + 222, -78)
+        -- 開始 / 時長 / 日期 (only for 今天 and 之後).
+        f.startField = field(f, "開始", 18, -116)
+        f.startButton = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.startButton:SetSize(80, 22)
+        f.startButton:SetPoint("TOPLEFT", f, "TOPLEFT", X, -110)
+        f.startButton:SetScript("OnClick", function(self) UI.pickStart(self) end)
+        f.durField = field(f, "時長", X + 96, -116)
+        f.durButton = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.durButton:SetSize(80, 22)
+        f.durButton:SetPoint("TOPLEFT", f, "TOPLEFT", X + 136, -110)
+        f.durButton:SetScript("OnClick", function(self) UI.pickDuration(self) end)
+        f.dayField = field(f, "日期", X + 232, -116)
+        f.dayButton = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.dayButton:SetSize(80, 22)
+        f.dayButton:SetPoint("TOPLEFT", f, "TOPLEFT", X + 272, -110)
+        f.dayButton:SetScript("OnClick", function(self) UI.pickDay(self) end)
+        field(f, "人數", 18, -154)
+        f.roleText = f:CreateFontString(nil, "ARTWORK", "GameFontHighlight"); f.roleText:SetPoint("TOPLEFT", f, "TOPLEFT", X, -154)
+        f.roleButton = iconButton(f, 22, "any", "人數", function(self) UI.pickRoles(self) end, "調整")
+        f.roleButton:SetPoint("TOPLEFT", f, "TOPLEFT", X + 222, -148)
+        field(f, "錄取", 18, -192)
+        f.direct = iconButton(f, 24, "direct", "直接錄取", function() draft.mode = "a"; drawTicket() end, "直接錄取")
+        f.direct:SetPoint("TOPLEFT", f, "TOPLEFT", X, -186)
+        f.consent = iconButton(f, 24, "consent", "團長同意", function() draft.mode = "c"; drawTicket() end, "團長同意")
+        f.consent:SetPoint("TOPLEFT", f, "TOPLEFT", X + 110, -186)
+        f.modeButton = f.direct
+        field(f, "標籤", 18, -230)
         f.tagButtons = {}
         for i, k in ipairs(UI.TAG_KEYS) do
-            local b = iconButton(f, 24, "tag_" .. k, nil, function()
+            local b = iconButton(f, 22, "tag_" .. k, UI.TAG_NAME[k], function()
                 local bit = A().TAGS[k]
                 if math.floor(draft.tags / bit) % 2 == 1 then draft.tags = draft.tags - bit else draft.tags = draft.tags + bit end
                 drawTicket()
-            end)
-            b:SetPoint("TOPLEFT", f, "TOPLEFT", 18 + (i - 1) * 30, -146)
+            end, UI.TAG_NAME[k])
+            b:SetPoint("TOPLEFT", f, "TOPLEFT", X + (i - 1) * 88, -224)
             f.tagButtons[k] = b
         end
-        f.note = ns.createFrame("EditBox", nil, f, "InputBoxTemplate"); f.note:SetSize(360, 22)
-        f.note:SetPoint("TOPLEFT", f, "TOPLEFT", 22, -184)
+        field(f, "備註", 18, -268)
+        f.note = ns.createFrame("EditBox", nil, f, "InputBoxTemplate"); f.note:SetSize(420, 22)
+        f.note:SetPoint("TOPLEFT", f, "TOPLEFT", X + 4, -262)
         f.note:SetAutoFocus(false)
         if f.note.SetMaxLetters then f.note:SetMaxLetters(A().NOTE_MAX) end
         f.note:SetScript("OnTextChanged", function(self) if draft then draft.note = A().cleanNote(self:GetText()) end end)
         f.note:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
         f.result = f:CreateFontString(nil, "ARTWORK", "GameFontHighlight"); f.result:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 18, 18)
-        f.go = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.go:SetSize(90, 24)
+        f.go = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.go:SetSize(96, 24)
         f.go:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -18, 14); f.go:SetText(tex("yes", 16) .. " 開單")
         f.go:SetScript("OnClick", function() UI.submitTicket() end)
         f:Hide()
@@ -586,22 +641,29 @@ function UI.dungeonGrid(owner, onClick, isOn, onQuest)
     if ns.Framework.closeMenu then ns.Framework.closeMenu() end
     if not grid then
         grid = CreateFrame("Frame", UI.GRID_NAME, UIParent)
-        grid:SetFrameStrata("FULLSCREEN_DIALOG")
+        grid:SetFrameStrata("TOOLTIP") -- GF-002-D: above the windows
         ns.makeOpaque(grid, 0)
         grid:EnableMouse(true)
         grid.buttons = {}
         if UISpecialFrames then table.insert(UISpecialFrames, UI.GRID_NAME) end
         for i, d in ipairs(ns.AdventureData.DUNGEONS) do
             local b = iconButton(grid, 30, "dungeon", d.name)
-            b:SetPoint("TOPLEFT", grid, "TOPLEFT", 6 + ((i - 1) % 9) * 34, -6 - math.floor((i - 1) / 9) * 34)
+            b:SetPoint("TOPLEFT", grid, "TOPLEFT", 10 + ((i - 1) % 9) * 50, -6 - math.floor((i - 1) / 9) * 50)
+            -- GF-002-D: the short name under the icon.
+            b.label = grid:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+            b.label:SetPoint("TOP", b, "BOTTOM", 0, -1)
+            b.label:SetWidth(ns.labelWidth(d.short or d.name)); b.label:SetText(d.short or d.name)
             b.dungeon = d.id
             grid.buttons[i] = b
         end
         local n = #ns.AdventureData.DUNGEONS
         grid.quest = iconButton(grid, 30, "quest", "任務")
+        grid.quest.label = grid:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        grid.quest.label:SetPoint("TOP", grid.quest, "BOTTOM", 0, -1)
+        grid.quest.label:SetWidth(ns.labelWidth("任務")); grid.quest.label:SetText("任務")
         ns.GameIcons.set(grid.quest.tex, "quest")
-        grid.quest:SetPoint("TOPLEFT", grid, "TOPLEFT", 6 + (n % 9) * 34, -6 - math.floor(n / 9) * 34)
-        grid:SetSize(6 + 9 * 34, 12 + math.ceil((n + 1) / 9) * 34)
+        grid.quest:SetPoint("TOPLEFT", grid, "TOPLEFT", 10 + (n % 9) * 50, -6 - math.floor(n / 9) * 50)
+        grid:SetSize(20 + 9 * 50, 12 + math.ceil((n + 1) / 9) * 50)
     end
     if onQuest then
         grid.quest:SetScript("OnClick", function(self) grid:Hide(); onQuest(self) end)
@@ -630,6 +692,7 @@ function UI.dungeonGrid(owner, onClick, isOn, onQuest)
     return grid
 end
 function UI.grid() return grid end
+ns.onExclusiveShow = function() if grid then grid:Hide() end end
 
 -- Every menu on this page goes through here: the dungeon grid closes first.
 function UI.menu(owner, items)
@@ -663,27 +726,74 @@ function UI.pickQuests(owner)
     return UI.menu(owner, items)
 end
 
+-- GF-002-D: 現在 / 今天 / 之後 only choose the mode; 開始, 時長 (and 日期 for
+-- 之後) are their own rows, each with a small menu that starts with its name.
+function UI.setFinish() if draft.start then draft.finish = draft.start + (draft.dur or 2) * 3600 end end
+
 function UI.pickTime(owner, mode)
     draft.timeMode = mode
-    if mode == "n" then draft.start, draft.finish = nil, nil; drawTicket(); return end
-    local base = S().serverNow()
+    draft.dur = draft.dur or 2
+    if mode == "n" then draft.start, draft.finish = nil, nil
+    elseif mode == "t" then
+        draft.start = UI.quarterTimes(S().serverNow(), 1)[1]
+    else
+        draft.dayOff = draft.dayOff or 1
+        draft.start = UI.dayStart(draft.dayOff) + 20 * 3600 -- 20:00 that day
+    end
+    UI.setFinish()
+    drawTicket()
+end
+
+-- Server time of 00:00 (the player's clock) dayOff days from today.
+function UI.dayStart(dayOff)
+    local skew = UI.skew()
+    local localNow = S().serverNow() - skew
+    local d = date("*t", localNow)
+    local midnight = localNow - (d.hour * 3600 + d.min * 60 + d.sec)
+    return midnight + dayOff * 86400 + skew
+end
+
+local function titled(title, items)
+    table.insert(items, 1, { text = "|cffffd100" .. title .. "|r", fn = function() end })
+    return items
+end
+UI.titled = titled
+
+function UI.pickStart(owner)
     local items = {}
-    if mode == "f" then
-        for dayOff = 1, A().FUTURE_DAYS do
-            local t0 = base + dayOff * 86400
-            items[#items + 1] = { text = UI.day(t0), fn = function()
-                draft.start = math.ceil(t0 / 900) * 900; draft.finish = draft.start + 7200; drawTicket()
-            end }
+    if draft.timeMode == "f" then
+        local base = UI.dayStart(draft.dayOff or 1)
+        for h = 8, 23 do
+            local t = base + h * 3600
+            items[#items + 1] = { text = UI.clock(t), fn = function() draft.start = t; UI.setFinish(); drawTicket() end }
         end
     else
-        for _, t in ipairs(UI.quarterTimes(base, 16)) do
-            items[#items + 1] = { text = UI.clock(t) .. "～" .. UI.clock(t + 7200), fn = function()
-                draft.start, draft.finish = t, t + 7200; drawTicket()
-            end }
+        for _, t in ipairs(UI.quarterTimes(S().serverNow(), 16)) do
+            items[#items + 1] = { text = UI.clock(t), fn = function() draft.start = t; UI.setFinish(); drawTicket() end }
         end
     end
-    drawTicket()
-    return UI.menu(owner, items)
+    return UI.menu(owner, titled("開始", items))
+end
+
+function UI.pickDuration(owner)
+    local items = {}
+    for _, h in ipairs(UI.DURATIONS) do
+        items[#items + 1] = { text = h .. " 小時", fn = function() draft.dur = h; UI.setFinish(); drawTicket() end }
+    end
+    return UI.menu(owner, titled("時長", items))
+end
+
+function UI.pickDay(owner)
+    local items = {}
+    for dayOff = 1, A().FUTURE_DAYS do
+        items[#items + 1] = { text = UI.day(UI.dayStart(dayOff) + 43200), fn = function()
+            local tod = draft.start and (draft.start - UI.dayStart(draft.dayOff or 1)) or 20 * 3600
+            draft.dayOff = dayOff
+            draft.start = UI.dayStart(dayOff) + tod
+            UI.setFinish(); drawTicket()
+        end }
+    end
+    return UI.menu(owner, titled("日期", items))
 end
 
 function UI.pickRoles(owner)
@@ -718,54 +828,62 @@ local function drawWorker()
     if not (wpopup and wdraft) then return end
     local marks = {}
     for _, d in ipairs(wdraft.dungeons) do marks[#marks + 1] = ns.GameIcons.markup(ns.GameIcons.dungeonKey(d), 18) end
-    wpopup.dungeons:SetText(#marks > 0 and table.concat(marks, " ") or tex("dungeon"))
+    wpopup.dungeons:SetText(#marks > 0 and table.concat(marks, " ") or "選擇地城")
     for _, r in ipairs(A().ROLES) do
         local m, a = wpopup.mainRoles[r], wpopup.altRoles[r]
-        m:SetAlpha(wdraft.main == r and 1 or 0.35)
-        a:SetAlpha(wdraft.alt == r and 1 or 0.35)
+        m:SetAlpha(wdraft.main == r and 1 or 0.35); m.label:SetAlpha(wdraft.main == r and 1 or 0.5)
+        a:SetAlpha(wdraft.alt == r and 1 or 0.35); a.label:SetAlpha(wdraft.alt == r and 1 or 0.5)
     end
-    wpopup.quests:SetText(tex("quest") .. " " .. (wdraft.allQuests and "*" or ("x" .. #wdraft.quests)))
+    wpopup.quests:SetText(wdraft.allQuests and "全部任務" or (#wdraft.quests > 0 and (tex("quest") .. " 任務 " .. #wdraft.quests) or "選擇任務"))
     local slots = {}
-    for _, sl in ipairs(wdraft.slots) do slots[#slots + 1] = sl.now and tex("now") or (UI.clock(sl.s) .. "～" .. UI.clock(sl.e)) end
+    for _, sl in ipairs(wdraft.slots) do slots[#slots + 1] = sl.now and (tex("now") .. " 現在") or (UI.clock(sl.s) .. "～" .. UI.clock(sl.e)) end
     wpopup.slots:SetText(table.concat(slots, "  "))
 end
 
+UI.WORKER_FIELDS = { "地城", "任務", "職責", "副職責", "時段" }
 function UI.openWorker()
     wdraft = UI.newWorkerDraft()
     if not wpopup then
-        local f = ns.popupWindow(UI.WORKER_NAME, 420, 220)
+        local f = ns.popupWindow(UI.WORKER_NAME, 500, 290)
         f:SetPoint("CENTER", 0, 60)
         f:EnableMouse(true)
+        ns.exclusivePopup(f)
         if UISpecialFrames then table.insert(UISpecialFrames, UI.WORKER_NAME) end
+        local X = 84
+        local field = ns.OrdersUI.fieldLabel
+        field(f, "地城", 18, -40)
         f.dungeons = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.dungeons:SetSize(380, 24)
-        f.dungeons:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -32)
+        f.dungeons:SetPoint("TOPLEFT", f, "TOPLEFT", X, -34)
         f.dungeons:SetScript("OnClick", function(self) UI.pickWorkerDungeons(self) end)
-        f.quests = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.quests:SetSize(120, 24)
-        f.quests:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -64)
+        field(f, "任務", 18, -76)
+        f.quests = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.quests:SetSize(160, 24)
+        f.quests:SetPoint("TOPLEFT", f, "TOPLEFT", X, -70)
         f.quests:SetScript("OnClick", function(self) UI.pickWorkerQuests(self) end)
-        -- Main role: three big role icons; the second role: three small ones (click again to clear).
+        field(f, "職責", 18, -114)
+        field(f, "副職責", 18, -150)
         f.mainRoles, f.altRoles = {}, {}
         for i, r in ipairs(A().ROLES) do
-            local m = iconButton(f, 26, "dungeon", UI.ROLE_NAME[r], function()
+            local m = iconButton(f, 24, "dungeon", UI.ROLE_NAME[r], function()
                 wdraft.main = r; if wdraft.alt == r then wdraft.alt = nil end; drawWorker()
-            end)
+            end, UI.ROLE_NAME[r])
             ns.GameIcons.set(m.tex, UI.GAME[r])
-            m:SetPoint("LEFT", f.quests, "RIGHT", 12 + (i - 1) * 30, 0)
+            m:SetPoint("TOPLEFT", f, "TOPLEFT", X + (i - 1) * 80, -108)
             f.mainRoles[r] = m
-            local a = iconButton(f, 16, "dungeon", UI.ROLE_NAME[r], function()
+            local a = iconButton(f, 20, "dungeon", UI.ROLE_NAME[r], function()
                 wdraft.alt = (wdraft.alt == r or wdraft.main == r) and nil or r; drawWorker()
-            end)
+            end, UI.ROLE_NAME[r])
             ns.GameIcons.set(a.tex, UI.GAME[r])
-            a:SetPoint("LEFT", f.quests, "RIGHT", 112 + (i - 1) * 20, -4)
+            a:SetPoint("TOPLEFT", f, "TOPLEFT", X + (i - 1) * 80, -146)
             f.altRoles[r] = a
         end
         f.roles = f.mainRoles.t
+        field(f, "時段", 18, -188)
         f.slots = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.slots:SetSize(380, 24)
-        f.slots:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -96)
+        f.slots:SetPoint("TOPLEFT", f, "TOPLEFT", X, -182)
         f.slots:SetScript("OnClick", function(self) UI.pickWorkerSlots(self) end)
-        f.remove = iconButton(f, 24, "no", "移除", function() A().removeWorker(); f:Hide(); UI.refresh() end)
+        f.remove = iconButton(f, 22, "no", "移除", function() A().removeWorker(); f:Hide(); UI.refresh() end, "移除職工單")
         f.remove:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 18, 14)
-        f.save = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.save:SetSize(90, 24)
+        f.save = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.save:SetSize(96, 24)
         f.save:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -18, 14); f.save:SetText(tex("yes", 16) .. " 登記")
         f.save:SetScript("OnClick", function() UI.saveWorker() end)
         f:Hide()
@@ -831,7 +949,7 @@ function UI.pickWorkerRoles(owner)
 end
 
 function UI.pickWorkerSlots(owner)
-    local items = { { text = tex("now"), fn = function() wdraft.slots = { { now = true } }; drawWorker() end } }
+    local items = { { text = tex("now") .. " 現在", fn = function() wdraft.slots = { { now = true } }; drawWorker() end } }
     for _, t in ipairs(UI.quarterTimes(S().serverNow(), 12)) do
         items[#items + 1] = { text = "+ " .. UI.clock(t) .. "～" .. UI.clock(t + 7200), fn = function()
             local kept = {}
@@ -841,7 +959,7 @@ function UI.pickWorkerSlots(owner)
             drawWorker()
         end }
     end
-    return UI.menu(owner, items)
+    return UI.menu(owner, UI.titled("時段", items))
 end
 
 ---------------------------------------------------------------------------
