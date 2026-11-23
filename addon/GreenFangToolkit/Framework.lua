@@ -352,6 +352,8 @@ function F.createMinimapButton()
         -- GF-001-D19: the name only; how to move or reset it is common
         -- minimap-button behaviour, and sync status is in 「同步與診斷」.
         GameTooltip:AddLine("綠皮冒險工具箱")
+        -- GF-002-B (R-8.2): adventure and order numbers on two lines.
+        for _, fn in ipairs(F.tooltipLines or {}) do pcall(fn, GameTooltip) end
         GameTooltip:Show()
     end)
     b:SetScript("OnLeave", function() GameTooltip:Hide() end)

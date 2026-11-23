@@ -97,6 +97,22 @@ function Diag.ordersText()
     return table.concat(parts, "｜")
 end
 
+-- GF-002-B: adventure tickets.
+function Diag.adventureText()
+    local Adv = ns.Adventure
+    local led = Adv.ledger
+    local open, closed = 0, 0
+    for _, v in pairs(Adv.all()) do if v.closed then closed = closed + 1 else open = open + 1 end end
+    local workers = 0
+    for _ in pairs(Adv.workers()) do workers = workers + 1 end
+    local st = led.stats
+    local invite = (type(C_PartyInfo) == "table" and type(C_PartyInfo.InviteUnit) == "function") and "C_PartyInfo.InviteUnit"
+        or (type(InviteUnit) == "function" and "InviteUnit") or "沒有（一位一位邀請）"
+    local log = Adv.questLog() and "可讀" or "讀不到（任務單只能手動）"
+    return string.format("冒險單 %d 張進行中、%d 張已結束｜職工單 %d 張｜記錄 %d 筆｜這次登入：送出 %d、收到 %d、佇列 %d｜組隊邀請：%s｜任務日誌：%s",
+        open, closed, workers, led:count(), st.sent, st.received, led:queued(), invite, log)
+end
+
 function Diag.pricesText()
     local P = ns.Prices
     local db = P.db()
@@ -131,6 +147,7 @@ local SECTIONS = {
     { title = "遊戲內分享（公會成員之間自動轉傳）", text = Diag.shareText },
     { title = "訂單（製作與訂單）", text = Diag.ordersText },
     { title = "價格（拍賣場、商人、公會分享）", text = Diag.pricesText },
+    { title = "冒險（冒險單與職工單）", text = function() return Diag.adventureText() end },
     { title = "公會名冊", text = Diag.rosterText },
     { title = "版本", text = Diag.versionText },
 }

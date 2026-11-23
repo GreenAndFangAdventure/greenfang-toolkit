@@ -1,4 +1,4 @@
-# 契約：GF Sync ↔ 網站上傳 API（v1.4a）
+# 契約：GF Sync ↔ 網站上傳 API（v1.5）
 
 - 版本：
   - v1（2026-11-17 claude-pm 依 Q-005 與實作結果定稿）
@@ -13,6 +13,7 @@
 
     依據：GF Sync 的 `docs/UPDATE_MANIFEST.md` §2
   - **v1.3（2026-11-22 claude-addon，GF-001-D24，AddOn 0.9.8／0.10.0；與 GearBot 議定）**：新增選填欄位 `uploader.fullName`（每一種 kind）與 `member.share`／`member.report` 的 `payload.subject.fullName`：角色全名「名字 姓氏」，和網站名冊（Blizzard API）的寫法一樣。用來修正 `character_not_in_roster`（§3 第 2、6 點）。格式其餘不變
+  - **v1.5（2026-11-23 claude-pm，GF-002-B，AddOn 0.12.0）**：`character.self`、`member.share` 的 payload 多一個選填欄位 `adventure`（冒險單、職工單、動作；savedvariables §adventure）。網站規則見 §3 第 11 點。不是新的 kind
   - **v1.4a（2026-11-23 claude-pm，GearBot 與審查的回饋）**：`j` 每位工匠一份；決勝規則；新增 `w.returnedAt`、`j.statusAt`
   - **v1.4（2026-11-23 claude-pm，GF-006-B，AddOn 0.11.0）**：`character.self` 和 `member.share` 的 payload 多一個選填欄位 `crafting`（製作服務與訂單，格式見 savedvariables §crafting）。網站的處理規則見 §3 第 10 點，上線順序見 §5。不是新的 kind，舊的用戶端照舊能用
 - 實作位置：網站 repo `green-and-fang-site`，位於 `functions/api/sync/*`（D-002）。PR 送到 `dev`
@@ -168,6 +169,14 @@ Content-Type: application/json; charset=utf-8
     - **時間**：公會單還沒有 `w.lock` 時，用各工匠 `j.acceptedAt` 最早的那位當作暫定的接單者（和遊戲同樣的規則，R-5.3）。`j.deliveredAt` 用來判斷待驗收的天數（14 天工匠結案、太久沒動）。`cst = "review"` 顯示成待驗收。
     - **網站要自己檢查**：GF Sync 0.1.0 的 `character.self` 是原樣傳的，`crafting` 不會經過 GF Sync 的白名單（0.2.0 起才有）。所以上面的格式檢查網站一定要做，不能只靠 GF Sync。
     - 第一版只顯示和通知，網站不能建立或修改訂單（規格 R-9.1）。
+
+11. **`adventure`**（v1.5，GF-002-B；savedvariables §adventure）：
+    - **歸屬**：`tickets` 屬於團長、`worker` 和 `actions` 屬於職工，作者就是 uploader（`character.self`）或 subject（`member.share`）。不屬於的略過。
+    - **合併**：`tickets`、`worker`、`actions` 各自依 `recordedAt` 整份比新舊。冒險單的錄取、候補、遞補由所有事件重新算出（排序規則見 savedvariables §adventure），和收到的順序無關。
+    - **顯示**：冒險單和職工單分開，**和製作訂單也分開**（標題、圖示不同，規格 R-8.4）；只給公會成員看。職工單也只給公會成員看。
+    - **`note`**：唯一的自由文字。網站一定要自己再檢查長度（40 個字元）、去掉控制字元，並**一律當純文字轉義顯示**；GF Sync 0.1.0 的 `character.self` 不會先過濾。
+    - **Discord**（綠皮 BOT）：開單、錄取、遞補（通知被遞補的人和團長）、開始前 60／15 分鐘、取消時通知；事件要去重。
+    - 第一版只顯示和通知；網站和 Discord 開單、報名之後另寫（id 開頭 `x`、`y` 先保留）。
 
 ## 4. 撤回
 
