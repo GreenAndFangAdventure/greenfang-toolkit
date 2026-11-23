@@ -219,6 +219,7 @@ crafting = {
             close = "deal", closedBy = "customer", closeHow = "trade", closedAt = 1763373590 },
       j = { recordedAt = 1763373000,    -- 工匠那一半（只有工匠本人寫）
             jst = "delivered", gave = 5,
+            acceptedAt = 1763371000, deliveredAt = 1763372500, deliveredHow = "mail",
             close = "deal", closedBy = "crafter", closeHow = "timeout", closedAt = 1763373000 },
     },
   },
@@ -226,19 +227,22 @@ crafting = {
 ```
 
 - **`services.value[<skillLineID>]`**：`active`（布林，接單中）、`fee`（銅幣，專業預設工錢）、`recipes[<配方 ID>]`（銅幣，個別配方工錢）。**沒填的工錢不寫那個鍵**；`0` 代表免費（規格 R-4.4）。網站要把「沒有鍵」和 `0` 分開顯示。
-- **訂單 `id`**：遊戲建立的是 `g` 開頭，網站 `w` 開頭，Discord `d` 開頭，只有 `[0-9a-z.]`，64 字元以內。
+- **訂單 `id`**：遊戲建立的是 `g` 開頭，網站 `w` 開頭，Discord `d` 開頭，只有 `[0-9a-z.]`，64 字元以內。`src` 只有 `"g"`、`"w"`、`"d"`，和 `id` 的開頭一致。
+- **`recordedAt`**：每一半各自帶的是**原作者那份記錄的最後修改時間**。同一位作者的所有訂單放在同一份記錄裡，所以改了其中一張，他其他訂單的 `recordedAt` 也會跟著往後推，但內容不變。網站照「比較新就採用」處理即可，結果不受影響。
 - **`w`（客人）**：
   - `customer`：客人 GUID；`crafter`：指定工匠 GUID，公會單是 `"*"`；`lock`：公會單最後給誰（還沒有人接就不寫）。
   - `recipe`、`item`：配方 ID、成品物品 ID（附魔這類沒有成品時不寫 `item`）；`qty`：成品數量（≥ 1）。
   - `mats`：客人出的材料（物品 ID 字串鍵 → 數量）。沒有就不寫。
   - `fee`：客人實際寫的工錢（銅幣，可以是 0）；`feeQuoted`：下單時工匠的報價，**工匠沒填就不寫**，`0` 是免費；`quote`：下單時材料的自動估價（銅幣，算不出就不寫）。
-  - `cst`：`"open"`、`"deal"`、`"cancel"`、`"returned"`（退回製作中）；`got`：已收到的數量。
-  - `note`：第二版才有。`ext`：網站單才有（網站參考號、網站帳號 ID，不放名字）。
-- **`j`（工匠）**：`jst`：`"accept"`、`"decline"`、`"drop"`（退單）、`"delivered"`；`gave`：已交付的數量。
+  - `cst`：`"open"`、`"review"`（交付判斷不確定，客人那邊是待驗收，規格 R-7.1）、`"deal"`、`"cancel"`、`"returned"`（退回製作中）；`got`：已收到的數量。
+  - `lockedAt`：公會單寫定給誰的伺服器時間（還沒寫定就不寫）。
+  - `note`：第二版才有，目前不寫。`ext`（網站參考號）只存在網站上，**AddOn 不寫也不上傳**。
+- **`j`（工匠）**：`jst`：`"accept"`、`"decline"`、`"drop"`（退單）、`"delivered"`；`gave`：已交付的數量；`acceptedAt`：接單的伺服器時間（公會單「最早接的人拿到」要用，規格 R-5.3）；`deliveredAt`：最後一次交付的伺服器時間（14 天工匠結案、太久沒動的提醒要用，R-6.5、R-6.9）；`deliveredHow`：`"trade"`、`"mail"`、`"manual"`（工匠按 📨）。
 - **結案欄位**（寫在結案的那一方）：`close`：`"deal"`／`"cancel"`；`closedBy`：`"customer"`／`"crafter"`／`"web"`；`closeHow`：`"trade"`／`"mail"`／`"manual"`／`"timeout"`（待驗收 14 天後工匠結案，規格 R-6.5）；`closedAt`：伺服器時間。
 - **誰可以寫哪一半**：`w` 只能由 `w.customer` 本人寫，`j` 只能由這張單的工匠（`crafter`，公會單是 `lock` 或接單的人）本人寫。`character.self` 的 `w`／`j` 必須屬於 `uploader`；`member.share` 的必須屬於 `subject`。不屬於的那一半，網站略過（只略過那一半，不讓整筆失敗）。
 - **不放的東西**：角色名字、帳號、信箱、備註以外的文字、價格資料（`prices` 一律不上傳，規格 R-9.2）。
-- **上限**：每位作者最多 100 張單；`services.value` 最多 12 個專業，每個專業最多 500 個配方報價。超過時先丟最舊結案的單。
+- **上限**：每位作者最多 100 張單；`services.value` 最多 12 個專業，每個專業最多 500 個配方報價。超過時：訂單先丟 `closedAt` 最舊的結案單，還超過再丟 `created` 最舊的進行中單；專業和配方報價保留 ID 最小的（每次結果一樣）。
+- **不合格的資料**：只丟掉不合格的那一項。訂單的 `w` 或 `j` 只有一半不合格時，**只丟那一半**，另一半照留；一張單兩半都不合格才整張丟掉。
 - **什麼時候寫**：和所在的 kind 一樣，只在登出時寫。`crafting` 內容沒變時不因為它重寫 `member.share`（沿用 §member.share「什麼時候重寫」）。
 - `character.self` 原本的欄位不受影響。網站不認得 `crafting` 時忽略即可。
 
