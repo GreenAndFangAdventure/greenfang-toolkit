@@ -20,15 +20,20 @@ local ROLE_BOX = { t = { 0, 19, 22, 41 }, h = { 20, 39, 1, 20 }, d = { 20, 39, 2
 
 -- Each entry: a list of candidates { file, box = { l, r, t, b } in 64ths } tried in order.
 G.ART = {
-    role_t = { { ROLES_FILE, box = ROLE_BOX.t }, { "Interface\\Icons\\Ability_Defend" } },
-    role_h = { { ROLES_FILE, box = ROLE_BOX.h }, { "Interface\\Icons\\Spell_Holy_Heal" } },
-    role_d = { { ROLES_FILE, box = ROLE_BOX.d }, { "Interface\\Icons\\INV_Sword_04" } },
+    -- GF-002-F: whole spell icons first (the role sheet came out dark and cut in
+    -- half on 16001: its layout differs), the role sheet as a fallback.
+    role_t = { { "Interface\\Icons\\Ability_Warrior_DefensiveStance" }, { "Interface\\Icons\\Ability_Defend" },
+        { ROLES_FILE, box = ROLE_BOX.t } },
+    role_h = { { "Interface\\Icons\\Spell_Holy_FlashHeal" }, { "Interface\\Icons\\Spell_Holy_Heal" },
+        { ROLES_FILE, box = ROLE_BOX.h } },
+    role_d = { { "Interface\\Icons\\Ability_DualWield" }, { "Interface\\Icons\\INV_Sword_04" },
+        { ROLES_FILE, box = ROLE_BOX.d } },
     person = { { "Interface\\Icons\\INV_Misc_Head_Human_01" }, { "Interface\\Icons\\INV_Misc_Bag_10" } },
     quest = { { "Interface\\Icons\\INV_Misc_Note_01" } },
     now = { { "Interface\\Icons\\Spell_Nature_TimeStop" } },
     today = { { "Interface\\Icons\\INV_Misc_PocketWatch_01" }, { "Interface\\Icons\\Spell_Nature_TimeStop" } },
-    future = { { "Interface\\Calendar\\UI-Calendar-Button", box = { 0, 50, 0, 50 } }, { "Interface\\Icons\\INV_Misc_Book_09" },
-        { "Interface\\Icons\\INV_Misc_Note_01" } },
+    -- GF-002-F: the calendar button art came out as a stretched pill; a book (an agenda).
+    future = { { "Interface\\Icons\\INV_Misc_Book_09" }, { "Interface\\Icons\\INV_Misc_Note_01" } },
     key = { { "Interface\\Icons\\INV_Misc_Key_03" } },
     prev = { { "Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Up" } },
     next = { { "Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up" } },

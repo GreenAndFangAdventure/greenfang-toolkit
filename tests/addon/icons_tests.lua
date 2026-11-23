@@ -28,19 +28,25 @@ return function(T)
         return e
     end
 
-    test("GF-002-C role art: the group finder sheet with its box; ability icons when the client lacks it", function()
+    -- GF-002-F: the role sheet came out dark and cut in half on 16001; whole
+    -- spell icons first, the sheet (with its box) is the last fallback.
+    test("GF-002-C role art: whole spell icons first; the group finder sheet with its box as the last fallback", function()
+        local STANCE = "Interface\\Icons\\Ability_Warrior_DefensiveStance"
         local ns = login()
         local G = ns.GameIcons
         local t = tex()
-        ok(G.set(t, "role_t"), "set"); eq(t._texture, ROLES, "role sheet")
-        eq(t._texCoord[1], 0, "tank box left"); eq(t._texCoord[2], 19 / 64, "tank box right")
-        ok(G.markup("role_h", 14):find("UI-LFG-ICON-ROLES:14:14:0:0:64:64:20:39:1:20", 1, true), "markup carries the healer box")
-        ns = login({ missingFiles = { [ROLES] = true } })
+        ok(G.set(t, "role_t"), "set"); eq(t._texture, STANCE, "defensive stance")
+        eq(t._texCoord[2], 1, "full icon (no box)")
+        ok(G.markup("role_h", 14):find("Spell_Holy_FlashHeal", 1, true), "markup: the healer icon")
+        ns = login({ missingFiles = { [STANCE] = true } })
         G = ns.GameIcons
         t = tex()
         ok(G.set(t, "role_t"), "fallback set"); eq(t._texture, DEFEND, "Ability_Defend instead")
-        eq(t._texCoord[2], 1, "full icon (no box)")
-        ok(G.markup("role_t"):find("Ability_Defend", 1, true), "markup falls back too")
+        ns = login({ missingFiles = { [STANCE] = true, [DEFEND] = true } })
+        G = ns.GameIcons
+        t = tex()
+        ok(G.set(t, "role_t"), "last fallback"); eq(t._texture, ROLES, "role sheet")
+        eq(t._texCoord[1], 0, "tank box left"); eq(t._texCoord[2], 19 / 64, "tank box right")
     end)
 
     test("GF-002-C dungeon art: each dungeon its own LFGIcon; the key when missing; never a broken texture", function()
@@ -95,7 +101,7 @@ return function(T)
         ok(row, "row")
         local shown, grey = 0, 0
         for _, s in ipairs(row.slots) do
-            if s._shown then shown = shown + 1; if s._alpha and s._alpha < 1 then grey = grey + 1 end; eq(s._texture, ROLES, "role art") end
+            if s._shown then shown = shown + 1; if s._alpha and s._alpha < 1 then grey = grey + 1 end; ok(tostring(s._texture):find("Interface\\Icons\\", 1, true), "role art") end
         end
         eq(shown, 4, "4 seat icons"); eq(grey, 4, "all open (grey)")
         ok(not row.roles:GetText():find("/", 1, true), "no 2/3 text")
@@ -109,7 +115,7 @@ return function(T)
         local U = ns.AdventureUI
         ok(U.timeText({ timeMode = "n" }):find("TimeStop", 1, true), "now")
         ok(U.timeText({ timeMode = "t", start = 1763000000, finish = 1763003600 }):find("PocketWatch", 1, true), "today")
-        ok(U.timeText({ timeMode = "f", start = 1763000000, finish = 1763003600 }):find("UI-Calendar-Button", 1, true), "future")
+        ok(U.timeText({ timeMode = "f", start = 1763000000, finish = 1763003600 }):find("INV_Misc_Book_09", 1, true), "future (GF-002-F: a book, not the calendar art)")
     end)
 
     test("GF-002-C item 8: dungeon colours by level (white fits, grey too low, red too high)", function()
@@ -135,6 +141,7 @@ return function(T)
         ok(sfk.badge._shown, "ticked")
         wow.click(sfk)
         eq(#d.dungeons, 0, "click again: removed")
+        grid:Hide() -- GF-002-F: the worker window comes back when the picker closes
         local f = _G[U.WORKER_NAME]
         wow.click(f.mainRoles.t)
         eq(d.main, "t", "main role by its icon")

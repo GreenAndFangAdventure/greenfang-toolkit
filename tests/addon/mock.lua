@@ -33,6 +33,9 @@ end
 -- at GameFontNormal): Small 6/13, normal 7/15, Large 8/18 (ASCII/Chinese).
 local function fontPx(font)
     if not font then return 6, 11 end
+    -- GF-002-F: the toolkit's own font objects (CreateFont + SetFont) carry their size.
+    local obj = type(font) == "string" and rawget(_G, font) or font
+    if type(obj) == "table" and obj._fontSize then return math.floor(obj._fontSize / 2), obj._fontSize end
     font = tostring(font)
     if font:find("Small") then return 6, 13 end
     if font:find("Large") or font:find("Huge") then return 8, 18 end
@@ -123,10 +126,11 @@ local function newObject(kind, name)
         return fs
     end
     function methods.SetFontObject(self, font) self._font = font end
+    function methods.SetDesaturated(self, on) self._desaturated = on and true or false end
     function methods.SetWordWrap(self, on) self._wordWrap = on and true or false end
     function methods.CreateTexture(self, _, layer)
         local t = newObject("Texture")
-        t._layer = layer
+        t._layer, t._parent = layer, self
         self._textures = self._textures or {}
         self._textures[#self._textures + 1] = t
         return t
@@ -407,6 +411,21 @@ function wow.installGlobals()
     end
     GameTooltip.Hide = function(self) self._owner = nil; self._shown = false; self._lines = {} end
     UISpecialFrames = {}
+    -- Fonts (GF-002-F): the game's font objects, and CreateFont for the toolkit's own.
+    for _, n in ipairs({ "GameFontHighlight", "GameFontNormal", "GameFontDisable" }) do
+        local fo = newObject("Font", n)
+        fo._fontSize = 13
+        fo.GetFont = function(self) return "Fonts/ARIALN.ttf", self._fontSize, "" end
+        _G[n] = fo
+    end
+    CreateFont = function(name)
+        local fo = newObject("Font", name)
+        fo.SetFont = function(self, path, size) self._fontPath, self._fontSize = path, size end
+        fo.CopyFontObject = function(self, src) self._fontSize = src and src._fontSize end
+        fo.GetFont = function(self) return self._fontPath, self._fontSize, "" end
+        if name then _G[name] = fo end
+        return fo
+    end
     SlashCmdList = {}
     CreateFrame = function(kind, name, parent, template)
         if template and state.noTemplates then error("Couldn't find inherited node: " .. template) end

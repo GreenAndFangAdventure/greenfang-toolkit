@@ -131,7 +131,7 @@ test("fresh install creates schema v2 defaults", function()
     local db = GreenFangToolkitDB
     eq(db.schema, "gf.toolkit", "schema")
     eq(db.schemaVersion, 2, "schemaVersion")
-    eq(db.addonVersion, "0.12.3", "addonVersion")
+    eq(db.addonVersion, "0.12.4", "addonVersion")
     eq(db.sync.enabled, true, "sync.enabled default")
     eq(db.sync.noticeShown, false, "noticeShown before login")
     eq(#db.sync.outbox, 0, "outbox empty")
@@ -157,7 +157,7 @@ test("TOC declares the agreed names and loads every file", function()
     ok(toc:find("## Interface: 16001", 1, true), "Interface")
     ok(toc:find("## Title: 綠皮冒險工具箱", 1, true), "Title")
     ok(toc:find("## Author: 綠皮與獠牙冒險事務所", 1, true), "Author")
-    ok(toc:find("## Version: 0.12.3", 1, true), "Version")
+    ok(toc:find("## Version: 0.12.4", 1, true), "Version")
     ok(toc:find("## SavedVariables: GreenFangToolkitDB\r?\n"), "SavedVariables")
     local listed = {}
     for line in toc:gmatch("[^\r\n]+") do
@@ -429,7 +429,7 @@ test("unknown fields in an existing v2 table are preserved", function()
         sync = { enabled = false, noticeShown = true, outbox = {} },
     } })
     eq(GreenFangToolkitDB.futureModule.keep, true, "unknown field kept")
-    eq(GreenFangToolkitDB.addonVersion, "0.12.3", "addonVersion updated")
+    eq(GreenFangToolkitDB.addonVersion, "0.12.4", "addonVersion updated")
     eq(GreenFangToolkitDB.sync.enabled, true, "old off ignored (D-015)")
 end)
 
@@ -479,7 +479,7 @@ test("TSV/JSON export keep the v0.3.1 format", function()
     local s = ns.Roster.current()
     local json = ns.Export.jsonParts(s)
     eq(#json, 1, "one part")
-    ok(json[1]:find('^{"schema":"gfguildroster.report","schemaVersion":1,"addonVersion":"0.12.3"'), "json header")
+    ok(json[1]:find('^{"schema":"gfguildroster.report","schemaVersion":1,"addonVersion":"0.12.4"'), "json header")
     ok(json[1]:find('"part":1,"partCount":1', 1, true), "parts")
     ok(json[1]:find('"onlineAtCapture":true', 1, true), "member online in manual export")
     ok(not json[1]:find('"guid":', 1, true), "no guid in v1 export")
@@ -2662,7 +2662,7 @@ test("D10 diag window: sections, sharing stats, export moved here, /gftk sync st
     ok(has(all, "GF Sync 只是補充來源"), "site note")
     ok(has(all, "記錄 ") and has(all, "這次登入：送出"), "sharing statistics")
     ok(has(all, "掃描時間："), "roster scan")
-    ok(has(all, "工具箱 0.12.3"), "version")
+    ok(has(all, "工具箱 0.12.4"), "version")
     wow.click(ns.Diag.exportJSONButton)
     ok(_G.GreenFangToolkit_ExportWindow and _G.GreenFangToolkit_ExportWindow:IsShown(), "export from the window")
     GreenFangToolkitDB.settings.minimapAngle = 10
@@ -4063,7 +4063,7 @@ test("D20 popups: 同步與診斷 and export are opaque, framed and above the to
     ok(_G[ns.Framework.WINDOW_NAME].gfOpaque, "toolkit window: opaque too")
     wow.click(ns.UI.classChoice)
     ok(ns.UI.classChoice.menu.gfOpaque, "filter list: opaque")
-    eq(ns.UI.classChoice.menu._strata, "FULLSCREEN_DIALOG", "filter list on top")
+    eq(ns.UI.classChoice.menu._strata, "TOOLTIP", "filter list on top (GF-002-F: above the click-outside layer)")
 end)
 
 test("D20 roster filter line: labels and boxes do not overlap", function()
@@ -4195,7 +4195,7 @@ test("D21 recipe icons: crafted item, else spell icon, else the profession's; ca
     for _, r in ipairs(ns.Recipes.rowFrames()) do
         if r:IsShown() and r.data then
             icons[#icons + 1] = r.data.id .. "=" .. tostring(r.icon:IsShown() and r.icon._texture)
-            eq(r.icon._w, 24, "24 px (GF-002-E: bigger rows, a button on each)")
+            eq(r.icon._w, 28, "28 px (GF-002-F: 36 px rows)")
         end
     end
     table.sort(icons)
@@ -4596,6 +4596,9 @@ assert(loadfile(ROOT .. "/tests/addon/labels_tests.lua"))()({ test = test, eq = 
 assert(loadfile(ROOT .. "/tests/addon/usability_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint, shareLogin = shareLogin, shareFrom = shareFrom,
     rMsg = rMsg, leatherWindow = leatherWindow, PEER = PEER, A_PEER = A_PEER, A_THIRD = A_THIRD })
+-- GF-002-F: no overlaps, click outside, past midnight, the year, my worker ticket, sizes (tests/addon/layout_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/layout_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------
 

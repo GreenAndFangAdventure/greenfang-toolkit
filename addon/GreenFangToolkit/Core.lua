@@ -252,14 +252,34 @@ function ns.exclusivePopups() return exclusive end
 -- and field names have no fixed width and never wrap; the layout measures
 -- them. labelWidth is an upper estimate at the normal font (16 px a Chinese
 -- character, 8 for ASCII), used when the client cannot measure yet.
-ns.LABEL_FONT, ns.FIELD_FONT = "GameFontHighlight", "GameFontNormal"
+-- GF-002-F (owner: 「字還有圖都要再大」): 16 px text, 18 px titles. The
+-- toolkit's own font objects copy the game's fonts and only change the size;
+-- without CreateFont the game's Large fonts are used.
+ns.TEXT_SIZE, ns.TITLE_SIZE = 16, 18
+local function makeFont(name, base, size)
+    if type(CreateFont) ~= "function" then return nil end
+    local ok, f = pcall(CreateFont, name)
+    if not ok or not f then return nil end
+    local src = _G[base]
+    if src and f.CopyFontObject then pcall(f.CopyFontObject, f, src) end
+    local path, flags
+    if src and src.GetFont then local p, _, fl = src:GetFont(); path, flags = p, fl end
+    if path and f.SetFont then pcall(f.SetFont, f, path, size, flags or "") end
+    return name
+end
+ns.LABEL_FONT = makeFont("GreenFangToolkitText16", "GameFontHighlight", 16) or "GameFontHighlightLarge"
+ns.FIELD_FONT = makeFont("GreenFangToolkitField16", "GameFontNormal", 16) or "GameFontNormalLarge"
+ns.DISABLED_FONT = makeFont("GreenFangToolkitDisabled16", "GameFontDisable", 16) or "GameFontDisableLarge"
+ns.TITLE_FONT = makeFont("GreenFangToolkitTitle18", "GameFontNormal", 18) or "GameFontNormalLarge"
+-- Sizes (GF-002-F): clickable icons, dungeon icons, page rows, window rows.
+ns.ICON, ns.ROW_ICON, ns.DUNGEON_ICON, ns.PAGE_ROW, ns.WINDOW_ROW, ns.BUTTON_H = 32, 28, 48, 36, 52, 30
 local function plainText(text)
     return (tostring(text or ""):gsub("|T.-|t", "\1\1"):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""))
 end
 function ns.labelWidth(text)
     local w = 0
     for ch in plainText(text):gmatch("[%z\1-\127\194-\244][\128-\191]*") do
-        w = w + (ch == "\1" and 9 or #ch == 1 and 8 or 16)
+        w = w + (ch == "\1" and 10 or #ch == 1 and 9 or 17)
     end
     return w + 6
 end
@@ -313,6 +333,42 @@ local function catcher()
     return c
 end
 
+---------------------------------------------------------------------------
+-- GF-002-F (owner: 「次選單如果在其他地方按左鍵，應該也要消掉」): while a
+-- menu, list or the destination picker is open, a transparent full-screen
+-- button lies just under it; a click anywhere else lands on it and closes
+-- them (the click does nothing else, as with the game's own drop-downs).
+---------------------------------------------------------------------------
+ns.BLOCKER_NAME = "GreenFangToolkit_ClickOutside"
+local blocker
+local function isMenu(f) return (f.gfEscLevel or 0) >= ns.ESC_LEVEL.grid end
+function ns.menusOpen()
+    for _, f in ipairs(escFrames) do if isMenu(f) and f:IsShown() then return true end end
+    return false
+end
+function ns.closeMenus()
+    for _, f in ipairs(escFrames) do if isMenu(f) and f:IsShown() then f:Hide() end end
+end
+local function updateBlocker()
+    if not blocker then
+        if not ns.menusOpen() then return end
+        blocker = CreateFrame("Button", ns.BLOCKER_NAME, UIParent)
+        blocker:SetAllPoints(UIParent)
+        blocker:SetFrameStrata("TOOLTIP")
+        if blocker.SetFrameLevel then blocker:SetFrameLevel(1) end
+        blocker:EnableMouse(true)
+        if blocker.RegisterForClicks then blocker:RegisterForClicks("AnyUp") end
+        blocker:SetScript("OnClick", function() ns.closeMenus() end)
+        blocker:Hide()
+    end
+    if ns.menusOpen() then
+        if not blocker:IsShown() then blocker:Show() end
+    elseif blocker:IsShown() then
+        blocker:Hide()
+    end
+end
+function ns.clickBlocker() return blocker end
+
 function ns.escRegister(f, level)
     if not f or f.gfEscRegistered then return f end
     f.gfEscLevel = f.gfEscLevel or level or ns.ESC_LEVEL.panel
@@ -324,15 +380,20 @@ function ns.escRegister(f, level)
             self.gfEscSeq = escSeq
             local c = catcher()
             if not c:IsShown() then c:Show() end
+            if isMenu(self) then updateBlocker() end
         end)
-        f:HookScript("OnHide", function()
+        f:HookScript("OnHide", function(self)
             if escCatcher and escCatcher:IsShown() and not anyOpen() then
                 escCatcher.quiet = true
                 escCatcher:Hide()
             end
+            if isMenu(self) then updateBlocker() end
         end)
     end
-    if f:IsShown() then local c = catcher(); if not c:IsShown() then c:Show() end end
+    if f:IsShown() then
+        local c = catcher(); if not c:IsShown() then c:Show() end
+        if isMenu(f) then updateBlocker() end
+    end
     return f
 end
 
@@ -362,7 +423,7 @@ function ns.popupWindow(name, w, h)
     ns.makeOpaque(f)
     if f.HookScript then f:HookScript("OnShow", function(self) if self.Raise then self:Raise() end end) end
     -- Title in the larger font (owner: 「字清楚一點」).
-    if f.TitleText and f.TitleText.SetFontObject then f.TitleText:SetFontObject("GameFontNormal") end
+    if f.TitleText and f.TitleText.SetFontObject then f.TitleText:SetFontObject(ns.TITLE_FONT) end
     ns.escRegister(f, ns.ESC_LEVEL.panel)
     return f
 end
