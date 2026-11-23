@@ -234,6 +234,7 @@ end
 local exclusive = {}
 function ns.exclusivePopup(f)
     exclusive[#exclusive + 1] = f
+    f.gfEscLevel = ns.ESC_LEVEL.popup
     if f.HookScript then
         f:HookScript("OnShow", function(self)
             for _, other in ipairs(exclusive) do
@@ -247,13 +248,111 @@ function ns.exclusivePopup(f)
 end
 function ns.exclusivePopups() return exclusive end
 
--- GF-002-D: room for a short Chinese name (13 px a character, 7 for ASCII,
--- a little more than the font needs, so nothing is cut to "…").
+-- GF-002-E (owner, 0.12.2: 「目的/地」「現/在」 broke onto two lines): names
+-- and field names have no fixed width and never wrap; the layout measures
+-- them. labelWidth is an upper estimate at the normal font (16 px a Chinese
+-- character, 8 for ASCII), used when the client cannot measure yet.
+ns.LABEL_FONT, ns.FIELD_FONT = "GameFontHighlight", "GameFontNormal"
+local function plainText(text)
+    return (tostring(text or ""):gsub("|T.-|t", "\1\1"):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""))
+end
 function ns.labelWidth(text)
     local w = 0
-    for ch in tostring(text or ""):gmatch("[%z\1-\127\194-\244][\128-\191]*") do w = w + (#ch == 1 and 7 or 13) end
-    return w + 4
+    for ch in plainText(text):gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+        w = w + (ch == "\1" and 9 or #ch == 1 and 8 or 16)
+    end
+    return w + 6
 end
+-- The width a FontString needs: what the client measures; the estimate
+-- when it cannot measure yet (0 before the font is ready).
+function ns.measure(fs)
+    if not fs then return 0 end
+    local w = ns.num((fs:GetStringWidth())) or 0
+    if w > 0 then return w end
+    return ns.labelWidth(fs:GetText())
+end
+-- A text that sizes itself to its content: no width, one line.
+function ns.freeText(fs)
+    if fs.SetWordWrap then fs:SetWordWrap(false) end
+    if fs.SetNonSpaceWrap then fs:SetNonSpaceWrap(false) end
+    return fs
+end
+
+---------------------------------------------------------------------------
+-- GF-002-E (owner: 「所有子視窗如果壓 ESC 應該都是退回或關掉」): ESC closes
+-- the top window first: a menu, the dungeon grid, the popup, 同步與診斷 /
+-- export, and only then the main window. The client's CloseSpecialWindows
+-- hides every UISpecialFrames frame at once, so only one hidden catcher
+-- frame is listed there; it is shown while any window of ours is, and when
+-- the client hides it, it closes the top window and comes back if more are
+-- open. ESC therefore never opens the game menu while a window is open.
+---------------------------------------------------------------------------
+ns.ESC_NAME = "GreenFangToolkit_Escape"
+ns.ESC_LEVEL = { window = 1, panel = 2, popup = 3, grid = 4, menu = 5 }
+local escFrames, escSeq, escCatcher = {}, 0, nil
+
+local function anyOpen()
+    for _, f in ipairs(escFrames) do if f:IsShown() then return true end end
+    return false
+end
+ns.escAnyOpen = anyOpen
+
+local function catcher()
+    if escCatcher then return escCatcher end
+    local c = CreateFrame("Frame", ns.ESC_NAME, UIParent)
+    c:SetSize(1, 1)
+    c:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -10, 10)
+    c:Hide()
+    c:SetScript("OnHide", function(self)
+        if self.quiet then self.quiet = nil; return end
+        ns.escape()
+        if anyOpen() then ns.after(0, function() if anyOpen() and not self:IsShown() then self:Show() end end) end
+    end)
+    if UISpecialFrames then table.insert(UISpecialFrames, ns.ESC_NAME) end
+    escCatcher = c
+    return c
+end
+
+function ns.escRegister(f, level)
+    if not f or f.gfEscRegistered then return f end
+    f.gfEscLevel = f.gfEscLevel or level or ns.ESC_LEVEL.panel
+    f.gfEscRegistered = true
+    escFrames[#escFrames + 1] = f
+    if f.HookScript then
+        f:HookScript("OnShow", function(self)
+            escSeq = escSeq + 1
+            self.gfEscSeq = escSeq
+            local c = catcher()
+            if not c:IsShown() then c:Show() end
+        end)
+        f:HookScript("OnHide", function()
+            if escCatcher and escCatcher:IsShown() and not anyOpen() then
+                escCatcher.quiet = true
+                escCatcher:Hide()
+            end
+        end)
+    end
+    if f:IsShown() then local c = catcher(); if not c:IsShown() then c:Show() end end
+    return f
+end
+
+-- The window ESC closes next: the highest level, the last shown among equals.
+function ns.escTop()
+    local best
+    for _, f in ipairs(escFrames) do
+        if f:IsShown() then
+            if not best or f.gfEscLevel > best.gfEscLevel
+                or (f.gfEscLevel == best.gfEscLevel and (f.gfEscSeq or 0) > (best.gfEscSeq or 0)) then best = f end
+        end
+    end
+    return best
+end
+function ns.escape()
+    local f = ns.escTop()
+    if f then f:Hide() end
+    return f
+end
+function ns.escCatcher() return escCatcher end
 
 function ns.popupWindow(name, w, h)
     local f = ns.createFrame("Frame", name, UIParent, "BasicFrameTemplateWithInset")
@@ -262,6 +361,9 @@ function ns.popupWindow(name, w, h)
     if f.SetToplevel then f:SetToplevel(true) end
     ns.makeOpaque(f)
     if f.HookScript then f:HookScript("OnShow", function(self) if self.Raise then self:Raise() end end) end
+    -- Title in the larger font (owner: 「字清楚一點」).
+    if f.TitleText and f.TitleText.SetFontObject then f.TitleText:SetFontObject("GameFontNormal") end
+    ns.escRegister(f, ns.ESC_LEVEL.panel)
     return f
 end
 

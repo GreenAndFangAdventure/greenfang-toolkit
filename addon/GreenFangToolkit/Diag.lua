@@ -182,7 +182,6 @@ local function create()
     f:SetScript("OnDragStop", f.StopMovingOrSizing)
     f:SetClampedToScreen(true)
     if f.TitleText then f.TitleText:SetText("綠皮冒險工具箱｜同步與診斷") end
-    if UISpecialFrames then table.insert(UISpecialFrames, Diag.WINDOW_NAME) end
     f.state = f:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
     f.state:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -36)
     local y = -70

@@ -916,7 +916,6 @@ local function createExport()
     f:SetScript("OnDragStop", f.StopMovingOrSizing)
     f:SetClampedToScreen(true)
     if f.TitleText then f.TitleText:SetText("綠皮冒險工具箱｜報告匯出") end
-    if UISpecialFrames then table.insert(UISpecialFrames, "GreenFangToolkit_ExportWindow") end
     exportWindow = f
     exportInfo = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     exportInfo:SetPoint("TOPLEFT", 20, -37)
