@@ -1059,6 +1059,8 @@ return function(T)
         local cw = c.orders[closed].w
         eq(cw.cst, "deal", "closed"); eq(cw.close, "deal", "close"); eq(cw.closedBy, "customer", "by"); eq(cw.closeHow, "trade", "how")
         eq(c.orders["gbbb.1"].j.jst, "accept", "my accept"); eq(c.orders["gbbb.1"].w, nil, "not B's half")
+        ok(type(c.orders["gbbb.1"].j.acceptedAt) == "number", "acceptedAt")
+        eq(c.orders["gbbb.1"].j.deliveredAt, nil, "not delivered: no deliveredAt")
         local d = c.orders["gbbb.2"].j
         eq(d.jst, "decline", "decline"); eq(d.close, "cancel", "directed decline closes"); eq(d.closedBy, "crafter", "by crafter")
         for _, str in ipairs(strings(c)) do
@@ -1094,6 +1096,29 @@ return function(T)
         eq(entryOf("member.share", "Player-" .. A), nil, "never a member.share for myself")
     end)
 
+    test("GF-006 R-9.2 contract v1.4 fixes: review, lockedAt, acceptedAt/deliveredAt/deliveredHow, src", function()
+        local ns = login()
+        local O = ns.Orders
+        local id = O.place({ recipe = RECIPE, item = ITEM, skill = SKILL, qty = 2 })
+        O.customer(id, "lock", B)
+        O.customer(id, "unsure")
+        local wh = O.craftingFor(A).orders[id].w
+        eq(wh.cst, "review", "uncertain judgement = review"); eq(wh.lock, "Player-" .. B, "lock")
+        ok(type(wh.lockedAt) == "number", "lockedAt"); eq(wh.src, "g", "src")
+        eq(O.wHalf({ id = "w1", src = "zz", q = 1 }, A, 1).src, "g", "unknown src never written")
+        orders(ns, B, { w("gbbb.1", { cf = A, q = 2 }), w("gbbb.2", { cf = A, q = 2 }) })
+        O.press(O.get("gbbb.1"), "accept")
+        O.crafter(O.get("gbbb.1"), "mailed")
+        O.press(O.get("gbbb.2"), "accept")
+        O.crafter(O.get("gbbb.2"), "delivered", "trade")
+        local c = O.craftingFor(A).orders
+        local j1, j2 = c["gbbb.1"].j, c["gbbb.2"].j
+        eq(j1.jst, "delivered", "mailed is delivered"); eq(j1.deliveredHow, "mail", "by mail")
+        eq(j2.deliveredHow, "trade", "by trade"); ok(j1.acceptedAt and j1.deliveredAt >= j1.acceptedAt, "times")
+        O.crafter(O.get("gbbb.2"), "undeliver")
+        eq(O.craftingFor(A).orders["gbbb.2"].j.deliveredAt, nil, "returned mail: no delivery time")
+    end)
+
     test("GF-006 R-9.2 upload caps: 100 orders per author (oldest closed dropped first), 12 professions, 500 recipe fees", function()
         local ns = login()
         local O = ns.Orders
@@ -1114,6 +1139,24 @@ return function(T)
         local skills, recipes = 0, 0
         for _, v in pairs(c.services.value) do skills = skills + 1; for _ in pairs(v.recipes or {}) do recipes = recipes + 1 end end
         eq(skills, 12, "12 professions"); eq(recipes, 500, "500 recipe fees")
+    end)
+
+    test("GF-006 R-9.2 caps v1.4: then the oldest open by created; professions and fees keep the smallest IDs", function()
+        local ns = login()
+        local O = ns.Orders
+        local list = {}
+        for i = 1, 105 do list[#list + 1] = w("gbbb.o" .. i, { cf = C, cr = 1763000000 + i }) end
+        ok(orders(ns, B, list) == "new", "stored")
+        local c = O.craftingFor(B)
+        local n = 0
+        for k in pairs(c.orders) do n = n + 1; ok(tonumber(k:match("o(%d+)$")) > 5, "oldest created dropped: " .. k) end
+        eq(n, 100, "100 kept")
+        local sv = { active = {}, fees = {}, recipeFees = { [9001] = 1 }, recipeSkill = { [9001] = 100 } }
+        for skill = 120, 131 do sv.fees[skill] = 1 end
+        services(ns, B, sv)
+        local value = O.craftingFor(B).services.value
+        ok(value["100"] and value["100"].recipes["9001"] == 1, "recipe-only profession 100 kept (smallest)")
+        eq(value["131"], nil, "the largest dropped"); ok(value["130"], "130 kept")
     end)
 
     ---------------------------------------------------------------------------

@@ -770,7 +770,8 @@ end
 Orders.UPLOAD_ORDERS = 100
 Orders.UPLOAD_SKILLS = 12
 Orders.UPLOAD_RECIPES = 500
-local CST = { o = "open", p = "open", r = "returned", d = "deal", x = "cancel" }
+local CST = { o = "open", p = "review", r = "returned", d = "deal", x = "cancel" }
+local SRC = { g = true, w = true, d = true }
 local JST = { a = "accept", n = "decline", b = "drop", d = "delivered", m = "delivered", c = "delivered" }
 local HOW = { trade = true, mail = true, manual = true }
 
@@ -781,9 +782,10 @@ local function num(n) return type(n) == "number" and n >= 0 and math.floor(n) or
 
 function Orders.wHalf(e, a, t)
     local h = {
-        recordedAt = t, src = e.src or "g", ver = e.ver or 1, created = num(e.cr),
+        recordedAt = t, src = SRC[e.src] and e.src or "g", ver = e.ver or 1, created = num(e.cr),
         customer = guidOf(a), crafter = (e.cf == nil or e.cf == "*") and "*" or guidOf(e.cf),
-        lock = e.lk and guidOf(e.lk) or nil, recipe = num(e.rc), item = num(e.it),
+        lock = e.lk and guidOf(e.lk) or nil, lockedAt = e.lk and num(e.lt) or nil,
+        recipe = num(e.rc), item = num(e.it),
         qty = math.max(1, num(e.q) or 1), fee = num(e.fe) or 0, feeQuoted = num(e.fq), quote = num(e.qt),
         cst = CST[e.st or "o"] or "open", got = num(e.gt) or 0,
     }
@@ -801,7 +803,11 @@ function Orders.wHalf(e, a, t)
 end
 
 function Orders.jHalf(e, t, view)
-    local h = { recordedAt = t, jst = JST[e.st or "a"] or "accept", gave = num(e.gv) or 0 }
+    local h = { recordedAt = t, jst = JST[e.st or "a"] or "accept", gave = num(e.gv) or 0,
+        acceptedAt = num(e.ac), deliveredAt = num(e.dt) }
+    if h.deliveredAt then
+        h.deliveredHow = e.st == "m" and "mail" or (HOW[e.ch] and e.ch or "manual")
+    end
     local directed = view ~= nil and not view.guild
     if e.st == "c" then
         h.close, h.closedBy, h.closeHow, h.closedAt = "deal", "crafter", "timeout", num(e.sa)
@@ -828,21 +834,28 @@ function Orders.craftingFor(a)
             end
             return value[k]
         end
+        -- Over the caps the smallest IDs are kept (the same result every time).
+        local ids = {}
+        for id in pairs(sv.recipeFees) do ids[#ids + 1] = id end
+        table.sort(ids)
+        local skillOf = {}
         local list, seen = {}, {}
-        for skill in pairs(sv.active) do if not seen[skill] then seen[skill] = true; list[#list + 1] = skill end end
-        for skill in pairs(sv.fees) do if not seen[skill] then seen[skill] = true; list[#list + 1] = skill end end
+        local function addSkill(skill) if skill and not seen[skill] then seen[skill] = true; list[#list + 1] = skill end end
+        for skill in pairs(sv.active) do addSkill(skill) end
+        for skill in pairs(sv.fees) do addSkill(skill) end
+        for _, id in ipairs(ids) do
+            skillOf[id] = sv.recipeSkill[id] or (ns.Recipes and ns.Recipes.skillOfRecipe(id))
+            addSkill(skillOf[id])
+        end
         table.sort(list)
         for _, skill in ipairs(list) do
             local v = slot(skill)
             if v and sv.fees[skill] ~= nil then v.fee = sv.fees[skill] end
         end
-        local ids = {}
-        for id in pairs(sv.recipeFees) do ids[#ids + 1] = id end
-        table.sort(ids)
         local perSkill = {}
         for _, id in ipairs(ids) do
-            local skill = sv.recipeSkill[id] or (ns.Recipes and ns.Recipes.skillOfRecipe(id))
-            local v = skill and slot(skill)
+            local skill = skillOf[id]
+            local v = skill and value[tostring(skill)]
             if v and (perSkill[skill] or 0) < Orders.UPLOAD_RECIPES then
                 v.recipes = v.recipes or {}
                 v.recipes[tostring(id)] = sv.recipeFees[id]
@@ -854,17 +867,21 @@ function Orders.craftingFor(a)
     local orders, count, entries = {}, 0, {}
     local wrec, jrec = led:get(a, "W"), led:get(a, "J")
     for _, e in ipairs(wrec and Orders.decodeList(wrec.v) or {}) do
-        if validId(e.id) then entries[#entries + 1] = { id = e.id, w = e, closed = e.st == "d" or e.st == "x", at = e.sa or 0 } end
+        if validId(e.id) then
+            local closed = e.st == "d" or e.st == "x"
+            entries[#entries + 1] = { id = e.id, w = e, closed = closed, at = closed and (e.sa or 0) or (e.cr or 0) }
+        end
     end
     local views = Orders.all()
     for _, e in ipairs(jrec and Orders.decodeList(jrec.v) or {}) do
         if validId(e.id) then
             local v = views[e.id]
-            entries[#entries + 1] = { id = e.id, j = e, view = v,
-                closed = v ~= nil and (v.state == "deal" or v.state == "cancel"), at = e.sa or 0 }
+            local closed = v ~= nil and (v.state == "deal" or v.state == "cancel")
+            entries[#entries + 1] = { id = e.id, j = e, view = v, closed = closed,
+                at = closed and (v.closedAt or e.sa or 0) or ((v and v.created) or e.ac or e.sa or 0) }
         end
     end
-    -- Over the cap (100 per author): the oldest closed ones go first.
+    -- Over the cap (100 per author): oldest closed (closedAt) first, then oldest open (created).
     table.sort(entries, function(x, y)
         if x.closed ~= y.closed then return not x.closed end
         if x.at ~= y.at then return x.at > y.at end
