@@ -37,8 +37,29 @@ G.ART = {
     paste = { { "Interface\\Icons\\INV_Scroll_03" } },
     received = { { "Interface\\Icons\\INV_Letter_15" } },
     placed = { { "Interface\\Icons\\INV_Misc_Note_02" } },
-    worker = { { "Interface\\Icons\\INV_Misc_Bag_10" } },
-    adventure = { { "Interface\\Icons\\Ability_Warrior_BattleShout" }, { "Interface\\Icons\\INV_Sword_04" } },
+    -- GF-002-E (owner: 「有些圖示與主題不合」): each picked for its meaning;
+    -- the table with the reasons is tests/addon/MANUAL.md §3z.
+    -- 職工單 = "I want to join": a raised open hand.
+    worker = { { "Interface\\Icons\\Spell_Holy_SealOfSalvation" }, { "Interface\\Icons\\INV_Scroll_05" },
+        { "Interface\\Icons\\INV_Misc_Note_01" } },
+    -- 冒險單 = going on an adventure: a map.
+    adventure = { { "Interface\\Icons\\INV_Misc_Map_01" }, { "Interface\\Icons\\INV_Sword_04" } },
+    -- 調整 (the number of people): the group finder's "need more" group.
+    adjust = { { "Interface\\Icons\\INV_Misc_GroupNeedMore" }, { "Interface\\Buttons\\UI-PlusButton-Up" } },
+    -- 直接錄取 = in at once: the green check; 團長同意 = the leader decides: the leader's crown.
+    direct = { { "Interface\\RaidFrame\\ReadyCheck-Ready" } },
+    consent = { { "Interface\\GroupFrame\\UI-Group-LeaderIcon" }, { "Interface\\RaidFrame\\ReadyCheck-Waiting" } },
+    -- Tags: 解任務 the quest "!", 連刷 the round arrows (again and again), 慢慢打 a turtle,
+    -- 速刷 a running boot (Sprint), 語音 a shout.
+    tag_quest = { { "Interface\\GossipFrame\\AvailableQuestIcon" }, { "Interface\\Icons\\INV_Misc_Note_01" } },
+    tag_farm = { { "Interface\\Buttons\\UI-RefreshButton" }, { "Interface\\Icons\\Spell_Nature_Reincarnation" } },
+    tag_slow = { { "Interface\\Icons\\Ability_Hunter_Pet_Turtle" }, { "Interface\\Icons\\Spell_Nature_Sleep" } },
+    tag_fast = { { "Interface\\Icons\\Ability_Rogue_Sprint" }, { "Interface\\Icons\\INV_Gauntlets_04" } },
+    tag_voice = { { "Interface\\Icons\\Ability_Warrior_BattleShout" }, { "Interface\\Icons\\INV_Misc_Horn_01" } },
+    -- 我的服務 (crafter settings): the smith's hammer.
+    services = { { "Interface\\Icons\\Trade_BlackSmithing" }, { "Interface\\Icons\\INV_Hammer_20" } },
+    -- ＋下單 (place an order): a letter (an order sent to a crafter).
+    order = { { "Interface\\Icons\\INV_Letter_15" }, { "Interface\\Icons\\INV_Misc_Note_02" } },
 }
 
 -- Group finder dungeon art (LFGIcon-<name>), the key when the client has none.

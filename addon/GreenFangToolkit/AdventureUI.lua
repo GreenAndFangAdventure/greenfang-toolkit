@@ -45,7 +45,10 @@ UI.TAG_KEYS = { "quest", "farm", "slow", "fast", "voice" }
 
 -- GF-002-C: role, person, time and quest marks use the game's own art (GameIcons, with fallbacks).
 UI.GAME = { t = "role_t", h = "role_h", d = "role_d", any = "person", now = "now", today = "today", future = "future",
-    quest = "quest", dungeon = "key", worker = "worker", yes = "yes", no = "no", adventure = "adventure" }
+    quest = "quest", dungeon = "key", worker = "worker", yes = "yes", no = "no", adventure = "adventure",
+    -- GF-002-E: icons that match their meaning (MANUAL §3z).
+    adjust = "adjust", direct = "direct", consent = "consent",
+    tag_quest = "tag_quest", tag_farm = "tag_farm", tag_slow = "tag_slow", tag_fast = "tag_fast", tag_voice = "tag_voice" }
 local function tex(key, size)
     local g = UI.GAME[key]
     if g then return ns.GameIcons.markup(g, size) end
@@ -156,7 +159,8 @@ end
 -- The page
 ---------------------------------------------------------------------------
 
-local ROW_HEIGHT = 28
+local ROW_HEIGHT = 30
+UI.ROW_WIDTH = 1030 -- GF-002-E: the wider window
 local panel, scroll, content, summaryLine
 local rowWidgets, shownRows = {}, {}
 
@@ -251,40 +255,42 @@ end
 
 local function iconButton(parent, size, key, tip, onClick, label)
     local b = ns.OrdersUI.iconButton(parent, size, UI.ICON[key] or key, tip, onClick, label)
+    if UI.GAME[key] then ns.GameIcons.set(b.tex, UI.GAME[key]) end
     return b
 end
 
 local function newRow(i)
     local row = CreateFrame("Frame", nil, content)
-    row:SetSize(930, ROW_HEIGHT)
+    row:SetSize(UI.ROW_WIDTH, ROW_HEIGHT)
     row.bg = row:CreateTexture(nil, "BACKGROUND"); row.bg:SetAllPoints()
     row.att = row:CreateTexture(nil, "ARTWORK"); row.att:SetSize(16, 16); row.att:SetPoint("LEFT", row, "LEFT", 2, 0)
-    row.dest = row:CreateTexture(nil, "ARTWORK"); row.dest:SetSize(22, 22); row.dest:SetPoint("LEFT", row, "LEFT", 22, 0)
+    row.dest = row:CreateTexture(nil, "ARTWORK"); row.dest:SetSize(24, 24); row.dest:SetPoint("LEFT", row, "LEFT", 22, 0)
     row.name = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    row.name:SetPoint("LEFT", row, "LEFT", 50, 0); row.name:SetWidth(190); row.name:SetJustifyH("LEFT"); row.name:SetWordWrap(false)
-    row.time = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    row.time:SetPoint("LEFT", row, "LEFT", 244, 0); row.time:SetWidth(150); row.time:SetJustifyH("LEFT")
-    row.roles = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    row.roles:SetPoint("LEFT", row, "LEFT", 398, 0); row.roles:SetWidth(170); row.roles:SetJustifyH("LEFT")
+    row.name:SetPoint("LEFT", row, "LEFT", 52, 0); row.name:SetWidth(140); row.name:SetJustifyH("LEFT"); row.name:SetWordWrap(false)
+    row.time = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    row.time:SetPoint("LEFT", row, "LEFT", 196, 0); row.time:SetWidth(160); row.time:SetJustifyH("LEFT"); row.time:SetWordWrap(false)
+    row.roles = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    row.roles:SetPoint("LEFT", row, "LEFT", 360, 0); row.roles:SetWidth(206); row.roles:SetJustifyH("LEFT"); row.roles:SetWordWrap(false)
     -- GF-002-C item 2: one icon per seat, bright when taken, grey when open.
     row.slots = {}
     for k = 1, UI.MAX_SLOTS do
         local s = row:CreateTexture(nil, "ARTWORK")
         s:SetSize(16, 16)
-        s:SetPoint("LEFT", row, "LEFT", 398 + (k - 1) * 17, 0)
+        s:SetPoint("LEFT", row, "LEFT", 360 + (k - 1) * 17, 0)
         s:Hide()
         row.slots[k] = s
     end
-    row.tags = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    row.tags:SetPoint("LEFT", row, "LEFT", 572, 0); row.tags:SetWidth(90); row.tags:SetJustifyH("LEFT")
-    row.cls = row:CreateTexture(nil, "ARTWORK"); row.cls:SetSize(16, 16); row.cls:SetPoint("LEFT", row, "LEFT", 640, 0)
+    row.tags = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    row.tags:SetPoint("LEFT", row, "LEFT", 570, 0); row.tags:SetWidth(100); row.tags:SetJustifyH("LEFT"); row.tags:SetWordWrap(false)
+    row.cls = row:CreateTexture(nil, "ARTWORK"); row.cls:SetSize(18, 18); row.cls:SetPoint("LEFT", row, "LEFT", 674, 0)
     row.off = row:CreateTexture(nil, "OVERLAY"); row.off:SetSize(10, 10); row.off:SetPoint("BOTTOMRIGHT", row.cls, "BOTTOMRIGHT", 3, -3)
-    row.who = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    row.who:SetPoint("LEFT", row, "LEFT", 660, 0); row.who:SetWidth(96); row.who:SetJustifyH("LEFT"); row.who:SetWordWrap(false)
+    row.who = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    row.who:SetPoint("LEFT", row, "LEFT", 696, 0); row.who:SetWidth(118); row.who:SetJustifyH("LEFT"); row.who:SetWordWrap(false)
     row.buttons = {}
+    UI.ROW_BUTTON_X = 820
     for k = 1, 3 do
-        local b = iconButton(row, 22, "yes", nil)
-        b:SetPoint("LEFT", row, "LEFT", 760 + (k - 1) * 58, 0) -- GF-002-D: room for the names
+        local b = iconButton(row, 24, "yes", nil)
+        b:SetPoint("LEFT", row, "LEFT", UI.ROW_BUTTON_X, 0) -- GF-002-E: laid out by their names (fillRow)
         row.buttons[k] = b
     end
     row.head = row:CreateFontString(nil, "ARTWORK", "GameFontNormal"); row.head:SetPoint("LEFT", row, "LEFT", 6, 0)
@@ -353,6 +359,7 @@ local function fillRow(row, data, i)
                 b:Show()
             else b:Hide(); b.action = nil end
         end
+        UI.flowButtons(row)
         return
     end
     local v = data.view
@@ -389,6 +396,14 @@ local function fillRow(row, data, i)
             b:Show()
         else b:Hide(); b.action = nil end
     end
+    UI.flowButtons(row)
+end
+
+-- GF-002-E: the row buttons follow each other by their measured names.
+function UI.flowButtons(row)
+    local shown = {}
+    for _, b in ipairs(row.buttons) do if b:IsShown() then shown[#shown + 1] = b end end
+    ns.OrdersUI.flow(row, shown, UI.ROW_BUTTON_X, 0, 12, "LEFT")
 end
 
 function UI.layoutRows()
@@ -438,33 +453,32 @@ function UI.refresh()
 end
 
 local function build(p)
-    UI.newButton = ns.createFrame("Button", nil, p, "UIPanelButtonTemplate")
-    UI.newButton:SetSize(124, 24); UI.newButton:SetPoint("TOPLEFT", p, "TOPLEFT", 24, -40)
-    UI.newButton:SetText(tex("adventure", 16) .. " ＋冒險單") -- GF-002-D: icon + name
+    -- GF-002-D: icon + name; GF-002-E: the normal font, as wide as the text.
+    UI.newButton = ns.OrdersUI.textButton(p, tex("adventure", 18) .. " ＋冒險單")
+    UI.newButton:SetPoint("TOPLEFT", p, "TOPLEFT", 24, -40)
     UI.newButton.tooltipText = "冒險單"
     UI.newButton:SetScript("OnEnter", function(self) GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:AddLine("冒險單"); GameTooltip:Show() end)
     UI.newButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
     UI.newButton:SetScript("OnClick", function() UI.openTicket() end)
-    UI.workerButton = ns.createFrame("Button", nil, p, "UIPanelButtonTemplate")
-    UI.workerButton:SetSize(124, 24); UI.workerButton:SetPoint("LEFT", UI.newButton, "RIGHT", 10, 0)
-    UI.workerButton:SetText(tex("worker", 16) .. " ＋職工單")
+    UI.workerButton = ns.OrdersUI.textButton(p, tex("worker", 18) .. " ＋職工單")
+    UI.workerButton:SetPoint("LEFT", UI.newButton, "RIGHT", 12, 0)
     UI.workerButton:SetScript("OnEnter", function(self) GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:AddLine("職工單"); GameTooltip:Show() end)
     UI.workerButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
     UI.workerButton:SetScript("OnClick", function() UI.openWorker() end)
     summaryLine = p:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     summaryLine:SetPoint("LEFT", UI.workerButton, "RIGHT", 24, 0)
     scroll = ns.createFrame("ScrollFrame", nil, p, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 20, -76)
-    scroll:SetPoint("BOTTOMRIGHT", -40, 40)
+    scroll:SetPoint("TOPLEFT", 20, -80)
+    scroll:SetPoint("BOTTOMRIGHT", -40, 44)
     content = CreateFrame("Frame", nil, scroll)
-    content:SetSize(930, 1)
+    content:SetSize(UI.ROW_WIDTH, 1)
     scroll:SetScrollChild(content)
     scroll:HookScript("OnVerticalScroll", function() UI.layoutRows() end)
-    UI.nextInvite = iconButton(p, 24, "form", "邀請下一位", function() A().inviteNext(); UI.refresh() end, "邀請下一位")
-    UI.nextInvite:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -250, 10)
+    UI.nextInvite = iconButton(p, 26, "invite", "邀請下一位", function() A().inviteNext(); UI.refresh() end, "邀請下一位")
+    UI.nextInvite:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -290, 10)
     UI.nextInvite:Hide() -- only while names wait for a click (R-7.2 fallback)
-    UI.emptyLine = p:CreateFontString(nil, "ARTWORK", "GameFontDisable")
-    UI.emptyLine:SetPoint("TOP", p, "TOP", 0, -180)
+    UI.emptyLine = p:CreateFontString(nil, "ARTWORK", "GameFontDisableLarge")
+    UI.emptyLine:SetPoint("TOP", p, "TOP", 0, -200)
     ns.Diag.smallButton(p, "BOTTOMRIGHT", -24, 10)
     panel = p
 end
@@ -551,75 +565,82 @@ end
 UI.drawTicket = drawTicket
 
 -- GF-002-D layout: a field name in front of every row; every choice has its name.
+-- GF-002-E: larger, the normal font, rows laid out by the measured names.
 UI.TICKET_FIELDS = { "目的地", "時間", "開始", "時長", "日期", "人數", "錄取", "標籤", "備註" }
 function UI.openTicket()
     draft = UI.newDraft()
     if not popup then
-        local f = ns.popupWindow(UI.TICKET_NAME, 540, 370)
+        local f = ns.popupWindow(UI.TICKET_NAME, 660, 470)
         f:SetPoint("CENTER", 0, 60)
         f:EnableMouse(true)
         ns.exclusivePopup(f)
-        if UISpecialFrames then table.insert(UISpecialFrames, UI.TICKET_NAME) end
-        local X = 84
-        local field = ns.OrdersUI.fieldLabel
-        field(f, "目的地", 18, -40)
-        f.dest = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.dest:SetSize(220, 24)
-        f.dest:SetPoint("TOPLEFT", f, "TOPLEFT", X, -34)
-        f.dest:SetScript("OnClick", function(self) UI.pickDestination(self) end)
-        field(f, "時間", 18, -78)
+        if f.TitleText then f.TitleText:SetText("冒險單") end
+        local O = ns.OrdersUI
+        local FX = O.FIELD_X
+        local X = O.controlX({ "目的地", "時間", "開始", "人數", "錄取", "標籤", "備註" })
+        local function y(i) return -44 - (i - 1) * O.ROW_STEP end
+        local field = O.fieldLabel
+        field(f, "目的地", FX, y(1) - 6)
+        f.dest = O.textButton(f, "選擇目的地", function(self) UI.pickDestination(self) end, 260)
+        f.dest:SetPoint("TOPLEFT", f, "TOPLEFT", X, y(1))
+        field(f, "時間", FX, y(2) - 6)
         f.timeButtons = {}
-        for i, m in ipairs({ "n", "t", "f" }) do
-            local b = iconButton(f, 24, "now", UI.TIME_NAME[m], function(self) UI.pickTime(self, m) end, UI.TIME_NAME[m])
+        local list = {}
+        for _, m in ipairs({ "n", "t", "f" }) do
+            local b = iconButton(f, 26, "now", UI.TIME_NAME[m], function(self) UI.pickTime(self, m) end, UI.TIME_NAME[m])
             ns.GameIcons.set(b.tex, m == "n" and "now" or m == "t" and "today" or "future")
-            b:SetPoint("TOPLEFT", f, "TOPLEFT", X + (i - 1) * 72, -72)
             f.timeButtons[m] = b
+            list[#list + 1] = b
         end
-        f.timeText = f:CreateFontString(nil, "ARTWORK", "GameFontHighlight"); f.timeText:SetPoint("TOPLEFT", f, "TOPLEFT", X + 222, -78)
-        -- 開始 / 時長 / 日期 (only for 今天 and 之後).
-        f.startField = field(f, "開始", 18, -116)
-        f.startButton = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.startButton:SetSize(80, 22)
-        f.startButton:SetPoint("TOPLEFT", f, "TOPLEFT", X, -110)
-        f.startButton:SetScript("OnClick", function(self) UI.pickStart(self) end)
-        f.durField = field(f, "時長", X + 96, -116)
-        f.durButton = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.durButton:SetSize(80, 22)
-        f.durButton:SetPoint("TOPLEFT", f, "TOPLEFT", X + 136, -110)
-        f.durButton:SetScript("OnClick", function(self) UI.pickDuration(self) end)
-        f.dayField = field(f, "日期", X + 232, -116)
-        f.dayButton = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.dayButton:SetSize(80, 22)
-        f.dayButton:SetPoint("TOPLEFT", f, "TOPLEFT", X + 272, -110)
-        f.dayButton:SetScript("OnClick", function(self) UI.pickDay(self) end)
-        field(f, "人數", 18, -154)
-        f.roleText = f:CreateFontString(nil, "ARTWORK", "GameFontHighlight"); f.roleText:SetPoint("TOPLEFT", f, "TOPLEFT", X, -154)
-        f.roleButton = iconButton(f, 22, "any", "人數", function(self) UI.pickRoles(self) end, "調整")
-        f.roleButton:SetPoint("TOPLEFT", f, "TOPLEFT", X + 222, -148)
-        field(f, "錄取", 18, -192)
-        f.direct = iconButton(f, 24, "direct", "直接錄取", function() draft.mode = "a"; drawTicket() end, "直接錄取")
-        f.direct:SetPoint("TOPLEFT", f, "TOPLEFT", X, -186)
-        f.consent = iconButton(f, 24, "consent", "團長同意", function() draft.mode = "c"; drawTicket() end, "團長同意")
-        f.consent:SetPoint("TOPLEFT", f, "TOPLEFT", X + 110, -186)
+        local after = O.flow(f, list, X, y(2), 24)
+        f.timeText = ns.freeText(f:CreateFontString(nil, "ARTWORK", "GameFontHighlight"))
+        f.timeText:SetPoint("TOPLEFT", f, "TOPLEFT", after + 10, y(2) - 6)
+        -- 開始 / 時長 / 日期 (only for 今天 and 之後), each with its name in front.
+        f.startField = field(f, "開始", FX, y(3) - 6)
+        f.startButton = O.textButton(f, "00:00", function(self) UI.pickStart(self) end, 90)
+        f.startButton:SetPoint("TOPLEFT", f, "TOPLEFT", X, y(3))
+        local x2 = X + 90 + 24
+        f.durField = field(f, "時長", x2, y(3) - 6)
+        f.durButton = O.textButton(f, "2 小時", function(self) UI.pickDuration(self) end, 90)
+        f.durButton:SetPoint("TOPLEFT", f, "TOPLEFT", x2 + ns.labelWidth("時長") + 10, y(3))
+        local x3 = x2 + ns.labelWidth("時長") + 10 + 90 + 24
+        f.dayField = field(f, "日期", x3, y(3) - 6)
+        f.dayButton = O.textButton(f, "00/00", function(self) UI.pickDay(self) end, 90)
+        f.dayButton:SetPoint("TOPLEFT", f, "TOPLEFT", x3 + ns.labelWidth("日期") + 10, y(3))
+        field(f, "人數", FX, y(4) - 6)
+        f.roleText = ns.freeText(f:CreateFontString(nil, "ARTWORK", "GameFontHighlightLarge"))
+        f.roleText:SetPoint("TOPLEFT", f, "TOPLEFT", X, y(4) - 4)
+        f.roleButton = iconButton(f, 26, "adjust", "人數", function(self) UI.pickRoles(self) end, "調整")
+        f.roleButton:SetPoint("TOPLEFT", f, "TOPLEFT", X + 230, y(4))
+        field(f, "錄取", FX, y(5) - 6)
+        f.direct = iconButton(f, 26, "direct", "直接錄取", function() draft.mode = "a"; drawTicket() end, "直接錄取")
+        f.consent = iconButton(f, 26, "consent", "團長同意", function() draft.mode = "c"; drawTicket() end, "團長同意")
+        O.flow(f, { f.direct, f.consent }, X, y(5), 30)
         f.modeButton = f.direct
-        field(f, "標籤", 18, -230)
+        field(f, "標籤", FX, y(6) - 6)
         f.tagButtons = {}
-        for i, k in ipairs(UI.TAG_KEYS) do
-            local b = iconButton(f, 22, "tag_" .. k, UI.TAG_NAME[k], function()
+        local tags = {}
+        for _, k in ipairs(UI.TAG_KEYS) do
+            local b = iconButton(f, 26, "tag_" .. k, UI.TAG_NAME[k], function()
                 local bit = A().TAGS[k]
                 if math.floor(draft.tags / bit) % 2 == 1 then draft.tags = draft.tags - bit else draft.tags = draft.tags + bit end
                 drawTicket()
             end, UI.TAG_NAME[k])
-            b:SetPoint("TOPLEFT", f, "TOPLEFT", X + (i - 1) * 88, -224)
             f.tagButtons[k] = b
+            tags[#tags + 1] = b
         end
-        field(f, "備註", 18, -268)
-        f.note = ns.createFrame("EditBox", nil, f, "InputBoxTemplate"); f.note:SetSize(420, 22)
-        f.note:SetPoint("TOPLEFT", f, "TOPLEFT", X + 4, -262)
+        O.flow(f, tags, X, y(6), 20)
+        field(f, "備註", FX, y(7) - 6)
+        f.note = ns.createFrame("EditBox", nil, f, "InputBoxTemplate"); f.note:SetSize(480, 26)
+        if f.note.SetFontObject then f.note:SetFontObject("ChatFontNormal") end
+        f.note:SetPoint("TOPLEFT", f, "TOPLEFT", X + 6, y(7))
         f.note:SetAutoFocus(false)
         if f.note.SetMaxLetters then f.note:SetMaxLetters(A().NOTE_MAX) end
         f.note:SetScript("OnTextChanged", function(self) if draft then draft.note = A().cleanNote(self:GetText()) end end)
         f.note:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-        f.result = f:CreateFontString(nil, "ARTWORK", "GameFontHighlight"); f.result:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 18, 18)
-        f.go = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.go:SetSize(96, 24)
-        f.go:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -18, 14); f.go:SetText(tex("yes", 16) .. " 開單")
-        f.go:SetScript("OnClick", function() UI.submitTicket() end)
+        f.result = f:CreateFontString(nil, "ARTWORK", "GameFontHighlight"); f.result:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 20, 20)
+        f.go = O.textButton(f, tex("yes", 16) .. " 開單", function() UI.submitTicket() end, 110)
+        f.go:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -20, 16)
         f:Hide()
         popup = f
     end
@@ -634,6 +655,7 @@ function UI.draft() return draft end
 -- GF-002-C items 7, 8: every dungeon as its own art in a grid, coloured by
 -- level (white fits, grey too low for me, red too high); click to pick or toggle.
 UI.GRID_NAME = "GreenFangToolkit_DungeonGrid"
+UI.GRID_COLUMNS, UI.GRID_CELL_W, UI.GRID_CELL_H = 8, 76, 66
 local grid
 -- onQuest: when given, a quest scroll button closes the grid and opens the
 -- quest menu instead (only one of the two is ever open; GF-002-C fix).
@@ -645,25 +667,30 @@ function UI.dungeonGrid(owner, onClick, isOn, onQuest)
         ns.makeOpaque(grid, 0)
         grid:EnableMouse(true)
         grid.buttons = {}
-        if UISpecialFrames then table.insert(UISpecialFrames, UI.GRID_NAME) end
+        ns.escRegister(grid, ns.ESC_LEVEL.grid) -- GF-002-E
+        -- GF-002-E (owner: 簡稱被截成「怒」「哀」): larger cells, the short name in full under the icon.
+        local C, W, H, ICON = UI.GRID_COLUMNS, UI.GRID_CELL_W, UI.GRID_CELL_H, 36
+        local function place(b, i)
+            b:SetPoint("TOPLEFT", grid, "TOPLEFT", 10 + ((i - 1) % C) * W + (W - ICON) / 2, -8 - math.floor((i - 1) / C) * H)
+        end
+        local function name(b, text)
+            b.label = ns.freeText(grid:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
+            b.label:SetPoint("TOP", b, "BOTTOM", 0, -2)
+            b.label:SetText(text)
+        end
         for i, d in ipairs(ns.AdventureData.DUNGEONS) do
-            local b = iconButton(grid, 30, "dungeon", d.name)
-            b:SetPoint("TOPLEFT", grid, "TOPLEFT", 10 + ((i - 1) % 9) * 50, -6 - math.floor((i - 1) / 9) * 50)
-            -- GF-002-D: the short name under the icon.
-            b.label = grid:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-            b.label:SetPoint("TOP", b, "BOTTOM", 0, -1)
-            b.label:SetWidth(ns.labelWidth(d.short or d.name)); b.label:SetText(d.short or d.name)
+            local b = iconButton(grid, ICON, "dungeon", d.name)
+            place(b, i)
+            name(b, d.short or d.name)
             b.dungeon = d.id
             grid.buttons[i] = b
         end
         local n = #ns.AdventureData.DUNGEONS
-        grid.quest = iconButton(grid, 30, "quest", "任務")
-        grid.quest.label = grid:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        grid.quest.label:SetPoint("TOP", grid.quest, "BOTTOM", 0, -1)
-        grid.quest.label:SetWidth(ns.labelWidth("任務")); grid.quest.label:SetText("任務")
+        grid.quest = iconButton(grid, ICON, "quest", "任務")
+        name(grid.quest, "任務")
         ns.GameIcons.set(grid.quest.tex, "quest")
-        grid.quest:SetPoint("TOPLEFT", grid, "TOPLEFT", 10 + (n % 9) * 50, -6 - math.floor(n / 9) * 50)
-        grid:SetSize(20 + 9 * 50, 12 + math.ceil((n + 1) / 9) * 50)
+        place(grid.quest, n + 1)
+        grid:SetSize(20 + C * W, 16 + math.ceil((n + 1) / C) * H)
     end
     if onQuest then
         grid.quest:SetScript("OnClick", function(self) grid:Hide(); onQuest(self) end)
@@ -844,48 +871,50 @@ UI.WORKER_FIELDS = { "地城", "任務", "職責", "副職責", "時段" }
 function UI.openWorker()
     wdraft = UI.newWorkerDraft()
     if not wpopup then
-        local f = ns.popupWindow(UI.WORKER_NAME, 500, 290)
+        local f = ns.popupWindow(UI.WORKER_NAME, 620, 380)
         f:SetPoint("CENTER", 0, 60)
         f:EnableMouse(true)
         ns.exclusivePopup(f)
-        if UISpecialFrames then table.insert(UISpecialFrames, UI.WORKER_NAME) end
-        local X = 84
-        local field = ns.OrdersUI.fieldLabel
-        field(f, "地城", 18, -40)
-        f.dungeons = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.dungeons:SetSize(380, 24)
-        f.dungeons:SetPoint("TOPLEFT", f, "TOPLEFT", X, -34)
-        f.dungeons:SetScript("OnClick", function(self) UI.pickWorkerDungeons(self) end)
-        field(f, "任務", 18, -76)
-        f.quests = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.quests:SetSize(160, 24)
-        f.quests:SetPoint("TOPLEFT", f, "TOPLEFT", X, -70)
-        f.quests:SetScript("OnClick", function(self) UI.pickWorkerQuests(self) end)
-        field(f, "職責", 18, -114)
-        field(f, "副職責", 18, -150)
+        if f.TitleText then f.TitleText:SetText("職工單") end
+        local O = ns.OrdersUI
+        local FX = O.FIELD_X
+        local X = O.controlX(UI.WORKER_FIELDS)
+        local function y(i) return -44 - (i - 1) * O.ROW_STEP end
+        local field = O.fieldLabel
+        field(f, "地城", FX, y(1) - 6)
+        f.dungeons = O.textButton(f, "選擇地城", function(self) UI.pickWorkerDungeons(self) end, 460)
+        f.dungeons:SetPoint("TOPLEFT", f, "TOPLEFT", X, y(1))
+        field(f, "任務", FX, y(2) - 6)
+        f.quests = O.textButton(f, "選擇任務", function(self) UI.pickWorkerQuests(self) end, 200)
+        f.quests:SetPoint("TOPLEFT", f, "TOPLEFT", X, y(2))
+        field(f, "職責", FX, y(3) - 6)
+        field(f, "副職責", FX, y(4) - 6)
         f.mainRoles, f.altRoles = {}, {}
-        for i, r in ipairs(A().ROLES) do
-            local m = iconButton(f, 24, "dungeon", UI.ROLE_NAME[r], function()
+        local mains, alts = {}, {}
+        for _, r in ipairs(A().ROLES) do
+            local m = iconButton(f, 26, "dungeon", UI.ROLE_NAME[r], function()
                 wdraft.main = r; if wdraft.alt == r then wdraft.alt = nil end; drawWorker()
             end, UI.ROLE_NAME[r])
             ns.GameIcons.set(m.tex, UI.GAME[r])
-            m:SetPoint("TOPLEFT", f, "TOPLEFT", X + (i - 1) * 80, -108)
             f.mainRoles[r] = m
-            local a = iconButton(f, 20, "dungeon", UI.ROLE_NAME[r], function()
+            mains[#mains + 1] = m
+            local a = iconButton(f, 24, "dungeon", UI.ROLE_NAME[r], function()
                 wdraft.alt = (wdraft.alt == r or wdraft.main == r) and nil or r; drawWorker()
             end, UI.ROLE_NAME[r])
             ns.GameIcons.set(a.tex, UI.GAME[r])
-            a:SetPoint("TOPLEFT", f, "TOPLEFT", X + (i - 1) * 80, -146)
             f.altRoles[r] = a
+            alts[#alts + 1] = a
         end
+        O.flow(f, mains, X, y(3), 36)
+        O.flow(f, alts, X, y(4), 38)
         f.roles = f.mainRoles.t
-        field(f, "時段", 18, -188)
-        f.slots = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.slots:SetSize(380, 24)
-        f.slots:SetPoint("TOPLEFT", f, "TOPLEFT", X, -182)
-        f.slots:SetScript("OnClick", function(self) UI.pickWorkerSlots(self) end)
-        f.remove = iconButton(f, 22, "no", "移除", function() A().removeWorker(); f:Hide(); UI.refresh() end, "移除職工單")
-        f.remove:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 18, 14)
-        f.save = ns.createFrame("Button", nil, f, "UIPanelButtonTemplate"); f.save:SetSize(96, 24)
-        f.save:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -18, 14); f.save:SetText(tex("yes", 16) .. " 登記")
-        f.save:SetScript("OnClick", function() UI.saveWorker() end)
+        field(f, "時段", FX, y(5) - 6)
+        f.slots = O.textButton(f, "現在", function(self) UI.pickWorkerSlots(self) end, 460)
+        f.slots:SetPoint("TOPLEFT", f, "TOPLEFT", X, y(5))
+        f.remove = iconButton(f, 26, "no", "移除", function() A().removeWorker(); f:Hide(); UI.refresh() end, "移除職工單")
+        f.remove:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 20, 18)
+        f.save = O.textButton(f, tex("yes", 16) .. " 登記", function() UI.saveWorker() end, 110)
+        f.save:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -20, 16)
         f:Hide()
         wpopup = f
     end

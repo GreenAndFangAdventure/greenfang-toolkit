@@ -28,10 +28,22 @@ local function guard(self, what)
 end
 
 -- Rough on-screen width of a text: 6 px per ASCII character, 11 px otherwise.
-local function textWidth(t)
+-- GF-002-E: by font when the FontString has one (the client's zhTW fonts,
+-- measured from the owner's 0.12.2 screenshots: 「目的地」 did not fit 43 px
+-- at GameFontNormal): Small 6/13, normal 7/15, Large 8/18 (ASCII/Chinese).
+local function fontPx(font)
+    if not font then return 6, 11 end
+    font = tostring(font)
+    if font:find("Small") then return 6, 13 end
+    if font:find("Large") or font:find("Huge") then return 8, 18 end
+    return 7, 15
+end
+local function textWidth(t, font)
+    local a, c = fontPx(font)
     local w = 0
-    for ch in tostring(t or ""):gmatch("[%z\1-\127\194-\244][\128-\191]*") do
-        w = w + (#ch == 1 and 6 or 11)
+    t = tostring(t or ""):gsub("|T.-|t", "\1\1"):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    for ch in t:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+        w = w + (ch == "\1" and 8 or #ch == 1 and a or c)
     end
     return w
 end
@@ -49,14 +61,16 @@ local function setAlpha(self, a) self._alpha = a end
 local function setFrameStrata(self, v) self._strata = v end
 local function setColorTexture(self, r, g, b, a) self._color = { r, g, b, a } end
 local function getStringWidth(self)
-    local w, fixed = textWidth(self._text), fixedWidthOf(self)
+    local w, fixed = textWidth(self._text, self._font), fixedWidthOf(self)
     if fixed and w > fixed then return fixed end
     return w
 end
+-- Truncated ("…") or, with word wrap on, broken onto a second line.
 local function isTruncated(self)
     local fixed = fixedWidthOf(self)
-    return fixed ~= nil and textWidth(self._text) > fixed
+    return fixed ~= nil and textWidth(self._text, self._font) > fixed
 end
+wow.textWidth = textWidth
 
 local function newObject(kind, name)
     local o = { _kind = kind, _name = name, _shown = true, _scripts = {}, _events = {}, _text = "", _attrs = {} }
@@ -103,7 +117,13 @@ local function newObject(kind, name)
     function methods.UnregisterEvent(self, e) self._events[e] = nil end
     function methods.SetText(self, t) self._text = t or "" end
     function methods.GetText(self) return self._text end
-    function methods.CreateFontString(self) return newObject("FontString") end
+    function methods.CreateFontString(self, _, _, font)
+        local fs = newObject("FontString")
+        fs._font, fs._parent = font, self
+        return fs
+    end
+    function methods.SetFontObject(self, font) self._font = font end
+    function methods.SetWordWrap(self, on) self._wordWrap = on and true or false end
     function methods.CreateTexture(self, _, layer)
         local t = newObject("Texture")
         t._layer = layer
@@ -312,6 +332,21 @@ function wow.click(b, mouse, down)
     if b._scripts.PostClick then b._scripts.PostClick(b, mouse, down) end
     return result
 end
+
+-- ESC (GF-002-E): the client's CloseSpecialWindows hides every shown frame
+-- named in UISpecialFrames; when none was shown, the game menu opens.
+-- Then the next frame (timers at 0) runs. Returns true when a frame took it.
+function wow.pressEscape()
+    local found = false
+    for _, name in pairs(UISpecialFrames) do
+        local f = _G[name]
+        if f and f._shown then f:Hide(); found = true end
+    end
+    if not found then state.gameMenu = (state.gameMenu or 0) + 1 end
+    wow.advance(0)
+    return found
+end
+function wow.gameMenuCount() return state.gameMenu or 0 end
 
 -- Every text currently set on any widget (font strings, buttons, edit boxes).
 function wow.allObjects() return allObjects end

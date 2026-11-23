@@ -42,7 +42,8 @@ ns.Framework = F
 
 F.WINDOW_NAME = "GreenFangToolkit_MainWindow"
 F.NAV_WIDTH = 160
-F.PANEL_WIDTH, F.PANEL_HEIGHT = 1000, 610
+-- GF-002-E (owner: 「請調整大一點」): wider and taller, so the names fit on the rows.
+F.PANEL_WIDTH, F.PANEL_HEIGHT = 1100, 640
 
 local modules, byId = {}, {}
 local window, navButtons, panels, currentId = nil, {}, {}, nil
@@ -128,7 +129,7 @@ local function createWindow()
     f:SetScript("OnDragStart", f.StartMoving)
     f:SetScript("OnDragStop", f.StopMovingOrSizing)
     f:SetClampedToScreen(true)
-    if UISpecialFrames then table.insert(UISpecialFrames, F.WINDOW_NAME) end
+    ns.escRegister(f, ns.ESC_LEVEL.window) -- GF-002-E: ESC closes the windows above it first
     local nav = CreateFrame("Frame", nil, f)
     nav:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -32)
     nav:SetSize(F.NAV_WIDTH - 14, F.PANEL_HEIGHT - 44)
@@ -404,6 +405,7 @@ function ns.choiceButton(parent, w, x, y, options, onChoose, allText, label)
     menu:Hide()
     menu.items = {}
     b.menu = menu
+    ns.escRegister(menu, ns.ESC_LEVEL.menu)
     function b.textFor(value)
         if value == nil and allText then return allText end
         for _, o in ipairs(b.lastOptions or {}) do
@@ -435,9 +437,9 @@ function ns.choiceButton(parent, w, x, y, options, onChoose, allText, label)
             local item = menu.items[i]
             if not item then
                 item = CreateFrame("Button", nil, menu)
-                item:SetSize(w + 20, 18)
-                item:SetPoint("TOPLEFT", menu, "TOPLEFT", 4, -4 - (i - 1) * 18)
-                pcall(item.SetNormalFontObject, item, "GameFontHighlightSmall")
+                item:SetSize(w + 20, 22)
+                item:SetPoint("TOPLEFT", menu, "TOPLEFT", 4, -4 - (i - 1) * 22)
+                pcall(item.SetNormalFontObject, item, "GameFontHighlight")
                 item:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
                 menu.items[i] = item
             end
@@ -447,7 +449,7 @@ function ns.choiceButton(parent, w, x, y, options, onChoose, allText, label)
             item:Show()
         end
         for i = #list + 1, #menu.items do menu.items[i]:Hide() end
-        menu:SetSize(w + 28, #list * 18 + 8)
+        menu:SetSize(w + 28, #list * 22 + 8)
         menu:Show()
         openMenu = menu
     end)
@@ -461,7 +463,7 @@ function ns.checkBox(parent, text, x, y, onChange)
     local c = ns.createFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
     c:SetSize(24, 24)
     c:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
-    c.label = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    c.label = ns.freeText(parent:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
     c.label:SetPoint("LEFT", c, "RIGHT", 0, 0)
     c.label:SetText(text)
     c.checked = false
@@ -494,26 +496,28 @@ function ns.showMenu(owner, items)
         ns.makeOpaque(popup, 0)
         popup:EnableMouse(true)
         popup.items = {}
-        if UISpecialFrames then table.insert(UISpecialFrames, F.MENU_NAME) end
+        ns.escRegister(popup, ns.ESC_LEVEL.menu)
     end
-    local w = 160
+    -- GF-002-E: the larger font; as wide as the longest item.
+    local w = 180
+    for _, item in ipairs(items) do w = math.max(w, ns.labelWidth(item.text) + 24) end
     for i, item in ipairs(items) do
         local b = popup.items[i]
         if not b then
             b = CreateFrame("Button", nil, popup)
-            b:SetSize(w - 8, 20)
-            b:SetPoint("TOPLEFT", popup, "TOPLEFT", 4, -4 - (i - 1) * 20)
-            pcall(b.SetNormalFontObject, b, "GameFontHighlightSmall")
+            b:SetPoint("TOPLEFT", popup, "TOPLEFT", 4, -4 - (i - 1) * 22)
+            pcall(b.SetNormalFontObject, b, "GameFontHighlight")
             b:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
             popup.items[i] = b
         end
+        b:SetSize(w - 8, 22)
         b:SetText(item.text)
         local fn = item.fn
         b:SetScript("OnClick", function() closeMenu(); fn() end)
         b:Show()
     end
     for i = #items + 1, #popup.items do popup.items[i]:Hide() end
-    popup:SetSize(w, #items * 20 + 8)
+    popup:SetSize(w, #items * 22 + 8)
     popup:ClearAllPoints()
     local x, y = nil, nil
     if type(GetCursorPosition) == "function" then
@@ -552,7 +556,8 @@ function ns.multiChoiceButton(parent, w, x, y, options, onChange, summary)
     menu:Hide()
     menu.items = {}
     b.menu = menu
-    local ROW, WIDTH = 20, math.max(w + 40, 170)
+    ns.escRegister(menu, ns.ESC_LEVEL.menu)
+    local ROW, WIDTH = 22, math.max(w + 40, 190)
 
     function b.isOn(value) return b.selected == nil or b.selected[value] == true end
     function b.count()
@@ -594,7 +599,7 @@ function ns.multiChoiceButton(parent, w, x, y, options, onChange, summary)
         it.icon = it:CreateTexture(nil, "ARTWORK")
         it.icon:SetSize(16, 16)
         it.icon:SetPoint("LEFT", it, "LEFT", 22, 0)
-        it.label = it:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        it.label = it:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
         it.label:SetJustifyH("LEFT")
         menu.items[i] = it
         return it

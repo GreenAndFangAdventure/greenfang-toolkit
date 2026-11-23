@@ -411,6 +411,8 @@ function Recipes.isBuilding() return building ~= nil end
 -- Rows for one profession: { { id, name, crafters } }, filtered and sorted by name.
 -- opts (GF-001-D19): online = only crafters who are online; who = "mine"
 -- (only recipes I know) or "others" (only other members).
+-- GF-002-E: active = only crafters taking orders (R-4.2); fee = "free" / "set"
+-- / "max:<copper>" on the fee the row shows (Recipes.feeMatches).
 function Recipes.rows(index, skill, query, onlyGuid, opts)
     local p = index[skill]
     local rows = {}
@@ -425,6 +427,7 @@ function Recipes.rows(index, skill, query, onlyGuid, opts)
             local keep = (not onlyGuid or m.guid == onlyGuid)
                 and (not opts.online or m.online)
                 and (opts.who ~= "others" or not m.self)
+                and (not opts.active or (ns.Orders and ns.Orders.isActive(m.guid, skill)))
             if keep then list[#list + 1] = m end
         end
         if #list > 0 and (opts.who ~= "mine" or mine) then
@@ -432,7 +435,8 @@ function Recipes.rows(index, skill, query, onlyGuid, opts)
             if ns.Orders and #list > 1 then ns.Orders.sortCrafters(list, skill) end
             local name = Recipes.name(id)
             if q == "" or ns.keyName(name):find(q, 1, true) then
-                rows[#rows + 1] = { id = id, name = name, crafters = list, mine = mine, skill = skill } -- online first
+                local row = { id = id, name = name, crafters = list, mine = mine, skill = skill } -- online first
+                if not opts.fee or Recipes.feeMatches(Recipes.rowFee(row), opts.fee) then rows[#rows + 1] = row end
             end
         end
     end
@@ -442,6 +446,27 @@ function Recipes.rows(index, skill, query, onlyGuid, opts)
     end)
     return rows
 end
+
+-- GF-002-E: the fee a row shows (OrdersUI.rowFee): nil = nobody filled one in.
+function Recipes.rowFee(row)
+    if not (ns.OrdersUI and ns.OrdersUI.rowFee) then return nil end
+    return ns.OrdersUI.rowFee(row, row.crafters)
+end
+function Recipes.feeMatches(fee, filter)
+    if not filter then return true end
+    if filter == "free" then return fee == 0 end
+    if filter == "set" then return fee ~= nil end
+    local max = tonumber(tostring(filter):match("^max:(%d+)$"))
+    if max then return fee ~= nil and fee <= max end
+    return true
+end
+Recipes.FEE_OPTIONS = {
+    { value = nil, text = "工錢不限" },
+    { value = "free", text = "免費" },
+    { value = "set", text = "有填工錢" },
+    { value = "max:10000", text = "1 金以內" },
+    { value = "max:50000", text = "5 金以內" },
+}
 
 -- Rows of several professions in one list, by name (GF-001-D22).
 function Recipes.rowsFor(index, skills, query, onlyGuid, opts)
@@ -563,7 +588,7 @@ end
 -- 「配方」 page
 ---------------------------------------------------------------------------
 
-local ROW_HEIGHT, RECIPE_ICON, RECIPE_TIP_X = 22, 20, 300
+local ROW_HEIGHT, RECIPE_ICON, RECIPE_TIP_X = 30, 24, 300 -- GF-002-E: taller rows (a button on each)
 local panel, scroll, content, search, emptyLine, filterLine, clearFilter
 local rowWidgets = {}
 local shownRows = {} -- all rows of the current list; only those in view have frames
@@ -604,9 +629,10 @@ function Recipes.click(row, button)
     return Recipes.showDetail(data.id) and "detail" or "none"
 end
 
+Recipes.ROW_WIDTH = 1030 -- GF-002-E: the wider window
 local function newRow(i)
     local row = CreateFrame("Button", nil, content)
-    row:SetSize(930, ROW_HEIGHT)
+    row:SetSize(Recipes.ROW_WIDTH, ROW_HEIGHT)
     row.bg = row:CreateTexture(nil, "BACKGROUND")
     row.bg:SetAllPoints()
     -- Hover: a light highlight under the text; the row stays readable.
@@ -617,15 +643,24 @@ local function newRow(i)
     row.icon:SetSize(RECIPE_ICON, RECIPE_ICON)
     row.icon:SetPoint("LEFT", row, "LEFT", 6, 0)
     row.name = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    row.name:SetPoint("LEFT", row, "LEFT", 32, 0)
-    row.name:SetWidth(396)
+    row.name:SetPoint("LEFT", row, "LEFT", 36, 0)
+    row.name:SetWidth(300)
     row.name:SetJustifyH("LEFT")
     row.name:SetWordWrap(false)
-    row.who = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    row.who:SetPoint("LEFT", row, "LEFT", 440, 0)
-    row.who:SetWidth(480)
+    row.who = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    row.who:SetPoint("LEFT", row, "LEFT", Recipes.COL_WHO, 0)
+    row.who:SetWidth(Recipes.COL_FEE - Recipes.COL_WHO - 12)
     row.who:SetJustifyH("LEFT")
     row.who:SetWordWrap(false)
+    -- GF-002-E: 工錢 (the crafter's quote, R-4.4) and a visible 下單 / 我的工錢 button.
+    row.feeTex = row:CreateTexture(nil, "ARTWORK"); row.feeTex:SetSize(16, 16)
+    row.feeTex:SetPoint("LEFT", row, "LEFT", Recipes.COL_FEE, 0)
+    row.fee = ns.freeText(row:CreateFontString(nil, "ARTWORK", "GameFontHighlight"))
+    row.fee:SetPoint("LEFT", row, "LEFT", Recipes.COL_FEE + 20, 0)
+    row.fee:SetJustifyH("LEFT")
+    row.order = ns.OrdersUI.textButton(row, "我的工錢", function(self) Recipes.pressOrder(self:GetParent() or self.row) end, 104)
+    row.order.row = row
+    row.order:SetPoint("LEFT", row, "LEFT", Recipes.COL_BUTTON, 0)
     row:EnableMouse(true)
     if row.RegisterForClicks then row:RegisterForClicks("LeftButtonUp", "RightButtonUp") end
     row:SetScript("OnEnter", function(self)
@@ -649,6 +684,26 @@ local function newRow(i)
     row:SetScript("OnClick", function(self, button) Recipes.click(self, button) end)
     rowWidgets[i] = row
     return row
+end
+Recipes.COL_WHO, Recipes.COL_FEE, Recipes.COL_BUTTON = 350, 720, 900
+
+-- The row button: 下單 when someone else can make it, else 我的工錢 for my own recipe.
+function Recipes.rowAction(data)
+    if not data then return nil end
+    for _, m in ipairs(data.crafters or {}) do if not m.self then return "order" end end
+    if data.mine then return "fee" end
+    return nil
+end
+function Recipes.pressOrder(row)
+    local data = row and row.data
+    local action = Recipes.rowAction(data)
+    if action == "order" then
+        local pick = ns.OrdersUI.pendingCrafter
+        ns.OrdersUI.pendingCrafter, ns.OrdersUI.pendingMark = nil, nil
+        return ns.OrdersUI.openOrder({ recipe = data.id, skill = data.skill, crafters = data.crafters, crafter = pick })
+    elseif action == "fee" then
+        return ns.OrdersUI.editFee({ recipe = data.id, skill = data.skill })
+    end
 end
 
 function Recipes.professionsInIndex(index)
@@ -750,6 +805,18 @@ function Recipes.layoutRows()
                 row.who:SetText(Recipes.crafterText(data.crafters, data.skill))
                 local online = data.crafters[1] and data.crafters[1].online
                 if online then row.who:SetTextColor(0.4, 1, 0.4) else row.who:SetTextColor(0.8, 0.8, 0.8) end
+                local fee = Recipes.rowFee(data)
+                ns.OrdersUI.showFee(row.feeTex, row.fee, fee)
+                row.fee:SetText(ns.OrdersUI.feeText(fee))
+                local action = Recipes.rowAction(data)
+                if action then
+                    row.order:SetText(action == "order" and (ns.GameIcons.markup("order", 16) .. " 下單")
+                        or (ns.GameIcons.markup("services", 16) .. " 我的工錢"))
+                    row.order.action = action
+                    row.order:Show()
+                else
+                    row.order:Hide(); row.order.action = nil
+                end
                 row:Show()
             else
                 row:Hide(); row.data = nil
@@ -783,12 +850,12 @@ function Recipes.refresh()
     current.skills = chosen
     if Recipes.skillChoice then Recipes.skillChoice.refreshText() end
     if Recipes.whoChoice then Recipes.whoChoice.refreshText() end
-    local opts = { online = current.online, who = Recipes.whoFilter() }
+    local opts = { online = current.online, who = Recipes.whoFilter(), active = current.active, fee = current.fee }
     local rows = Recipes.rowsFor(index, chosen, current.query, current.guid, opts)
     shownRows = rows
     content:SetHeight(math.max(1, #rows * ROW_HEIGHT))
     Recipes.layoutRows()
-    local filtered = current.query ~= "" or current.online or opts.who ~= nil
+    local filtered = current.query ~= "" or current.online or opts.who ~= nil or current.active or current.fee ~= nil
     if #skills == 0 then
         emptyLine:SetText(current.guid and "這位成員還沒有分享配方。" or "還沒有人分享配方。")
     elseif #chosen == 0 then
@@ -824,52 +891,58 @@ end
 -- 搜尋 [box]  專業 [▼]  會做的人 [▼]  [ ] 只看在線   N 個配方
 local FILTER_Y = -44
 
-local function label(p, text, x)
-    local l = p:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    l:SetPoint("TOPLEFT", p, "TOPLEFT", x, FILTER_Y - 6)
+local function label(p, text, x, y)
+    local l = ns.freeText(p:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
+    l:SetPoint("TOPLEFT", p, "TOPLEFT", x, (y or FILTER_Y) - 6)
     l:SetText(text)
     return l
 end
+local FILTER_Y2 = FILTER_Y - 34
 
 local function build(p)
     label(p, "搜尋", 22)
     search = ns.createFrame("EditBox", nil, p, "InputBoxTemplate")
     search:SetSize(180, 24)
-    search:SetPoint("TOPLEFT", p, "TOPLEFT", 62, FILTER_Y)
+    search:SetPoint("TOPLEFT", p, "TOPLEFT", 70, FILTER_Y)
     search:SetAutoFocus(false)
     search:SetMaxLetters(60)
     search:SetScript("OnTextChanged", function(self) current.query = str(self:GetText()); Recipes.refresh() end)
     search:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     Recipes.searchBox = search
-    label(p, "專業", 262)
+    label(p, "專業", 272)
     -- GF-001-D22: check boxes (several professions at once), with icons.
-    Recipes.skillChoice = ns.multiChoiceButton(p, 120, 300, FILTER_Y, Recipes.skillOptions,
+    Recipes.skillChoice = ns.multiChoiceButton(p, 130, 320, FILTER_Y, Recipes.skillOptions,
         function() Recipes.refresh() end, Recipes.skillSummary)
-    label(p, "會做的人", 440)
-    Recipes.whoChoice = ns.multiChoiceButton(p, 110, 500, FILTER_Y, function() return Recipes.WHO_OPTIONS end,
+    label(p, "會做的人", 470)
+    Recipes.whoChoice = ns.multiChoiceButton(p, 120, 546, FILTER_Y, function() return Recipes.WHO_OPTIONS end,
         function() Recipes.refresh() end, Recipes.whoSummary)
-    Recipes.onlineCheck = ns.checkBox(p, "只看在線", 628, FILTER_Y, function(on) current.online = on; Recipes.refresh() end)
-    filterLine = p:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    filterLine:SetPoint("TOPLEFT", p, "TOPLEFT", 724, FILTER_Y - 5)
+    Recipes.onlineCheck = ns.checkBox(p, "只看在線", 690, FILTER_Y, function(on) current.online = on; Recipes.refresh() end)
+    -- GF-002-E (owner: 「工錢應直接顯示，且可篩選」): second line.
+    Recipes.activeCheck = ns.checkBox(p, "只看接單中", 22, FILTER_Y2, function(on) current.active = on; Recipes.refresh() end)
+    label(p, "工錢", 170, FILTER_Y2)
+    Recipes.feeChoice = ns.choiceButton(p, 130, 218, FILTER_Y2, function() return Recipes.FEE_OPTIONS end,
+        function(v) current.fee = v; Recipes.refresh() end, "工錢不限")
+    filterLine = ns.freeText(p:CreateFontString(nil, "ARTWORK", "GameFontNormal"))
+    filterLine:SetPoint("TOPLEFT", p, "TOPLEFT", 820, FILTER_Y - 5)
     filterLine:SetJustifyH("LEFT")
     clearFilter = ns.createFrame("Button", nil, p, "UIPanelButtonTemplate")
-    clearFilter:SetSize(100, 22)
-    clearFilter:SetPoint("TOPLEFT", p, "TOPLEFT", 840, FILTER_Y - 1)
+    clearFilter:SetSize(110, 24)
+    clearFilter:SetPoint("TOPLEFT", p, "TOPLEFT", 940, FILTER_Y - 1)
     clearFilter:SetText("看全部的人")
     clearFilter:SetScript("OnClick", function() current.guid = nil; Recipes.refresh() end)
     clearFilter:Hide()
     Recipes.clearFilterButton = clearFilter
-    local header = p:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    header:SetPoint("TOPLEFT", p, "TOPLEFT", 52, -82)
-    header:SetText("配方")
-    local header2 = p:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    header2:SetPoint("TOPLEFT", p, "TOPLEFT", 460, -82)
-    header2:SetText("會做的人")
+    local HEAD_Y = -118
+    for _, h in ipairs({ { "配方", 52 }, { "會做的人", 20 + Recipes.COL_WHO }, { "工錢", 20 + Recipes.COL_FEE } }) do
+        local fs = ns.freeText(p:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
+        fs:SetPoint("TOPLEFT", p, "TOPLEFT", h[2], HEAD_Y)
+        fs:SetText(h[1])
+    end
     scroll = ns.createFrame("ScrollFrame", nil, p, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 20, -100)
+    scroll:SetPoint("TOPLEFT", 20, -138)
     scroll:SetPoint("BOTTOMRIGHT", -40, 24)
     content = CreateFrame("Frame", nil, scroll)
-    content:SetSize(930, 1)
+    content:SetSize(Recipes.ROW_WIDTH, 1)
     scroll:SetScrollChild(content)
     scroll:HookScript("OnVerticalScroll", function() Recipes.layoutRows() end)
     emptyLine = p:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
