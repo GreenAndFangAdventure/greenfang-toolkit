@@ -6,6 +6,7 @@ local Orders, Prices, Delivery, Ledger = ns.Orders, ns.Prices, ns.Delivery, ns.L
 
 -- GF-006-B: order and price ledgers start a while after the D-014 sharing.
 local ORDERS_DELAY, PRICES_DELAY, MAINTAIN_EVERY = 30, 120, 60
+local ADVENTURE_DELAY = 35 -- GF-002-B
 
 local scanQueued, selfQueued, loginSelfRecorded = false, false, false
 local loginAt = 0
@@ -39,6 +40,11 @@ local function collectSoon(delay)
                 -- GF-006-C (R-9.4): web orders GF Sync left in GreenFangToolkit_Inbox.
                 if ns.ordersStarted then pcall(ns.WebOrders.readInbox) end
                 Delivery.checkPending()
+            end
+            -- GF-002-B: adventure tickets (GFTKA); my tickets that should have closed while I was away.
+            if not ns.adventureStarted and ns.now() - loginAt >= ADVENTURE_DELAY then
+                ns.adventureStarted = ns.Adventure.ledger:announce()
+                if ns.adventureStarted then pcall(ns.Adventure.onLogin) end
             end
             if not ns.pricesStarted and ns.now() - loginAt >= PRICES_DELAY then
                 ns.pricesStarted = Prices.login()
@@ -133,6 +139,7 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
         Share.register()
         -- GF-006-B: new prefixes; 0.10.0 never registers them (spec §12 item 10).
         Orders.ledger:register()
+        ns.Adventure.ledger:register()
         Prices.ledger:register()
         Delivery.install()
         UI.loadSettings()
@@ -148,11 +155,14 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
         loginAt = ns.now()
         ns.after(Share.LOGIN_DELAY + 1, function() collectSoon(0) end)
         ns.after(ORDERS_DELAY + 1, function() collectSoon(0) end)
+        ns.after(ADVENTURE_DELAY + 1, function() collectSoon(0) end)
         ns.after(PRICES_DELAY + 1, function() collectSoon(0) end)
         -- GF-006-B: lock guild orders, move closed rows to history, badge.
         local function maintain()
             if ns.guildState() == "target" then
                 pcall(Orders.maintain)
+                if ns.adventureStarted then pcall(ns.Adventure.maintain) end
+                if ns.AdventureUI then pcall(ns.AdventureUI.updateBadge) end
                 if ns.OrdersUI then pcall(ns.OrdersUI.updateBadge) end
             end
             ns.after(MAINTAIN_EVERY, maintain)
@@ -168,6 +178,8 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
         -- Last chance before the client writes SavedVariables.
         -- D-015: always written as true (GF Sync skips the file otherwise).
         if ns.db.sync then ns.db.sync.enabled = true end
+        -- GF-002-B (R-4.7): when I left, for my "now" tickets.
+        if ns.Adventure then pcall(ns.Adventure.onLogout) end
         if not ns.inCombat() then
             recordSelfNow(not loginSelfRecorded)
             -- Phase 4 (GF-001-D14): relayed data and recipe names for the site.
@@ -228,7 +240,8 @@ for _, e in ipairs({ "TRADE_SHOW", "TRADE_CLOSED", "TRADE_ACCEPT_UPDATE", "TRADE
     "BAG_UPDATE_DELAYED", "MAIL_SEND_SUCCESS", "MAIL_FAILED", "MAIL_INBOX_UPDATE", "MERCHANT_SHOW", "MERCHANT_UPDATE",
     "AUCTION_HOUSE_SHOW", "AUCTION_HOUSE_CLOSED", "REPLICATE_ITEM_LIST_UPDATE",
     "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED", "AUCTION_HOUSE_BROWSE_RESULTS_ADDED",
-    "COMMODITY_SEARCH_RESULTS_UPDATED", "ITEM_SEARCH_RESULTS_UPDATED" }) do
+    "COMMODITY_SEARCH_RESULTS_UPDATED", "ITEM_SEARCH_RESULTS_UPDATED", "QUEST_LOG_UPDATE", "QUEST_REMOVED",
+    "QUEST_TURNED_IN" }) do
     local ok = pcall(orderEvents.RegisterEvent, orderEvents, e)
     if not ok then ns.missingEvents[#ns.missingEvents + 1] = e end
 end
@@ -254,5 +267,11 @@ orderEvents:SetScript("OnEvent", function(_, event, arg1, arg2)
         Prices.onBrowseResults()
     elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" or event == "ITEM_SEARCH_RESULTS_UPDATED" then
         Prices.onSearchResult(arg1)
+    elseif event == "QUEST_LOG_UPDATE" or event == "QUEST_REMOVED" or event == "QUEST_TURNED_IN" then
+        -- GF-002-B (R-5.2): quests that left my log come off my worker ticket.
+        ns.coalesce("adventure-quests", 2, function()
+            local log = ns.Adventure.questLog()
+            if log then pcall(ns.Adventure.syncQuests, log) end
+        end)
     end
 end)
