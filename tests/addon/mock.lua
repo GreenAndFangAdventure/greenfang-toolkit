@@ -5,7 +5,7 @@
 local wow = {}
 
 local TOC_FILES = { "Config.lua", "Core.lua", "Data.lua", "Icons.lua", "GameIcons.lua", "Professions.lua", "Roster.lua", "Sync.lua", "Comm.lua", "Share.lua", "Ledger.lua", "Orders.lua", "Prices.lua", "Delivery.lua", "WebOrders.lua", "AdventureData.lua", "Adventure.lua",
-    "Export.lua", "Framework.lua", "UI.lua", "Character.lua", "Recipes.lua", "Diag.lua", "OrdersUI.lua", "AdventureUI.lua", "SleepingBagData.lua", "SleepingBag.lua", "Init.lua" }
+    "Export.lua", "Framework.lua", "UI.lua", "Character.lua", "Recipes.lua", "Diag.lua", "GuildAdmin.lua", "NativeLFG.lua", "OrdersUI.lua", "AdventureUI.lua", "SleepingBagData.lua", "SleepingBag.lua", "Init.lua" }
 wow.TOC_FILES = TOC_FILES
 
 ---------------------------------------------------------------------------
@@ -127,6 +127,9 @@ local function newObject(kind, name)
     end
     function methods.SetFontObject(self, font) self._font = font end
     function methods.SetDesaturated(self, on) self._desaturated = on and true or false end
+    function methods.SetVertexColor(self, r, g, b) self._vertex = { r, g, b } end
+    function methods.SetHeight(self, h) if self._kind ~= "FontString" then self._h = h end end
+    function methods.SetBlendMode(self, m) self._blend = m end
     function methods.SetWordWrap(self, on) self._wordWrap = on and true or false end
     function methods.CreateTexture(self, _, layer)
         local t = newObject("Texture")
@@ -233,6 +236,9 @@ function wow.reset(opts)
         noZoneText = opts.noZoneText,       -- GetZoneText missing -> C_Map fallback
         classColorAPI = opts.classColorAPI, -- provide C_ClassColor.GetClassColor
         noChatInfo = opts.noChatInfo,       -- C_ChatInfo missing
+        guildPerms = opts.guildPerms,       -- GF-001-Q: { invite = true, promote = true, ... }
+        myRankIndex = opts.myRankIndex,     -- my rank index from GetGuildInfo (default 4)
+        noGuildAdmin = opts.noGuildAdmin,   -- the guild management functions are missing
         sent = {},                          -- addon messages sent
         prefixes = {},                      -- registered addon message prefixes
         reloads = 0,                        -- C_UI.Reload calls
@@ -352,6 +358,19 @@ function wow.pressEscape()
 end
 function wow.gameMenuCount() return state.gameMenu or 0 end
 
+-- The game's confirm box (GF-001-Q): the one open, accept (with edit text), cancel.
+function wow.popup() return state.staticPopup end
+function wow.acceptPopup(text)
+    local f = state.staticPopup
+    if not f then return false end
+    if text and f.editBox then f.editBox:SetText(text) end
+    local d = StaticPopupDialogs[f.which]
+    state.staticPopup = nil
+    if d.OnAccept then d.OnAccept(f, f.data) end
+    return true
+end
+function wow.cancelPopup() state.staticPopup = nil end
+
 -- Every text currently set on any widget (font strings, buttons, edit boxes).
 function wow.allObjects() return allObjects end
 
@@ -454,7 +473,7 @@ function wow.installGlobals()
     GetGuildInfo = function(unit)
         if unit ~= "player" or not state.inGuild or state.guildInfoGone
             or state.guildNameLoading then return nil end
-        return p.guild, p.guildRank, 4, nil
+        return p.guild, p.guildRank, state.myRankIndex or 4, nil
     end
     GetRealmName = function() return p.realm end
     GetZoneText = function() return state.zone end
@@ -527,10 +546,55 @@ function wow.installGlobals()
         local m = state.roster[i]
         if not m then return nil end
         local rankIndex = ({ ["會長"] = 0, ["幹部"] = 1, ["會員"] = 2, ["新進"] = 3 })[m.rank] or 2
-        return m.name, m.rank, rankIndex, m.level, m.class, m.zone, "公開備註", "幹部備註", m.online, 0,
+        return m.name, m.rank, rankIndex, m.level, m.class, m.zone, m.note or "公開備註", m.officerNote or "幹部備註", m.online, 0,
             m.classToken, 0, 0, false, false, 4, m.guid
     end
     C_GuildInfo = { GuildRoster = function() state.rosterRequests = state.rosterRequests + 1 end }
+    -- Guild management (GF-001-Q). state.guildPerms = { invite = true, promote = true, ... };
+    -- every call is recorded in state.guildCalls; state.noGuildAdmin removes them all.
+    state.guildCalls = {}
+    local function perm(k) return function() return state.guildPerms ~= nil and state.guildPerms[k] == true end end
+    local function call(what) return function(a, b) state.guildCalls[#state.guildCalls + 1] = what .. ":" .. tostring(a) .. (b and (":" .. tostring(b)) or "") end end
+    CanGuildInvite, CanGuildPromote, CanGuildDemote, CanGuildRemove = perm("invite"), perm("promote"), perm("demote"), perm("remove")
+    CanEditPublicNote, CanEditOfficerNote, CanViewOfficerNote = perm("publicNote"), perm("officerNote"), perm("viewOfficer")
+    CanEditMOTD, CanEditGuildInfo = perm("motd"), perm("info")
+    GuildInvite, GuildPromote, GuildDemote, GuildUninvite = call("invite"), call("promote"), call("demote"), call("uninvite")
+    GuildRosterSetPublicNote = function(i, t) call("publicNote")(i, t); if state.roster[i] then state.roster[i].note = t end end
+    GuildRosterSetOfficerNote = function(i, t) call("officerNote")(i, t); if state.roster[i] then state.roster[i].officerNote = t end end
+    GuildSetMOTD = function(t) call("motd")(t); state.motd = t end
+    GetGuildRosterMOTD = function() return state.motd or "" end
+    GetGuildInfoText = function() return state.guildInfoText or "" end
+    SetGuildInfoText = function(t) call("info")(t); state.guildInfoText = t end
+    GuildControlGetNumRanks = function() return 4 end
+    ToggleGuildFrame = call("guildFrame")
+    ChatFrame_SendTell = call("tell")
+    C_PartyInfo = { InviteUnit = call("group") }
+    C_FriendList = { SendWho = call("who") }
+    -- The game's own confirm boxes: StaticPopup_Show records the open one;
+    -- wow.acceptPopup / wow.cancelPopup press its buttons.
+    StaticPopupDialogs = {}
+    state.staticPopup = nil
+    StaticPopup_Show = function(which, text1, text2, data)
+        local d = StaticPopupDialogs[which]
+        if not d then return nil end
+        local frame = { which = which, data = data, text = string.format(d.text, text1 or "", text2 or "") }
+        if d.hasEditBox then
+            frame.editBox = { _text = "", SetText = function(self, t) self._text = t or "" end,
+                GetText = function(self) return self._text end, SetMaxLetters = function(self, n) self._max = n end,
+                HighlightText = function() end, GetParent = function() return frame end }
+        end
+        frame.Hide = function() if state.staticPopup == frame then state.staticPopup = nil end end
+        if d.OnShow then d.OnShow(frame, data) end
+        state.staticPopup = frame
+        return frame
+    end
+    if state.noGuildAdmin then
+        CanGuildInvite, CanGuildPromote, CanGuildDemote, CanGuildRemove = nil, nil, nil, nil
+        CanEditPublicNote, CanEditOfficerNote, CanViewOfficerNote, CanEditMOTD, CanEditGuildInfo = nil, nil, nil, nil, nil
+        GuildInvite, GuildPromote, GuildDemote, GuildUninvite = nil, nil, nil, nil
+        GuildRosterSetPublicNote, GuildRosterSetOfficerNote, GuildSetMOTD, SetGuildInfoText = nil, nil, nil, nil
+        StaticPopup_Show, ToggleGuildFrame = nil, nil
+    end
     C_ChatInfo = nil
     if not state.noChatInfo then
         C_ChatInfo = {

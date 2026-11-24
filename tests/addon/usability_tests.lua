@@ -150,7 +150,8 @@ return function(T)
         local A, O = ns.AdventureUI, ns.OrdersUI
         A.openTicket()
         local f = _G[A.TICKET_NAME]
-        eq(overlaps({ f.timeButtons.n, f.timeButtons.t, f.timeButtons.f }), "", "時間")
+        -- GF-002-G: one 開始 control (the old 現在/今天/之後 buttons are gone).
+        ok(f.timeButtons == nil, "no three time buttons")
         eq(overlaps({ f.direct, f.consent }), "", "錄取")
         local tags = {}
         for _, k in ipairs(A.TAG_KEYS) do tags[#tags + 1] = f.tagButtons[k] end
@@ -210,7 +211,8 @@ return function(T)
         local first = function(key) return G.ART[key] and G.ART[key][1][1] end
         eq(first("adventure"), "Interface\\Icons\\INV_Misc_Map_01", "冒險單: a map")
         eq(first("worker"), "Interface\\Icons\\Spell_Holy_SealOfSalvation", "職工單: a raised hand")
-        eq(first("adjust"), "Interface\\Icons\\INV_Misc_GroupNeedMore", "調整: a group")
+        eq(first("adjust"), "Interface\\Icons\\INV_Misc_GroupLooking", "調整: a person (GF-002-G social heads)")
+        eq(first("group"), "Interface\\Icons\\INV_Misc_GroupNeedMore", "組隊: several heads")
         ok(first("direct") ~= first("consent"), "直接錄取 and 團長同意 look different")
         eq(first("consent"), "Interface\\GroupFrame\\UI-Group-LeaderIcon", "團長同意: the leader's crown")
         ok(first("tag_voice") ~= "Interface\\Icons\\Spell_Holy_Silence", "語音 is no longer the silence icon")

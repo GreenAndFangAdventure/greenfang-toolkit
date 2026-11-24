@@ -44,16 +44,23 @@ local ONLINE_COLOR, OFFLINE_COLOR = { 0.4, 1, 0.4 }, { 0.55, 0.55, 0.55 }
 local RANK_COLOR = { 0.85, 0.82, 0.65 }
 
 -- Make each visible row from the stored snapshot, never from a stale chat printout.
+-- GF-001-Q: two note columns on the right (公會註記 for everyone, 幹部註記
+-- only for those the game lets see it); the others gave a little room.
 local columns = {
-    { name = "角色", key = "name", x = 5, w = 160 },
-    { name = "會階", key = "rank", x = 168, w = 78 },
-    { name = "種族", key = "race", x = 249, w = 76 },
-    { name = "職業", key = "class", x = 328, w = 100, icon = true },
-    { name = "專業技能", key = "professions", x = 431, w = 300 },
-    { name = "等級", key = "level", x = 734, w = 40, firstDescending = true, center = true },
-    { name = "位置", key = "zone", x = 777, w = 92 },
-    { name = "狀態", key = "online", x = 872, w = 62, firstDescending = true },
+    { name = "角色", key = "name", x = 5, w = 150 },
+    { name = "會階", key = "rank", x = 158, w = 70 },
+    { name = "種族", key = "race", x = 231, w = 66 },
+    { name = "職業", key = "class", x = 300, w = 92, icon = true },
+    { name = "專業技能", key = "professions", x = 395, w = 286 },
+    { name = "等級", key = "level", x = 684, w = 34, firstDescending = true, center = true },
+    { name = "位置", key = "zone", x = 721, w = 70 },
+    { name = "狀態", key = "online", x = 794, w = 40, firstDescending = true },
+    { name = "公會註記", key = "note", x = 837, w = 104, noSort = true },
+    { name = "幹部註記", key = "officerNote", x = 944, w = 94, noSort = true, officer = true },
 }
+UI.columns = columns
+UI.ROW_WIDTH = 1040
+UI.REPORT_WIDTH = 520 -- the two lines on top; the guild buttons are right of them
 
 ---------------------------------------------------------------------------
 -- Sorting and filtering (pure; covered by offline tests)
@@ -216,9 +223,14 @@ end
 local function newRow(i)
     local row = CreateFrame("Frame", nil, rowContent)
     row.index = i
-    row:SetSize(936, ROW_HEIGHT)
+    row:SetSize(UI.ROW_WIDTH, ROW_HEIGHT)
     row.bg = row:CreateTexture(nil, "BACKGROUND")
     row.bg:SetAllPoints()
+    -- GF-001-Q: the selected member (its actions are in the bar under the list).
+    row.selected = row:CreateTexture(nil, "BORDER")
+    row.selected:SetAllPoints()
+    row.selected:SetColorTexture(1, 0.82, 0, 0.18)
+    row.selected:Hide()
     row.cells = {}
     for j, col in ipairs(columns) do
         local font = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -284,10 +296,20 @@ local function newRow(i)
             ns.showMenu(self, ns.OrdersUI.rosterMenuItems(m, id))
             return
         end
+        -- GF-001-Q: right-click elsewhere = the member menu (whisper, group,
+        -- look up, and what this character may do in the guild).
+        if mouse == "RightButton" then
+            UI.select(self.member)
+            local items = UI.memberMenuItems(self.member)
+            if #items > 0 then ns.showMenu(self, items) end
+            return
+        end
         if id then
             UI.setSkillFilter(UI.filters.skill ~= id and id or nil)
-        elseif UI.hasRecipes(self.memberGuid) then
-            ns.Recipes.show(self.memberGuid)
+        else
+            -- GF-001-Q: a left click selects the member; the same buttons show
+            -- under the list (配方 among them when the member shared recipes).
+            UI.select(self.member)
         end
     end)
     rowWidgets[i] = row
@@ -485,6 +507,13 @@ function UI.refresh(resetScroll)
         statusLine:SetText("")
     end
     UI.refreshSyncIndicator()
+    UI.refreshAdminButtons()
+    if UI.selected then
+        local still
+        for _, m in ipairs(matching) do if m.name == UI.selected.name then still = m end end
+        UI.selected = still
+    end
+    UI.drawActionBar()
     updateSortHeaders()
     rowContent:SetHeight(math.max(1, #matching * ROW_HEIGHT))
     if resetScroll and rowScroll then rowScroll:SetVerticalScroll(0) end
@@ -701,6 +730,8 @@ end
 function UI.fillRow(row, m)
     local color = Icons.classColor(m.classToken)
     local cells = row.cells
+    row.member = m
+    if UI.selected and m.name == UI.selected.name then row.selected:Show() else row.selected:Hide() end
     cells[1]:SetText(str(m.name))
     cells[1]:SetTextColor(color[1], color[2], color[3])
     cells[2]:SetText(str(m.guildRank))
@@ -715,6 +746,155 @@ function UI.fillRow(row, m)
     local status = m.online and ONLINE_COLOR or OFFLINE_COLOR
     cells[8]:SetText(m.online and "在線" or "離線")
     cells[8]:SetTextColor(status[1], status[2], status[3])
+    -- GF-001-Q: notes straight from the game's roster (memory only, never saved).
+    local note, officer = "", nil
+    if ns.GuildAdmin then note, officer = ns.GuildAdmin.notes(m.name) end
+    cells[9]:SetText(note)
+    cells[9]:SetTextColor(0.9, 0.9, 0.9)
+    if UI.officerVisible then
+        cells[10]:SetText(officer or "")
+        cells[10]:SetTextColor(0.6, 1, 0.6)
+        cells[10]:Show()
+    else
+        cells[10]:SetText("")
+        cells[10]:Hide()
+    end
+end
+
+---------------------------------------------------------------------------
+-- GF-001-Q: guild management on the roster (ns.GuildAdmin does the work)
+---------------------------------------------------------------------------
+
+-- Right-click menu and the bar under the list: the same actions.
+UI.RECIPE_ICON = "Interface\\Icons\\INV_Scroll_04"
+function UI.memberMenuItems(m)
+    if not m or not ns.GuildAdmin then return {} end
+    local items = {}
+    if UI.hasRecipes(m.guid) then
+        items[#items + 1] = { text = "|T" .. UI.RECIPE_ICON .. ":16|t 配方", fn = function() ns.Recipes.show(m.guid) end }
+    end
+    for _, it in ipairs(ns.GuildAdmin.menuItems(m)) do items[#items + 1] = it end
+    return items
+end
+
+function UI.select(m)
+    UI.selected = m
+    UI.drawActionBar()
+    UI.layoutRows()
+end
+
+UI.BAR_MAX = 9
+function UI.drawActionBar()
+    local bar = UI.actionBar
+    if not bar then return end
+    local m = UI.selected
+    local G = ns.GuildAdmin
+    if not (m and G) then
+        bar.name:SetText("")
+        bar.hint:SetText("點一列選成員")
+        for _, b in ipairs(bar.buttons) do b:Hide() end
+        return
+    end
+    bar.hint:SetText("")
+    local c = Icons.classColor(m.classToken)
+    bar.name:SetText(ns.shortName(m.name))
+    bar.name:SetTextColor(c[1], c[2], c[3])
+    local list = {}
+    if UI.hasRecipes(m.guid) then
+        list[#list + 1] = { key = "recipes", text = "配方", icon = UI.RECIPE_ICON, fn = function() ns.Recipes.show(m.guid) end }
+    end
+    for _, a in ipairs(G.actionsFor(m)) do list[#list + 1] = a end
+    local shown = {}
+    for i = 1, UI.BAR_MAX do
+        local b = bar.buttons[i]
+        local a = list[i]
+        if not b then
+            b = ns.OrdersUI.iconButton(bar, ns.ICON, "unknown", nil, nil, "")
+            bar.buttons[i] = b
+        end
+        if a then
+            ns.Icons.set(b.tex, a.icon)
+            b.tip, b.action = a.text, a.key
+            ns.OrdersUI.setLabel(b, a.text)
+            local fn = a.fn
+            b:SetScript("OnClick", function() fn(m) end)
+            b:Show()
+            shown[#shown + 1] = b
+        else
+            b:Hide(); b.action = nil
+        end
+    end
+    ns.OrdersUI.flow(bar, shown, bar.nameWidth, -6, 18)
+end
+
+-- 公會資訊: the message of the day and the guild info, with 編輯 where allowed.
+UI.GUILD_INFO_NAME = "GreenFangToolkit_GuildInfo"
+function UI.openGuildInfo()
+    local G = ns.GuildAdmin
+    if not UI.guildInfo then
+        local f = ns.popupWindow(UI.GUILD_INFO_NAME, 640, 420)
+        f:SetPoint("CENTER", 0, 40)
+        f:EnableMouse(true)
+        ns.exclusivePopup(f)
+        if f.TitleText then f.TitleText:SetText("公會資訊") end
+        local O = ns.OrdersUI
+        O.fieldLabel(f, "今日訊息", O.FIELD_X, -52)
+        f.motd = f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
+        f.motd:SetPoint("TOPLEFT", f, "TOPLEFT", O.FIELD_X, -80)
+        f.motd:SetWidth(592); f.motd:SetJustifyH("LEFT")
+        f.editMotd = O.textButton(f, "編輯", function() G.editMOTD() end)
+        f.editMotd:SetPoint("TOPRIGHT", f, "TOPRIGHT", -24, -44)
+        O.fieldLabel(f, "公會資訊", O.FIELD_X, -152)
+        f.info = f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
+        f.info:SetPoint("TOPLEFT", f, "TOPLEFT", O.FIELD_X, -180)
+        f.info:SetWidth(592); f.info:SetJustifyH("LEFT"); f.info:SetJustifyV("TOP")
+        f.info:SetHeight(170)
+        f.editInfo = O.textButton(f, "編輯", function() G.editInfo() end)
+        f.editInfo:SetPoint("TOPRIGHT", f, "TOPRIGHT", -24, -144)
+        f.close = O.textButton(f, ns.GameIcons.markup("yes", 20) .. " 完成", function() f:Hide() end, 110)
+        f.close:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -24, 18)
+        f:Hide()
+        UI.guildInfo = f
+    end
+    local f = UI.guildInfo
+    f:Show()
+    UI.drawGuildInfo()
+    return f
+end
+function UI.drawGuildInfo()
+    local f, G = UI.guildInfo, ns.GuildAdmin
+    if not (f and G) then return end
+    local motd, info = G.motd(), G.infoText()
+    f.motd:SetText(motd ~= "" and motd or "（沒有）")
+    f.info:SetText(info ~= "" and info or "（沒有）")
+    if G.can("motd") then f.editMotd:Show() else f.editMotd:Hide() end
+    if G.can("info") then f.editInfo:Show() else f.editInfo:Hide() end
+end
+
+-- Buttons on top of the page: only what this character may use.
+function UI.refreshAdminButtons()
+    local G = ns.GuildAdmin
+    if not (G and UI.inviteButton) then return end
+    local list = {}
+    if G.can("invite") then UI.inviteButton:Show(); list[#list + 1] = UI.inviteButton else UI.inviteButton:Hide() end
+    if G.has("GetGuildRosterMOTD") or G.has("GetGuildInfoText") then UI.infoButton:Show(); list[#list + 1] = UI.infoButton else UI.infoButton:Hide() end
+    if G.canOpenGameUI() then UI.gameGuildButton:Show(); list[#list + 1] = UI.gameGuildButton else UI.gameGuildButton:Hide() end
+    -- Right-aligned on the top line.
+    local x = UI.ROW_WIDTH + 20
+    for i = #list, 1, -1 do
+        local b = list[i]
+        x = x - b.gfWidth
+        b:ClearAllPoints()
+        b:SetPoint("TOPLEFT", panel, "TOPLEFT", x, -34)
+        x = x - 10
+    end
+    UI.adminLeft = x
+    local view = G.can("viewOfficer")
+    UI.officerVisible = view
+    for _, entry in ipairs(sortHeaders) do
+        if entry.col.officer then if view then entry.heading:Show() else entry.heading:Hide() end end
+    end
+    if UI.guildInfo and UI.guildInfo:IsShown() then UI.drawGuildInfo() end
 end
 
 local function scanResult(ok, countOrReason)
@@ -780,12 +960,18 @@ local function build(p)
     local f = p
     reportLine = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     reportLine:SetPoint("TOPLEFT", 22, -38)
-    reportLine:SetWidth(955)
+    reportLine:SetWidth(UI.REPORT_WIDTH)
     reportLine:SetJustifyH("LEFT")
     summaryLine = f:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
     summaryLine:SetPoint("TOPLEFT", 22, -58)
-    summaryLine:SetWidth(940)
+    summaryLine:SetWidth(UI.REPORT_WIDTH)
     summaryLine:SetJustifyH("LEFT")
+    -- GF-001-Q: 邀請入會 / 公會資訊 / 開啟遊戲公會介面 (top right; only what may be used).
+    local G = ns.GuildAdmin
+    local O = ns.OrdersUI
+    UI.inviteButton = O.textButton(f, "|TInterface\\Icons\\Spell_Holy_PrayerOfSpirit:20|t 邀請入會", function() G.inviteGuild() end)
+    UI.infoButton = O.textButton(f, "|TInterface\\Icons\\INV_Misc_Note_06:20|t 公會資訊", function() UI.openGuildInfo() end)
+    UI.gameGuildButton = O.textButton(f, "|TInterface\\Icons\\INV_Shirt_GuildTabard_01:20|t 開啟遊戲公會介面", function() G.openGameUI() end)
     UI.updateButton = button(f, "更新名冊", 115, 26, 20, -80, manualUpdate)
     -- GF-001-D20: one filter line with room between every control:
     -- [更新名冊] 搜尋 [box]  [專業 ▼]  [職業 ▼]  [ ] 只看在線  等級 [  ] 以上  [清除]
@@ -833,7 +1019,7 @@ local function build(p)
         UI.onlineCheck, UI.levelBox }
     local header = CreateFrame("Frame", nil, f)
     header:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -119)
-    header:SetSize(937, 25)
+    header:SetSize(UI.ROW_WIDTH, 25)
     local bg = header:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
     bg:SetColorTexture(0.13, 0.37, 0.30, 0.4)
@@ -845,17 +1031,34 @@ local function build(p)
         label:SetAllPoints()
         label:SetJustifyH("LEFT")
         label:SetWordWrap(false)
-        heading:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
-        heading:SetScript("OnClick", function() changeSort(col) end)
-        rosterControls[#rosterControls + 1] = heading
-        sortHeaders[#sortHeaders + 1] = { col = col, label = label }
+        if not col.noSort then
+            heading:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+            heading:SetScript("OnClick", function() changeSort(col) end)
+            rosterControls[#rosterControls + 1] = heading
+        end
+        heading.fieldNamed = col.name
+        sortHeaders[#sortHeaders + 1] = { col = col, label = label, heading = heading }
     end
     updateSortHeaders()
     rowScroll = ns.createFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
     rowScroll:SetPoint("TOPLEFT", 20, -149)
-    rowScroll:SetPoint("BOTTOMRIGHT", -40, 51)
+    rowScroll:SetPoint("BOTTOMRIGHT", -40, 96)
     rowContent = CreateFrame("Frame", nil, rowScroll)
-    rowContent:SetSize(938, 1)
+    rowContent:SetSize(UI.ROW_WIDTH, 1)
+    -- GF-001-Q: the selected member's actions (the same as the right-click menu).
+    local bar = CreateFrame("Frame", nil, f)
+    bar:SetPoint("TOPLEFT", f, "BOTTOMLEFT", 20, 92)
+    bar:SetSize(UI.ROW_WIDTH, 44)
+    local barBg = bar:CreateTexture(nil, "BACKGROUND")
+    barBg:SetAllPoints()
+    barBg:SetColorTexture(0.13, 0.37, 0.30, 0.25)
+    bar.name = ns.freeText(bar:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
+    bar.name:SetPoint("LEFT", bar, "LEFT", 10, 0)
+    bar.hint = ns.freeText(bar:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT))
+    bar.hint:SetPoint("LEFT", bar, "LEFT", 10, 0)
+    bar.nameWidth = 170
+    bar.buttons = {}
+    UI.actionBar = bar
     rowScroll:SetScrollChild(rowContent)
     -- Rows are refilled while scrolling; own-profession buttons follow
     -- (hidden when the row is out of view).
@@ -878,7 +1081,7 @@ ns.Framework.register({
     title = "公會名冊",
     order = 10,
     create = build,
-    show = function() UI.refresh(true) end,
+    show = function() if ns.GuildAdmin then ns.GuildAdmin.invalidate() end UI.refresh(true) end,
 })
 
 function UI.toggle() return ns.Framework.toggle("roster") end
