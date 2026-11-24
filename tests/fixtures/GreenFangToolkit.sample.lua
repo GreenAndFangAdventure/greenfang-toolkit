@@ -6,6 +6,8 @@
 GreenFangToolkitDB = {
 	["addonVersion"] = "0.14.1",
 	["adventure"] = {
+		["deleted"] = {
+		},
 		["log"] = {
 			["0000-0000000A"] = {
 			},

@@ -156,7 +156,8 @@ return function(T)
         local tags = {}
         for _, k in ipairs(A.TAG_KEYS) do tags[#tags + 1] = f.tagButtons[k] end
         eq(overlaps(tags), "", "標籤")
-        ok(tags[#tags].flowX + 26 + 4 + wow.textWidth(tags[#tags].label._text, tags[#tags].label._font) < 660, "標籤 inside the window")
+        -- GF-002-J: the options sit on even columns inside the window.
+        ok(tags[#tags].flowX + 32 + 4 + wow.textWidth(tags[#tags].label._text, tags[#tags].label._font) < f.width, "標籤 inside the window")
         -- Field names end before the controls.
         local X = O.controlX(A.TICKET_FIELDS)
         for _, name in ipairs({ "目的地", "時間", "人數", "錄取", "標籤", "備註" }) do

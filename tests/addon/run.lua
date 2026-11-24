@@ -4640,6 +4640,9 @@ assert(loadfile(ROOT .. "/tests/addon/uic_tests.lua"))()({ test = test, eq = eq,
 -- GF-002-I: §17 simpler states, step back, worker tickets close, the badge and its checklist, data-driven destinations (tests/addon/adventure_simplify_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/adventure_simplify_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-002-J: the owner's 0.14.0 fixes and spec §17.7 zones (tests/addon/adventure_fixes_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/adventure_fixes_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------
 
