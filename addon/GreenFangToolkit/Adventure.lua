@@ -44,7 +44,7 @@ local unesc = function(v) return ns.Ledger.unesc(v) end
 ---------------------------------------------------------------------------
 
 local NUM = { ver = true, cr = true, s = true, e = true, rt = true, rh = true, rd = true, sz = true, tg = true,
-    sa = true, mc = true, at = true, ex = true, lv = true, ap = true }
+    sa = true, mc = true, at = true, ex = true, lv = true, ap = true, ed = true } -- ed: GF-002-G, last edit
 
 function Adv.encodeEntry(e)
     local keys = {}
@@ -256,7 +256,9 @@ function Adv.view(t, leader, actions, opts)
     local v = { id = t.id, leader = leader, src = t.src or "g", created = t.cr or 0, dungeon = t.ds ~= "" and t.ds or nil,
         quests = splitDots(t.qs), questLevels = Adv.decodeQuestLevels(t.ql), timeMode = t.tm or "n", start = t.s, finish = t.e, tags = t.tg or 0,
         note = t.nt, mode = t.md or "a", state = "open", members = {}, waitlist = {}, pending = {}, invited = {},
-        kicked = {}, level = t.lv, leaderRole = t.lr }
+        kicked = {}, level = t.lv, leaderRole = t.lr, edited = t.ed,
+        -- GF-002-G: roles / size as the leader set them (the editor starts from these).
+        roles = t.ds ~= "" and { t = t.rt or 1, h = t.rh or 1, d = t.rd or 3 } or nil, size = t.sz }
     local cap = Adv.capacity(t)
     v.capacity = {}
     for k, n in pairs(cap) do v.capacity[k] = n end
@@ -548,7 +550,7 @@ function Adv.open(o)
     local e = {
         id = Adv.newId(), src = "g", ver = Adv.VERSION, cr = t, ds = o.dungeon or "", qs = table.concat(qs, "."),
         ql = Adv.encodeQuestLevels(qs, Adv.questLog()),
-        tm = tm, s = tm ~= "n" and o.start or nil, e = tm ~= "n" and o.finish or nil,
+        tm = tm, s = tm ~= "n" and o.start or nil, e = (tm ~= "n" and o.finish) or (tm == "n" and o.finish) or nil,
         rt = o.roles and o.roles.t, rh = o.roles and o.roles.h, rd = o.roles and o.roles.d,
         sz = (not o.dungeon) and (o.size or 5) or nil, tg = o.tags or 0, nt = Adv.cleanNote(o.note),
         md = o.mode == "c" and "c" or "a", mc = o.mode == "c" and t or nil, lr = o.leaderRole,
@@ -583,6 +585,41 @@ function Adv.leader(id, action, arg)
         kept[#kept + 1] = { a = arg, k = k, t = t }
         e.dc = Adv.encodeDecisions(kept)
     else return false, "action" end
+    return save("T", mine)
+end
+
+-- GF-002-G (owner: 「已建立冒險單要可編輯」): change my open ticket. Admitted
+-- people stay; the view replays every application against the new seats,
+-- so with fewer seats the latest ones (by application time) become waiting.
+-- ed = the edit time: members and waiting people get a ❗ (Adv.attention).
+function Adv.editTicket(id, o)
+    local mine = listOf(me(), "T")
+    local e = findIn(mine, id)
+    if not e then return false, "unknown" end
+    if e.st == "x" or e.st == "c" then return false, "closed" end
+    if not o.dungeon and not (o.quests and #o.quests > 0) then return false, "no-destination" end
+    local t = now()
+    local tm = o.timeMode or "n"
+    if tm ~= "n" then
+        if not (o.start and o.finish and o.finish > o.start) then return false, "bad-time" end
+        if o.start > t + Adv.FUTURE_DAYS * 86400 then return false, "too-far" end
+    end
+    local qs = {}
+    for i, q in ipairs(o.quests or {}) do if i <= Adv.MAX_QUESTS then qs[#qs + 1] = tostring(q) end end
+    e.ds, e.qs = o.dungeon or "", table.concat(qs, ".")
+    e.ql = Adv.encodeQuestLevels(qs, Adv.questLog()) or e.ql
+    e.tm = tm
+    e.s = tm ~= "n" and o.start or nil
+    e.e = (tm ~= "n" and o.finish) or (tm == "n" and o.finish) or nil
+    e.rt, e.rh, e.rd = o.roles and o.roles.t, o.roles and o.roles.h, o.roles and o.roles.d
+    e.sz = (not o.dungeon) and (o.size or 5) or nil
+    e.tg = o.tags or 0
+    e.nt = Adv.cleanNote(o.note)
+    local mode = o.mode == "c" and "c" or "a"
+    if mode == "c" and e.md ~= "c" then e.mc = t end
+    if mode == "a" then e.mc = nil end
+    e.md = mode
+    e.ed = t
     return save("T", mine)
 end
 
@@ -802,6 +839,13 @@ function Adv.attention(v, my, t, myWorker, questLog)
     end
     for _, i in ipairs(v.invited) do if i.a == my then return { key = v.id .. "|invite|" .. i.at, decide = true, code = "invite" } end end
     if v.kicked[my] and not mine then return { key = v.id .. "|kicked|" .. v.kicked[my], decide = false, code = "kicked" } end
+    -- GF-002-G: the leader changed the ticket after I was in or waiting.
+    local waiting
+    for _, w in ipairs(v.waitlist) do if w.a == my then waiting = w end end
+    local involvedAt = (mine and mine.at) or (waiting and waiting.at)
+    if v.edited and involvedAt and v.edited > involvedAt then
+        return { key = v.id .. "|edited|" .. v.edited, decide = false, code = "edited" }
+    end
     if mine then
         if mine.refilled then return { key = v.id .. "|refilled|" .. mine.refilled, decide = false, code = "refilled" } end
         local r = Adv.reminder(v, t)

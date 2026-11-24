@@ -28,7 +28,13 @@ G.ART = {
         { ROLES_FILE, box = ROLE_BOX.h } },
     role_d = { { "Interface\\Icons\\Ability_DualWield" }, { "Interface\\Icons\\INV_Sword_04" },
         { ROLES_FILE, box = ROLE_BOX.d } },
-    person = { { "Interface\\Icons\\INV_Misc_Head_Human_01" }, { "Interface\\Icons\\INV_Misc_Bag_10" } },
+    -- GF-002-G (owner: 「組隊與人數的圖標，採用社交那種人頭或多人頭」): the
+    -- social window's portraits: one head for a person / the number of people,
+    -- several heads for forming a group.
+    person = { { "Interface\\FriendsFrame\\UI-Toast-FriendOnlineIcon" }, { "Interface\\Icons\\INV_Misc_GroupLooking" },
+        { "Interface\\Icons\\INV_Misc_Head_Human_01" } },
+    group = { { "Interface\\Icons\\INV_Misc_GroupNeedMore" }, { "Interface\\FriendsFrame\\UI-Toast-ChatInviteIcon" },
+        { "Interface\\Icons\\Ability_Warrior_BattleShout" } },
     quest = { { "Interface\\Icons\\INV_Misc_Note_01" } },
     now = { { "Interface\\Icons\\Spell_Nature_TimeStop" } },
     today = { { "Interface\\Icons\\INV_Misc_PocketWatch_01" }, { "Interface\\Icons\\Spell_Nature_TimeStop" } },
@@ -50,7 +56,10 @@ G.ART = {
     -- 冒險單 = going on an adventure: a map.
     adventure = { { "Interface\\Icons\\INV_Misc_Map_01" }, { "Interface\\Icons\\INV_Sword_04" } },
     -- 調整 (the number of people): the group finder's "need more" group.
-    adjust = { { "Interface\\Icons\\INV_Misc_GroupNeedMore" }, { "Interface\\Buttons\\UI-PlusButton-Up" } },
+    adjust = { { "Interface\\Icons\\INV_Misc_GroupLooking" }, { "Interface\\Buttons\\UI-PlusButton-Up" } },
+    -- The game's group finder (尋求組隊).
+    lfg = { { "Interface\\LFGFrame\\BattlenetWorking0" }, { "Interface\\Icons\\INV_Misc_Spyglass_02" },
+        { "Interface\\Icons\\INV_Misc_GroupLooking" } },
     -- 直接錄取 = in at once: the green check; 團長同意 = the leader decides: the leader's crown.
     direct = { { "Interface\\RaidFrame\\ReadyCheck-Ready" } },
     consent = { { "Interface\\GroupFrame\\UI-Group-LeaderIcon" }, { "Interface\\RaidFrame\\ReadyCheck-Waiting" } },

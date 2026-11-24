@@ -118,9 +118,10 @@ UI.itemIcon = itemIcon
 local function setLabel(b, text)
     if not text then if b.label then b.label:SetText(""); b.label:Hide() end return end
     if not b.label then
-        local parent = b.labelParent or (b.GetParent and b:GetParent()) or b
         -- GF-002-E: the normal font, no fixed width, one line (0.12.2 wrapped 「調/整」).
-        b.label = ns.freeText(parent:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
+        -- GF-002-G: the name belongs to the button itself, so it hides with it even
+        -- when the page was never shown (0.12.4 left 「邀請下一位」 on the page).
+        b.label = ns.freeText(b:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
         b.label:SetPoint("LEFT", b, "RIGHT", 4, 0)
         b.label:SetJustifyH("LEFT")
     end
@@ -139,7 +140,7 @@ end
 function UI.flow(parent, list, x, y, gap, point)
     for _, b in ipairs(list) do
         b:ClearAllPoints()
-        if point == "LEFT" then b:SetPoint("LEFT", parent, "LEFT", x, 0)
+        if point == "LEFT" then b:SetPoint("LEFT", parent, "LEFT", x, y or 0)
         else b:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y) end
         b.flowX = x
         x = x + UI.buttonSpan(b) + (gap or 14)
@@ -159,13 +160,23 @@ local function iconButton(parent, size, key, tip, onClick, label)
     b.badge:SetSize(math.floor(size / 2), math.floor(size / 2))
     b.badge:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", 2, -2)
     b.badge:Hide()
-    -- GF-002-F: chosen = a gold frame behind the icon, full colour, white name;
-    -- not chosen = grey icon, grey name (UI.setSelected).
-    b.sel = b:CreateTexture(nil, "BACKGROUND")
-    b.sel:SetPoint("TOPLEFT", b, "TOPLEFT", -3, 3)
-    b.sel:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", 3, -3)
-    b.sel:SetColorTexture(1, 0.78, 0.1, 0.9)
+    -- GF-002-G (owner: 「選取的圖標，請要用有質感的發亮，不是很俗氣全黃而已」):
+    -- chosen = the action bar's glow ring (ADD blend) and a soft inner shine;
+    -- not chosen = a little darker, still clear (UI.setSelected).
+    b.sel = b:CreateTexture(nil, "OVERLAY")
+    b.sel:SetSize(math.floor(size * 1.75), math.floor(size * 1.75))
+    b.sel:SetPoint("CENTER", b, "CENTER", 0, 0)
+    if not Icons.set(b.sel, UI.GLOW) then b.sel:SetColorTexture(1, 0.85, 0.4, 0.35) end
+    if b.sel.SetBlendMode then b.sel:SetBlendMode("ADD") end
+    if b.sel.SetVertexColor then b.sel:SetVertexColor(1, 0.85, 0.45) end
     b.sel:Hide()
+    b.shine = b:CreateTexture(nil, "OVERLAY")
+    b.shine:SetAllPoints()
+    if Icons.set(b.shine, UI.SHINE) then
+        if b.shine.SetBlendMode then b.shine:SetBlendMode("ADD") end
+        b.shine:SetAlpha(0.45)
+    end
+    b.shine:Hide()
     if b.SetHighlightTexture then b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD") end
     if b.RegisterForClicks then b:RegisterForClicks("LeftButtonUp", "RightButtonUp") end
     b.tip = tip
@@ -184,14 +195,20 @@ local function iconButton(parent, size, key, tip, onClick, label)
 end
 UI.iconButton = iconButton
 
+UI.GLOW = "Interface\\Buttons\\UI-ActionButton-Border"
+UI.SHINE = "Interface\\Buttons\\CheckButtonHilight"
+UI.DIM = 0.62 -- not chosen: the icon a little darker, never grey
 function UI.setSelected(b, on)
     b.selected = on and true or false
-    if on then b.sel:Show() else b.sel:Hide() end
-    if b.tex.SetDesaturated then b.tex:SetDesaturated(not on) end
-    b.tex:SetAlpha(on and 1 or 0.55)
+    if on then b.sel:Show(); b.shine:Show() else b.sel:Hide(); b.shine:Hide() end
+    if b.tex.SetDesaturated then b.tex:SetDesaturated(false) end
+    local c = on and 1 or UI.DIM
+    if b.tex.SetVertexColor then b.tex:SetVertexColor(c, c, c) end
+    b.tex:SetAlpha(1)
+    b.dimmed = not on
     if b.label then
         b.label:SetAlpha(1)
-        if on then b.label:SetTextColor(1, 1, 1) else b.label:SetTextColor(0.6, 0.6, 0.6) end
+        if on then b.label:SetTextColor(1, 0.95, 0.75) else b.label:SetTextColor(0.72, 0.72, 0.72) end
     end
 end
 

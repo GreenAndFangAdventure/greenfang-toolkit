@@ -68,7 +68,10 @@ return function(T)
     local function parts(win)
         local out = {}
         for _, o in ipairs(wow.allObjects()) do
+            -- GF-002-G: a button's name belongs to the button (a child FontString).
             local direct = o._parent == win
+                or (o._kind == "FontString" and o._parent and o._parent._kind == "Button" and o._parent._parent == win
+                    and o._parent.label == o)
             local kind = o._kind
             local wanted = (kind == "Button" or kind == "EditBox" or kind == "FontString" or kind == "CheckButton")
                 or (kind == "Texture" and direct)
@@ -142,6 +145,13 @@ return function(T)
         check("worker empty", wf)
         for _, id in ipairs({ "rfc", "wc", "dm", "sfk", "bfd", "stk", "smg" }) do A.toggleWorkerDungeon(id) end
         check("worker with 7 dungeons", wf)
+        -- GF-002-G (owner's 22.png): 11 dungeons wrap onto a third line; 「＋地城」 and
+        -- the rows below move down instead of running into 「任務」.
+        for _, id in ipairs({ "gnr", "rfk", "brd", "lbrs" }) do A.toggleWorkerDungeon(id) end
+        check("worker with 11 dungeons", wf)
+        ok(wf.quests.flowY == nil, "任務 is placed by row, not in the chips")
+        for _, id in ipairs({ "ubrs", "dme", "dmw", "dmn", "strat", "scholo", "ul", "zf", "mar", "st" }) do A.toggleWorkerDungeon(id) end
+        check("worker with 21 dungeons", wf)
         O.openOrder({ recipe = 2660, skill = 164, crafters = {} }); check("order", _G[O.POPUP_NAME])
         O.editFee({ skill = 164 }); check("fee", _G[O.FEE_NAME])
         O.openPaste(); check("paste", _G[O.PASTE_NAME])
@@ -253,16 +263,17 @@ return function(T)
         d.dungeon = "smg"
         A.pickTime(nil, "t")
         eq(A.clock(d.start), "23:00", "the next quarter")
-        local starts = A.todayStarts()
-        local labels = {}
-        for _, t in ipairs(starts) do labels[#labels + 1] = A.startText(t) end
-        local all = table.concat(labels, ",")
-        ok(all:find("明天 00:00", 1, true), "start times go past midnight: " .. all)
-        ok(all:find("明天 06:30", 1, true), "up to 8 hours ahead")
-        local menu = A.pickStart(_G[A.TICKET_NAME].startButton)
-        eq(plain(menu.items[1]:GetText()), "開始", "titled")
-        ok(plain(menu.items[4]:GetText()):find("明天", 1, true), "the menu says 明天 after midnight")
-        menu:Hide()
+        -- GF-002-G: the 開始 picker has today's hours left and all of tomorrow's.
+        local pk = A.pickStart(_G[A.TICKET_NAME].startButton)
+        local today, tomorrow = 0, 0
+        for h = 0, 23 do
+            if pk.hours[1][h]:IsShown() then today = today + 1 end
+            if pk.hours[2][h]:IsShown() then tomorrow = tomorrow + 1 end
+        end
+        eq(today, 2, "today: 22 and 23 left")
+        eq(tomorrow, 24, "tomorrow: every hour (past midnight)")
+        eq(pk.dayLabels[2]:GetText(), "明天", "明天")
+        pk:Hide()
         A.pickDuration(_G[A.TICKET_NAME].startButton)
         local dm = _G[ns.Framework.MENU_NAME]
         ok(plain(dm.items[4]:GetText()):find("（隔天）", 1, true), "3 小時 shows it ends the next day")
@@ -274,21 +285,22 @@ return function(T)
         ok(id, "opened")
         local v = ns.Adventure.get(id)
         ok(plain(A.timeText(v)):find("（隔天）", 1, true), "the row says it ends the next day")
-        -- A start after midnight (明天 00:30) under 今天.
+        -- A start after midnight (明天 00:30), picked in the picker.
         local d2 = A.openTicket()
         d2.dungeon = "smg"
-        A.pickTime(nil, "t")
-        for _, t in ipairs(starts) do if A.startText(t) == "明天 00:30" then d2.start = t end end
-        A.setFinish()
+        pk = A.pickStart(_G[A.TICKET_NAME].startButton)
+        wow.click(pk.hours[2][0]); wow.click(pk.minutes[3])
+        eq(A.startText(d2.start), "明天 00:30", "明天 00:30")
         local id2 = A.submitTicket()
         ok(id2, "opened with a start after midnight")
         ok(plain(A.timeText(ns.Adventure.get(id2))):find("明天 00:30", 1, true), "shown as 明天 00:30")
-        -- Worker time slots too.
+        -- Worker time slots: the same picker.
         A.openWorker()
-        local sm = A.pickWorkerSlots(UIParent)
-        local found = false
-        for _, it in ipairs(sm.items) do if it._shown ~= false and plain(it:GetText()):find("（隔天）", 1, true) then found = true end end
-        ok(found, "worker slots past midnight say so")
+        local sp = A.pickWorkerSlots(UIParent)
+        wow.click(sp.hours[2][1])
+        local sl = A.workerDraft().slots[1]
+        ok(not sl.now and A.startText(sl.s) == "明天 01:00", "worker slot 明天 01:00")
+        eq(sl.e - sl.s, 2 * 3600, "2 hours")
     end)
 
     test("GF-002-F 之後: dates with the year, a proper icon", function()
@@ -357,8 +369,8 @@ return function(T)
         local main = A.workerDraft().main
         for _, r in ipairs(ns.Adventure.ROLES) do
             local b = wf.mainRoles[r]
-            eq(b.sel._shown, r == main, "gold frame only on the chosen role " .. r)
-            eq(b.tex._desaturated or false, r ~= main and true or false, "grey when not chosen " .. r)
+            eq(b.sel._shown, r == main, "glow only on the chosen role " .. r)
+            eq(b.dimmed, r ~= main, "a little darker when not chosen " .. r)
         end
         local grid = A.pickWorkerDungeons(wf.addDungeon)
         local smg

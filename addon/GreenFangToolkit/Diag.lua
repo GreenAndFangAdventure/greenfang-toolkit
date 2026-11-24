@@ -147,7 +147,7 @@ local SECTIONS = {
     { title = "遊戲內分享（公會成員之間自動轉傳）", text = Diag.shareText },
     { title = "訂單（製作與訂單）", text = Diag.ordersText },
     { title = "價格（拍賣場、商人、公會分享）", text = Diag.pricesText },
-    { title = "冒險（冒險單與職工單）", text = function() return Diag.adventureText() end },
+    { title = "冒險（冒險單與職工單）", text = function() return Diag.adventureText() .. (ns.NativeLFG and ("｜尋求組隊：" .. ns.NativeLFG.diagText()) or "") end },
     { title = "公會名冊", text = Diag.rosterText },
     { title = "公會管理（GF-001-Q）", text = function() return ns.GuildAdmin and ns.GuildAdmin.diagText() or "" end },
     { title = "版本", text = Diag.versionText },

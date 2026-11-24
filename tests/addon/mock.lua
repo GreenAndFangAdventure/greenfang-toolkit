@@ -5,7 +5,7 @@
 local wow = {}
 
 local TOC_FILES = { "Config.lua", "Core.lua", "Data.lua", "Icons.lua", "GameIcons.lua", "Professions.lua", "Roster.lua", "Sync.lua", "Comm.lua", "Share.lua", "Ledger.lua", "Orders.lua", "Prices.lua", "Delivery.lua", "WebOrders.lua", "AdventureData.lua", "Adventure.lua",
-    "Export.lua", "Framework.lua", "UI.lua", "Character.lua", "Recipes.lua", "Diag.lua", "GuildAdmin.lua", "OrdersUI.lua", "AdventureUI.lua", "SleepingBagData.lua", "SleepingBag.lua", "Init.lua" }
+    "Export.lua", "Framework.lua", "UI.lua", "Character.lua", "Recipes.lua", "Diag.lua", "GuildAdmin.lua", "NativeLFG.lua", "OrdersUI.lua", "AdventureUI.lua", "SleepingBagData.lua", "SleepingBag.lua", "Init.lua" }
 wow.TOC_FILES = TOC_FILES
 
 ---------------------------------------------------------------------------
@@ -127,6 +127,9 @@ local function newObject(kind, name)
     end
     function methods.SetFontObject(self, font) self._font = font end
     function methods.SetDesaturated(self, on) self._desaturated = on and true or false end
+    function methods.SetVertexColor(self, r, g, b) self._vertex = { r, g, b } end
+    function methods.SetHeight(self, h) if self._kind ~= "FontString" then self._h = h end end
+    function methods.SetBlendMode(self, m) self._blend = m end
     function methods.SetWordWrap(self, on) self._wordWrap = on and true or false end
     function methods.CreateTexture(self, _, layer)
         local t = newObject("Texture")

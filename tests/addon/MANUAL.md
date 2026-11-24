@@ -777,6 +777,41 @@ owner 實測 0.12.2 回報：字太小、有些名稱被擠成兩行（「目的
 
 - □ 幹部註記只在遊戲裡顯示。登出後在 `WTF\Account\<帳號>\SavedVariables\GreenFangToolkit.lua` 裡搜尋一段幹部註記的文字，應該找不到
 
+## 3ac. 冒險頁兩行、編輯、時間、發光、尋求組隊：截圖確認（GF-002-G，0.12.6 起）
+
+### 圖示對照（新增與更換）
+
+| 名稱 | 用的材質（依序備援） | 為什麼選它 |
+|---|---|---|
+| 人數（一個人） | `Interface\FriendsFrame\UI-Toast-FriendOnlineIcon` → `INV_Misc_GroupLooking` → `INV_Misc_Head_Human_01` | 好友名單的人頭 |
+| 組隊（好幾個人） | `INV_Misc_GroupNeedMore` → `Interface\FriendsFrame\UI-Toast-ChatInviteIcon` → `Ability_Warrior_BattleShout` | 尋求組隊的多人頭 |
+| 調整人數 | `INV_Misc_GroupLooking` → `UI-PlusButton-Up` | 一個人頭 |
+| 尋求組隊 | `Interface\LFGFrame\BattlenetWorking0` → `INV_Misc_Spyglass_02` → `INV_Misc_GroupLooking` | 遊戲尋求組隊的圖 |
+| 編輯 | `INV_Feather_05` | 羽毛筆 |
+| 選中的光 | `Interface\Buttons\UI-ActionButton-Border`（ADD）＋`Interface\Buttons\CheckButtonHilight` | 動作條按鈕選中時的光圈 |
+
+### 截圖
+
+- □ 冒險頁每一張單佔兩行：第一行是大圖示（44 px）、完整地城名稱（例如「血色修道院：大教堂」）、時間、空位、團長名字（完整）；第二行是標籤（圖示＋名稱）、備註和按鈕
+- □ 我的職工單也是兩行：第一行地城（最多三個＋「+N」）、時段、職責；第二行其他地城和任務，右邊「編輯」「移除」
+- □ 「組隊」按鈕和人數用人頭圖示
+- □ 自己開的冒險單有「編輯」：打開同一個視窗，標題「編輯冒險單」，按鈕「儲存」；把人數改少後，最晚申請的人變候補；那些人的列上會出現 ❗
+- □ 選中的職責、標籤、錄取方式：是發亮的光圈，不是黃色方塊；沒選的稍微暗，但看得清楚
+- □ 職工單選 11 個以上地城：地城排成好幾行，「＋地城」跟在最後，下面的「任務」「職責」整排往下移，**沒有任何東西疊在一起**
+- □ 沒有橫跨整個視窗的長按鈕：目的地是「圖示＋名稱＋等級」加一個小的「更換」；任務、時段的按鈕寬度跟著文字
+- □ 時間只有一列「開始」：按下去是「現在」、今天還剩的整點、明天每個整點、分（00／15／30／45）、「其他日期」；選了其他日期才出現「日期」（有年）；「時長」1～5 小時，「現在」也可以選
+- □ 晚上 11 點後打開「開始」：今天只剩 23 點，明天 0～23 點都可以選
+- □ 「邀請下一位」只在有人等著被邀請時出現（0.12.4 沒人時字還留在頁面上）
+
+### 尋求組隊（實機查證，研究在 `docs/research/GF-002-G_native-lfg.md`）
+
+- □ `/run for _,n in ipairs({"GetAvailableActivities","GetActivityInfoTable","Search","GetSearchResults","GetSearchResultInfo","GetSearchResultMemberCounts","CreateListing","ApplyToGroup"}) do print(n, type(C_LFGList and C_LFGList[n])) end`，把結果貼回來
+- □ 冒險頁上方有「搜尋尋求組隊」：按下去後聊天框**沒有**「介面動作被阻擋」；遊戲的尋求組隊視窗不用打開
+- □ 有登記職工單（例如選了死礦）時，搜尋後冒險頁下面出現「尋求組隊（遊戲內建）」，列出同地城的隊伍：人數、缺的職責、隊長、說明；按「密語」會開對隊長的密語，按「申請」會送出申請（遊戲的尋求組隊裡看得到）
+- □ 開冒險單時選「現在」和一個地城：出現「同時在尋求組隊上架」；勾起來再按「開單」，遊戲的尋求組隊裡有自己的隊伍，說明是冒險單的備註
+- □ 選目的地時（時間是現在）：有人在找的地城下面寫「現在 N 隊」
+- □ 同步與診斷的冒險段：「尋求組隊：C_LFGList N / 9」
+
 ## 3b. 睡袋路線（GF-008-A，0.6.0 起；部落角色）
 
 - □ 左側清單有「睡袋路線」；聯盟角色看不到這一項
