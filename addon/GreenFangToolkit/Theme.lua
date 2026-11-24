@@ -209,11 +209,110 @@ end
 ---------------------------------------------------------------------------
 
 local function enabled(b)
+    if b.gfEnabled ~= nil then return b.gfEnabled end
+    if b.disabled == true or b.enabled == false then return false end
     if b.IsEnabled then
         local v = b:IsEnabled()
         if v == false or v == 0 then return false end
     end
     return true
+end
+T.enabled = enabled
+
+---------------------------------------------------------------------------
+-- GF-UI-D2 (0.15.1, owner: 「不能互動的圖示就不要再可以亮」): only what can be
+-- pressed lights up under the mouse. The client draws a button's HIGHLIGHT
+-- layer (and its highlight texture) under the mouse even when it is disabled,
+-- so the hover art is faded out (alpha 0) for a control that is disabled, only
+-- shows a tooltip (infoOnly), is marked gfNoHover, or has nothing on OnClick.
+-- Checked again on every OnEnter and on every Enable / Disable / SetEnabled.
+---------------------------------------------------------------------------
+
+function T.hoverable(b)
+    if not b or b.infoOnly or b.gfNoHover then return false end
+    if not enabled(b) then return false end
+    if b.GetScript and b:GetScript("OnClick") == nil then return false end
+    return true
+end
+
+local function hoverArt(b)
+    local list = {}
+    if b.gfHover then list[#list + 1] = b.gfHover end
+    for _, t in ipairs(b.gfHoverEdges or {}) do list[#list + 1] = t end
+    if b.gfHl then list[#list + 1] = b.gfHl end
+    return list
+end
+
+function T.syncHover(b)
+    if not b then return false end
+    local on = T.hoverable(b)
+    for _, t in ipairs(hoverArt(b)) do if t.SetAlpha then t:SetAlpha(on and 1 or 0) end end
+    b.gfHoverOn = on
+    return on
+end
+
+-- Watch b: every OnEnter (also handlers set later) and every change of enabled
+-- first decide whether its hover art may show. Safe to call twice.
+function T.guardHover(b)
+    if not b or b.gfHoverGuard then return b end
+    b.gfHoverGuard = true
+    if b.GetHighlightTexture and not b.gfHl then
+        local hl = b:GetHighlightTexture()
+        if type(hl) == "table" or type(hl) == "userdata" then b.gfHl = hl end
+    end
+    local setScript = b.SetScript
+    local function wrap(fn)
+        return function(self, ...)
+            T.syncHover(self)
+            if fn then return fn(self, ...) end
+        end
+    end
+    b.SetScript = function(self, what, fn)
+        if what == "OnEnter" then fn = wrap(fn) end
+        return setScript(self, what, fn)
+    end
+    local cur = b.GetScript and b:GetScript("OnEnter") or nil
+    setScript(b, "OnEnter", wrap(cur))
+    local setEnabled, enable, disable = b.SetEnabled, b.Enable, b.Disable
+    b.SetEnabled = function(self, on)
+        self.gfEnabled = on and true or false
+        if setEnabled then setEnabled(self, on) end
+        if self.gfEdges then T.refresh(self) end
+        T.syncHover(self)
+    end
+    b.Enable = function(self)
+        self.gfEnabled = true
+        if enable then enable(self) end
+        if self.gfEdges then T.refresh(self) end
+        T.syncHover(self)
+    end
+    b.Disable = function(self)
+        self.gfEnabled = false
+        if disable then disable(self) end
+        if self.gfEdges then T.refresh(self) end
+        T.syncHover(self)
+    end
+    -- A highlight texture set later (SetHighlightTexture) is watched too.
+    local setHl = b.SetHighlightTexture
+    if setHl then
+        b.SetHighlightTexture = function(self, ...)
+            local r = setHl(self, ...)
+            local hl = self.GetHighlightTexture and self:GetHighlightTexture() or nil
+            if type(hl) == "table" or type(hl) == "userdata" then self.gfHl = hl end
+            T.syncHover(self)
+            return r
+        end
+    end
+    T.syncHover(b)
+    return b
+end
+
+-- Mark a control as one that only shows a tooltip: it never lights up.
+function T.infoOnly(b, on)
+    b.infoOnly = on ~= false
+    T.guardHover(b)
+    T.syncHover(b)
+    return b
 end
 
 -- Redraw a themed button for its state.
@@ -263,6 +362,7 @@ function T.button(parent, text, w, h, name)
     b.LockHighlight = function(self) T.setSelected(self, true) end
     b.UnlockHighlight = function(self) T.setSelected(self, false) end
     if text then b:SetText(text) end
+    T.guardHover(b) -- GF-UI-D2: a disabled button stays dark under the mouse
     return b
 end
 
@@ -312,6 +412,7 @@ function T.closeButton(f, onClose)
     b.tip = "關閉"
     b.fieldNamed = "關閉" -- an X needs no written name
     b:SetScript("OnClick", function() if onClose then onClose() else f:Hide() end end)
+    T.guardHover(b)
     return b
 end
 
@@ -345,6 +446,7 @@ function T.checkBox(parent, size)
             t:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", -(inset - 3), inset - 3)
         end
     end
+    T.guardHover(c) -- GF-UI-D2: no light when it cannot be ticked
     return c
 end
 
