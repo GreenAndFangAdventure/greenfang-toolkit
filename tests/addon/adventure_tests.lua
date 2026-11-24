@@ -103,7 +103,7 @@ return function(T)
         local v = Adv.view(ticket("t1", { rt = 1, rh = 0, rd = 1, lr = "d" }), B,
             { [C] = { act("t1", "ap", 10, "t") }, [D] = { act("t1", "ap", 20, "t") } }, { now = 30 })
         eq(names(v.members), C .. ":t", "first tank in"); eq(names(v.waitlist), D, "second waits")
-        eq(v.state, "full", "full (leader is the only dps)")
+        eq(v.state, "formed", "full (leader is the only dps): GF-002-H 成團 (one slot, finalized by the first member, full)")
     end)
 
     test("GF-002 R-4.5 consent: applications wait for ✓; switching to consent keeps who is in", function()
@@ -249,7 +249,7 @@ return function(T)
         peer(ns, B, "T", { ticket("t2", { tm = "t", s = t - 60 * MIN, e = t + 1 }) })
         wow.state.now = wow.state.now + 5; Adv.refresh()
         v = Adv.get("t2")
-        eq(v.state, "done", "time over"); eq(v.closeReason, "time", "by time")
+        eq(v.state, "ended", "time over (GF-002-H: ended, not 成行)"); eq(v.closeReason, "time", "by time")
     end)
 
     test("GF-002 R-7.1 reminders 60 and 15 minutes before the start", function()
@@ -345,7 +345,7 @@ return function(T)
         C_PartyInfo = { InviteUnit = function(name) invited[#invited + 1] = name end }
         local n = Adv.form(id)
         eq(n, 1, "one online member"); eq(invited[1], NAME[B], "full name")
-        eq(Adv.get(id).state, "departed", "departed (R-7.3)")
+        eq(Adv.get(id).state, "formed", "GF-002-H R-16.15: 組隊 on the finalized slot = 成團"); ok(Adv.get(id).departed, "no new applications")
         eq(Adv.worker(id, "apply") == false or true, true, "no new applications after departure")
         -- Refused (protected): one by one.
         ns = login()
@@ -499,24 +499,25 @@ return function(T)
         eq(again.id, first, "nothing changed: not rewritten")
     end)
 
-    test("GF-002 R-7.3 entering the ticket's dungeon counts as departing (instance ID, then name)", function()
+    test("GF-002-H R-16.16 entering the ticket's dungeon alone (too few accepted in the party) lights up 完成 (instance ID, then name)", function()
         local ns = login()
         local Adv = ns.Adventure
         local id = Adv.open({ dungeon = "sml", leaderRole = "d" })
         local other = Adv.open({ dungeon = "rfk", leaderRole = "d" })
+        Adv.form(id)
         IsInInstance = function() return true end
         GetInstanceInfo = function() return "x", "party", 1, "", 5, 0, false, 189 end
-        eq(Adv.onEnterWorld(), 1, "one ticket")
-        eq(Adv.get(id).state, "departed", "SM ticket departed"); eq(Adv.get(other).state, "open", "RFK untouched")
+        eq(Adv.onEnterWorld(), 1, "one formed ticket here")
+        ok(Adv.inDestination(Adv.get(id)) and not Adv.inDestination(Adv.get(other)), "SM, not RFK")
+        eq(Adv.get(id).state, "formed", "still 成團: only me in the party (R-16.22 needs 3)"); eq(Adv.get(other).state, "open", "RFK untouched")
         -- No usable ID: the name.
-        local id2 = Adv.open({ dungeon = "rfk", leaderRole = "d" })
         GetInstanceInfo = function() return "剃刀沼澤", "party", 1, "", 5, 0, false, nil end
         Adv.onEnterWorld()
-        eq(Adv.get(id2).state, "departed", "by name")
+        ok(Adv.inDestination(Adv.get(other)), "by name")
+        eq(Adv.get(other).state, "open", "not formed, not changed")
         -- A raid or the open world: nothing.
         GetInstanceInfo = function() return "黑翼之巢", "raid", 1, "", 40, 0, false, 469 end
-        local id3 = Adv.open({ dungeon = "brd", leaderRole = "d" })
-        eq(Adv.onEnterWorld(), 0, "raid: nothing"); eq(Adv.get(id3).state, "open", "still open")
+        eq(Adv.onEnterWorld(), 0, "raid: nothing"); ok(not Adv.inDestination(Adv.get(id)), "not inside")
         IsInInstance, GetInstanceInfo = nil, nil
         eq(Adv.onEnterWorld(), 0, "outside: nothing")
     end)

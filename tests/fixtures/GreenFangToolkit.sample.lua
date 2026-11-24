@@ -4,7 +4,20 @@
 -- GF Sync 只讀 sync 區塊。roster.snapshots 是遊戲內畫面用的資料，含 zone／online，不得上傳。
 
 GreenFangToolkitDB = {
-	["addonVersion"] = "0.12.6",
+	["addonVersion"] = "0.13.0",
+	["adventure"] = {
+		["log"] = {
+			["0000-0000000A"] = {
+			},
+			["0000-0000000F"] = {
+			},
+		},
+		["logoutAt"] = 1763373610,
+		["reopen"] = {
+		},
+		["seen"] = {
+		},
+	},
 	["migration"] = {
 		["at"] = 1763370000,
 		["from"] = "GFGuildRosterDB",
