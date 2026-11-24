@@ -28,6 +28,8 @@ Adv.MAX_SLOTS = 5              -- R-16.1 (0.13.0: 1-5 slots on tickets and worke
 Adv.SLACK = 1800               -- R-16.6: a slot without a length is its start +-30 minutes
 Adv.UNFINISHED_AFTER = 86400   -- R-16.17: formed, no 完成: ends 24 h after the slot
 Adv.LOG_DAYS, Adv.LOG_MAX = 30, 50 -- R-16.19
+Adv.AUTO_BEFORE, Adv.AUTO_NO_LENGTH = 3600, 4 * 3600 -- R-16.24: from 60 min before; no length = 4 h
+Adv.AUTO_SHARE = 0.6 -- R-16.22: 60% of the set size, rounded up, at least 2
 Adv.MAX_QUESTS = 5             -- R-4.1
 Adv.NOTE_MAX = 40              -- R-4.4 / R-10.2
 Adv.REMIND = { 3600, 900 }     -- R-7.1
@@ -49,7 +51,9 @@ local unesc = function(v) return ns.Ledger.unesc(v) end
 local NUM = { ver = true, cr = true, s = true, e = true, rt = true, rh = true, rd = true, sz = true, tg = true,
     sa = true, mc = true, at = true, ex = true, lv = true, ap = true, ed = true, -- ed: GF-002-G, last edit
     -- GF-002-H: fx finalized slot id, fa finalized at, fm formed at, su my slot choice changed at.
-    fx = true, fa = true, fm = true, su = true }
+    fx = true, fa = true, fm = true, su = true,
+    -- GF-002-H v1.1a: dt auto completion detected at (R-16.24), qc my quest log count (R-16.29).
+    dt = true, qc = true }
 
 function Adv.encodeEntry(e)
     local keys = {}
@@ -214,6 +218,18 @@ function Adv.slotEnd(sl)
     if sl.d then return sl.s + sl.d end
     return sl.s + Adv.SLACK
 end
+-- R-16.24: auto completion is checked from 60 minutes before the slot to its end
+-- (4 hours after the start without a length).
+function Adv.autoWindow(sl)
+    local s = sl.s or 0
+    return s - Adv.AUTO_BEFORE, s + (sl.d or Adv.AUTO_NO_LENGTH)
+end
+-- R-16.22: how many accepted people (the leader counts) must be in the party.
+function Adv.autoNeeded(v)
+    local size = v.roles and ((v.roles.t or 0) + (v.roles.h or 0) + (v.roles.d or 0)) or (v.size or 5)
+    return math.max(2, math.ceil(size * Adv.AUTO_SHARE - 1e-9))
+end
+
 -- Old (0.12.x) single time -> one slot.
 function Adv.slotsFromLegacy(tm, s, e, cr)
     if (tm or "n") == "n" then
@@ -271,6 +287,25 @@ function Adv.decodeQuestLevels(s)
     return out
 end
 
+-- R-16.28 / R-16.29: quest names on a ticket or worker ticket, in-game only
+-- (never uploaded; the site gets quest IDs): "216:name;217:name".
+function Adv.encodeQuestNames(qs, log)
+    if not log then return nil end
+    local out = {}
+    for _, q in ipairs(qs or {}) do
+        local info = log[tonumber(q) or q]
+        if info and info.title and info.title ~= "" then
+            out[#out + 1] = tostring(q) .. ":" .. Adv.cleanNote(info.title):gsub("[;:]", " ")
+        end
+    end
+    return #out > 0 and table.concat(out, ";") or nil
+end
+function Adv.decodeQuestNames(s)
+    local out = {}
+    for id, name in str(s):gmatch("(%d+):([^;]*)") do out[tonumber(id)] = name end
+    return out
+end
+
 -- R-10.2: one short line: no control characters or line breaks, at most 40 characters.
 function Adv.cleanNote(s)
     -- Explicit byte tests (as Share.lua): control bytes 0-31 and 127 become spaces.
@@ -304,6 +339,7 @@ local function validValue(_, g, v)
 end
 
 local cache = { version = -1 }
+local here -- the dungeon codes I am in (Adv.onEnterWorld), R-16.16 / R-16.22
 Adv.ledger = ns.Ledger.new({
     id = "adventure", prefix = Adv.PREFIX, burst = 6, refill = 0.5, loginDelay = 35,
     validAuthor = validAuthor, validGroup = function(g) return g == "T" or g == "W" or g == "A" end,
@@ -373,6 +409,7 @@ function Adv.view(t, leader, actions, opts)
         quests = splitDots(t.qs), questLevels = Adv.decodeQuestLevels(t.ql), tags = t.tg or 0,
         note = t.nt, mode = t.md or "a", state = "open", members = {}, waitlist = {}, pending = {}, invited = {},
         kicked = {}, level = t.lv, leaderRole = t.lr, edited = t.ed, slots = slots, slotById = byId,
+        questNames = Adv.decodeQuestNames(t.qn),
         -- GF-002-G: roles / size as the leader set them (the editor starts from these).
         roles = t.ds ~= "" and { t = t.rt or 1, h = t.rh or 1, d = t.rd or 3 } or nil, size = t.sz }
     local cap = Adv.capacity(t)
@@ -396,8 +433,10 @@ function Adv.view(t, leader, actions, opts)
         events[#events + 1] = { t = d.t, a = d.a, kind = d.k == "k" and "kick" or d.k == "p" and "approve" or "invite" }
     end
     local roles = {}
+    local detected = {} -- [a] = the earliest auto completion that author saw (R-16.24)
     for a, list in pairs(actions or {}) do
         for _, e in ipairs(list) do
+            if e.dt and (not detected[a] or e.dt < detected[a]) then detected[a] = e.dt end
             local kind = ({ ap = "apply", wd = "withdraw", ia = "accept", ir = "refuse" })[e.ac]
             local sx, any = slotsOf(e)
             local gone = sx and not any -- every slot it named was removed (R-16.4)
@@ -615,6 +654,22 @@ function Adv.view(t, leader, actions, opts)
             end
         end
     end
+    -- R-16.22 - R-16.24: an accepted member (or the leader) saw it done inside the
+    -- window: 成行 at once, 成團 too (owner: even without 組隊).
+    if (t.st == "o" or t.st == "g") and v.slot and v.final then
+        local from, to = Adv.autoWindow(v.slot)
+        local autoAt
+        for _, m in ipairs(v.members) do
+            local at = detected[m.a]
+            if at and at >= from and at <= to and (not autoAt or at < autoAt) then autoAt = at end
+        end
+        if autoAt then
+            v.state, v.closedAt, v.closeReason, v.auto = "done", autoAt, "auto", true
+            v.formed = true
+            v.formedAt = (v.formedAt and v.formedAt <= autoAt) and v.formedAt or autoAt
+        end
+    end
+    if t.st == "c" and t.dt then v.auto = true end
     if t.st == "c" or (t.st == "x" and t.rs == "unfinished") then v.formedAt = t.fm end
     v.closed = v.state == "cancel" or v.state == "done" or v.state == "ended" or v.state == "unfinished"
     return v
@@ -655,7 +710,7 @@ function Adv.workers()
             local ds, qs = {}, {}
             for _, d in ipairs(splitDots(e.ds)) do ds[d] = true end
             for _, q in ipairs(splitDots(e.qs)) do qs[tonumber(q) or q] = true end
-            out[a] = { entry = e, slots = Adv.workerSlots(e), dungeons = ds, quests = qs, allQuests = e.qa == "1",
+            out[a] = { entry = e, slots = Adv.workerSlots(e), dungeons = ds, questNames = Adv.decodeQuestNames(e.qn), questCount = e.qc, quests = qs, allQuests = e.qa == "1",
                 main = e.rm, alt = e.ra ~= "" and e.ra or nil, online = Adv.isOnline(a) }
         end
     end
@@ -853,7 +908,7 @@ function Adv.open(o)
     for i, q in ipairs(o.quests or {}) do if i <= Adv.MAX_QUESTS then qs[#qs + 1] = tostring(q) end end
     local e = {
         id = Adv.newId(), src = "g", ver = Adv.VERSION, cr = t, ds = o.dungeon or "", qs = table.concat(qs, "."),
-        ql = Adv.encodeQuestLevels(qs, Adv.questLog()),
+        ql = Adv.encodeQuestLevels(qs, Adv.questLog()), qn = Adv.encodeQuestNames(qs, Adv.questLog()),
         tm = tm, s = s, e = fin, ts = Adv.encodeTimes(slots),
         rt = o.roles and o.roles.t, rh = o.roles and o.roles.h, rd = o.roles and o.roles.d,
         sz = (not o.dungeon) and (o.size or 5) or nil, tg = o.tags or 0, nt = Adv.cleanNote(o.note),
@@ -896,6 +951,14 @@ function Adv.leader(id, action, arg, extra)
         if not (v and v.formed) then return false, "not-formed" end
         snapshot(e, v, t)
         e.st, e.sa = "c", t
+        Adv.addLog(e, "done")
+    elseif action == "auto" then
+        -- R-16.22 / R-16.23: detected here (the leader); 成團 and 成行 together.
+        local v = Adv.get(id)
+        if not v then return false, "unknown" end
+        snapshot(e, v, t)
+        e.fm = math.min(e.fm or t, t)
+        e.st, e.sa, e.dt = "c", t, t
         Adv.addLog(e, "done")
     elseif action == "depart" then e.st, e.sa = "g", t
     elseif action == "finalize" then
@@ -945,6 +1008,7 @@ function Adv.editTicket(id, o)
     for i, q in ipairs(o.quests or {}) do if i <= Adv.MAX_QUESTS then qs[#qs + 1] = tostring(q) end end
     e.ds, e.qs = o.dungeon or "", table.concat(qs, ".")
     e.ql = Adv.encodeQuestLevels(qs, Adv.questLog()) or e.ql
+    e.qn = Adv.encodeQuestNames(qs, Adv.questLog()) or (#qs > 0 and e.qn or nil)
     local keep = false
     for _, sl in ipairs(slots) do if sl.id == e.fx then keep = true end end
     if not keep then e.fx, e.fa = nil, nil end
@@ -1026,6 +1090,7 @@ function Adv.setWorker(o)
     for _, q in ipairs(o.quests or {}) do qs[#qs + 1] = tostring(q) end
     local e = { id = "w", cr = t, ds = table.concat(o.dungeons or {}, "."), qs = table.concat(qs, "."),
         qa = o.allQuests and "1" or nil, rm = o.main or "d", ra = o.alt or "", sl = Adv.encodeSlots(legacy),
+        qn = Adv.encodeQuestNames(qs, Adv.questLog()), qc = o.allQuests and Adv.questCount() or nil,
         sv = Adv.encodeTimes(slots), ex = t + (o.hours or 24) * 3600, st = "o", sa = t }
     return save("W", { e })
 end
@@ -1046,7 +1111,7 @@ function Adv.myWorker()
     for _, d in ipairs(splitDots(e.ds)) do ds[#ds + 1] = d end
     for _, q in ipairs(splitDots(e.qs)) do qs[#qs + 1] = tonumber(q) or q end
     return { dungeons = ds, quests = qs, allQuests = e.qa == "1", main = e.rm, alt = e.ra ~= "" and e.ra or nil,
-        slots = Adv.workerSlots(e), expires = e.ex }
+        slots = Adv.workerSlots(e), expires = e.ex, questNames = Adv.decodeQuestNames(e.qn), questCount = e.qc }
 end
 
 -- R-5.2: edit one piece and keep the rest.
@@ -1075,13 +1140,22 @@ end
 ---------------------------------------------------------------------------
 
 -- One log record from a closed ticket entry (nil when it is not one).
-function Adv.logRecord(e)
+function Adv.logRecord(e, v)
     local status = e.st == "c" and "done" or (e.st == "x" and e.rs == "unfinished") and "unfinished" or nil
+    if not status and v and v.auto and v.state == "done" then
+        -- R-16.24: members saw it done; the leader has not written it yet.
+        local mb = {}
+        for _, m in ipairs(v.members) do mb[m.a] = m.role or "any" end
+        mb[v.leader] = (v.capacity.any and "any") or v.leaderRole or "d"
+        local slotStart = v.slot and v.slot.s
+        return { id = e.id, ds = e.ds ~= "" and e.ds or nil, qs = e.qs ~= "" and e.qs or nil, fs = slotStart,
+            fm = v.formedAt, dn = v.closedAt, at = v.closedAt, st = "done", mb = Adv.encodePairs(mb), auto = true }
+    end
     if not status or not e.mb or e.mb == "" then return nil end
     local slotStart
     for _, sl in ipairs(entrySlots(e)) do if sl.id == e.fx then slotStart = sl.s end end
     return { id = e.id, ds = e.ds ~= "" and e.ds or nil, qs = e.qs ~= "" and e.qs or nil, fs = slotStart,
-        fm = e.fm, dn = status == "done" and e.sa or nil, at = e.sa, st = status, mb = e.mb }
+        fm = e.fm, dn = status == "done" and e.sa or nil, at = e.sa, st = status, mb = e.mb, auto = e.dt ~= nil or nil }
 end
 
 function Adv.myLog()
@@ -1196,6 +1270,7 @@ function Adv.dismissReopen(id) Adv.local_().reopen[id] = nil end
 -- Every minute: finish my timed tickets whose time is over, prune old ones (R-4.8, R-4.9, R-9.4).
 function Adv.maintain()
     local t = now()
+    if here then pcall(Adv.checkAuto) end -- R-16.24: the window may have opened while I was inside
     local mine = listOf(me(), "T")
     local kept, dirty = {}, false
     local before = Adv.all()
@@ -1203,7 +1278,13 @@ function Adv.maintain()
         local v = before[e.id]
         if (e.st == "o" or e.st == "g") and v then
             -- GF-002-H: over without forming -> ended (time); formed without 完成 for 24 h -> 成團未成行.
-            if v.state == "unfinished" then
+            if v.state == "done" and v.auto then
+                -- R-16.24: a member saw it done while I was away: 成行 in my part too.
+                snapshot(e, v, t)
+                e.st, e.sa, e.dt = "c", v.closedAt, v.closedAt
+                Adv.addLog(e, "done")
+                dirty = true
+            elseif v.state == "unfinished" then
                 snapshot(e, v, t)
                 e.st, e.sa, e.rs = "x", v.closedAt, "unfinished"
                 Adv.addLog(e, "unfinished")
@@ -1317,6 +1398,7 @@ end
 function Adv.questLog()
     local set = {}
     local found = false
+    local zone -- GF-002-H (R-16.27): the quest log's zone header above each quest
     if type(C_QuestLog) == "table" and type(C_QuestLog.GetNumQuestLogEntries) == "function" and type(C_QuestLog.GetInfo) == "function" then
         local n = ns.num((ns.call(C_QuestLog.GetNumQuestLogEntries))) or 0
         for i = 1, n do
@@ -1324,9 +1406,11 @@ function Adv.questLog()
             -- 16001 (owner, 2026-11-23): isHeader skips the zone rows; questID 0 is the fallback.
             -- level, else difficultyLevel; isScaling quests follow the character's level.
             local qid = type(info) == "table" and ns.num(info.questID) or nil
-            if qid and qid > 0 and info.isHeader ~= true then
+            if type(info) == "table" and (info.isHeader == true or not qid or qid <= 0) then
+                if str(info.title) ~= "" then zone = info.title end
+            elseif qid and qid > 0 then
                 set[qid] = { title = info.title, level = ns.num(info.level) or ns.num(info.difficultyLevel),
-                    scaling = info.isScaling == true }
+                    scaling = info.isScaling == true, zone = zone, order = i }
                 found = true
             end
         end
@@ -1334,12 +1418,31 @@ function Adv.questLog()
         local n = ns.num((ns.call(GetNumQuestLogEntries))) or 0
         for i = 1, n do
             local title, level, _, isHeader, _, _, _, questID = ns.call(GetQuestLogTitle, i)
-            if not isHeader and ns.num(questID) and questID > 0 then set[questID] = { title = title, level = level }; found = true end
+            if isHeader then zone = title
+            elseif ns.num(questID) and questID > 0 then set[questID] = { title = title, level = level, zone = zone, order = i }; found = true end
         end
     else
         return nil
     end
     return set, found
+end
+
+-- R-16.29: how many quests are in my log (日誌全部 N).
+function Adv.questCount()
+    local log = Adv.questLog()
+    if not log then return nil end
+    local n = 0
+    for _ in pairs(log) do n = n + 1 end
+    return n
+end
+
+-- R-16.29: quests some open adventure ticket is looking for (a set of quest IDs).
+function Adv.wantedQuests()
+    local set = {}
+    for _, v in pairs(Adv.all()) do
+        if not v.closed then for _, q in ipairs(v.quests) do set[tonumber(q) or q] = true end end
+    end
+    return set
 end
 
 -- Rows the page shows and the minimap number (R-6.2, R-8.1).
@@ -1462,7 +1565,6 @@ function Adv.currentDungeon()
 end
 
 -- Am I inside this ticket's dungeon? (the 完成 button glows, R-16.16)
-local here
 function Adv.inDestination(v)
     if not (v and v.dungeon) then return false end
     for _, d in ipairs(here or {}) do if d == v.dungeon then return true end end
@@ -1472,11 +1574,82 @@ end
 -- tickets are for this dungeon. Nothing is written (R-16.16).
 function Adv.onEnterWorld()
     here = Adv.currentDungeon()
+    if here then Adv.checkAuto() end
     if Adv.onChanged then Adv.onChanged() end
     if not here then return 0 end
     local n = 0
     for _, v in pairs(Adv.all()) do
         if v.leader == me() and v.formed and not v.closed and Adv.inDestination(v) then n = n + 1 end
+    end
+    return n
+end
+
+---------------------------------------------------------------------------
+-- R-16.22 - R-16.24: automatic 成行. Each accepted member (the leader too)
+-- checks on its own: in the destination dungeon (dungeon tickets), or a
+-- quest of the ticket turned in (quest tickets), with enough accepted people
+-- in the party, from 60 minutes before the finalized slot to its end. A member
+-- writes only its own part (dt on its signup); the view merges them.
+---------------------------------------------------------------------------
+
+-- The authors in my party (me included).
+function Adv.partyAuthors()
+    local set = { [me()] = true }
+    local raid = ns.call(IsInRaid) == true
+    local n = raid and 40 or 4
+    for i = 1, n do
+        local guid = ns.call(UnitGUID, (raid and "raid" or "party") .. i)
+        if type(guid) == "string" and guid ~= "" then
+            local a = S().authorOf(guid)
+            if a then set[a] = true end
+        end
+    end
+    return set
+end
+
+-- Accepted people of a ticket in my party (the leader counts).
+function Adv.acceptedInParty(v, party)
+    party = party or Adv.partyAuthors()
+    local n = party[v.leader] and 1 or 0
+    for _, m in ipairs(v.members) do if party[m.a] and m.a ~= v.leader then n = n + 1 end end
+    return n
+end
+
+-- questId: a quest I just turned in (QUEST_TURNED_IN), or nil. Returns how many tickets it wrote.
+function Adv.checkAuto(questId, t)
+    t = t or now()
+    local my = me()
+    if not my then return 0 end
+    here = Adv.currentDungeon()
+    local party = Adv.partyAuthors()
+    local hits = {}
+    for _, v in pairs(Adv.all()) do
+        local inIt = v.leader == my
+        for _, m in ipairs(v.members) do if m.a == my then inIt = true end end
+        if inIt and not v.closed and v.final and v.slot then
+            local from, to = Adv.autoWindow(v.slot)
+            if t >= from and t <= to and Adv.acceptedInParty(v, party) >= Adv.autoNeeded(v) then
+                local done = false
+                if v.dungeon then done = Adv.inDestination(v)
+                elseif questId then
+                    for _, q in ipairs(v.quests) do if tonumber(q) == tonumber(questId) then done = true end end
+                end
+                if done then hits[#hits + 1] = v end
+            end
+        end
+    end
+    local n = 0
+    for _, v in ipairs(hits) do
+        if v.leader == my then
+            if Adv.leader(v.id, "auto") then n = n + 1 end
+        else
+            local list = listOf(my, "A")
+            local e = findIn(list, v.id)
+            if e and not e.dt then
+                e.dt = t
+                if save("A", list) then n = n + 1 end
+            end
+        end
     end
     return n
 end
@@ -1636,7 +1809,7 @@ function Adv.uploadFor(a)
     end
     if trec then
         for _, e in ipairs(Adv.decodeList(trec.v) or {}) do
-            local r = validId(e.id) and Adv.logRecord(e)
+            local r = validId(e.id) and Adv.logRecord(e, Adv.get(e.id))
             if r and not log[r.id] then log[r.id] = r; logAt = math.max(logAt, r.at or 0) end
         end
     end
@@ -1651,7 +1824,7 @@ function Adv.uploadFor(a)
         local quests = {}
         for _, q in ipairs(splitDots(r.qs)) do if tonumber(q) then quests[#quests + 1] = tonumber(q) end end
         value[id] = { dungeon = r.ds, quests = #quests > 0 and quests or nil, slotStart = r.fs, formedAt = r.fm,
-            doneAt = r.dn, status = r.st, members = members }
+            doneAt = r.dn, status = r.st, members = members, auto = r.auto or nil }
         n = n + 1
     end
     if n > 0 then out.log = { recordedAt = logAt, value = value } end

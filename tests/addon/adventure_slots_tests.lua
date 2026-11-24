@@ -569,4 +569,203 @@ return function(T)
         wow.pressEscape()
         ok(not f:IsShown(), "ESC closes")
     end)
+    ---------------------------------------------------------------------------
+    -- v1.1a R-16.22 - R-16.25: automatic 成行
+    ---------------------------------------------------------------------------
+
+    -- My party: these authors (party1..4).
+    local function party(list)
+        UnitGUID = function(u)
+            if u == "player" then return "Player-" .. A end
+            local i = tonumber(tostring(u):match("^party(%d)$"))
+            return i and list[i] and ("Player-" .. list[i]) or nil
+        end
+    end
+    local function inside(instanceID)
+        IsInInstance = function() return instanceID ~= nil end
+        GetInstanceInfo = function() return "x", "party", 1, "", 5, 0, false, instanceID end
+    end
+    local function restore()
+        IsInInstance, GetInstanceInfo = nil, nil
+        UnitGUID = function(u) if u == "player" then return "Player-" .. A end end
+    end
+
+    test("GF-002-H R-16.22 needed: 60% of the set size rounded up, at least 2 (the leader counts)", function()
+        local ns = login()
+        local Adv = ns.Adventure
+        eq(Adv.autoNeeded({ roles = { t = 1, h = 1, d = 3 } }), 3, "5 -> 3")
+        eq(Adv.autoNeeded({ roles = { t = 1, h = 0, d = 2 } }), 2, "3 -> 2")
+        eq(Adv.autoNeeded({ size = 4 }), 3, "4 -> 3")
+        eq(Adv.autoNeeded({ size = 2 }), 2, "2 -> 2")
+        local from, to = Adv.autoWindow({ s = 10000 })
+        eq(from, 10000 - 3600, "60 minutes before"); eq(to, 10000 + 4 * 3600, "no length: 4 hours")
+        eq(select(2, Adv.autoWindow({ s = 10000, d = 7200 })), 17200, "with a length: its end")
+    end)
+
+    test("GF-002-H R-16.22 dungeon: inside with 3 of 5 accepted in the party -> 成團 and 成行 at once (no 組隊)", function()
+        local ns = login()
+        local Adv = ns.Adventure
+        local t = ns.Share.serverNow()
+        local id = Adv.open({ dungeon = "sml", roles = { t = 1, h = 1, d = 3 }, leaderRole = "d" })
+        apply(ns, B, id, t + 1, "t"); apply(ns, C, id, t + 2, "h")
+        wow.advance(60)
+        party({ B }); inside(189)
+        Adv.onEnterWorld()
+        eq(Adv.get(id).state, "open", "only 2 accepted in the party: not yet")
+        party({ B, C, D }) -- D is not accepted: does not count
+        Adv.checkAuto()
+        local v = Adv.get(id)
+        eq(v.state, "done", "成行"); ok(v.auto, "automatic"); ok(v.formedAt, "成團 too")
+        local e = mine(ns)[1]
+        eq(e.st, "c", "written as 成行"); ok(e.dt, "detected at"); ok(e.mb:find(C .. ":h", 1, true), "members")
+        eq(Adv.myLog()[1].st, "done", "logged")
+        -- Outside the window: a slot two days away.
+        local id2 = Adv.open({ dungeon = "sml", roles = { t = 1, h = 1, d = 1 }, leaderRole = "d", slots = { { s = ns.Share.serverNow() + 2 * 86400 } } })
+        apply(ns, B, id2, ns.Share.serverNow(), "t"); apply(ns, C, id2, ns.Share.serverNow(), "h")
+        Adv.checkAuto()
+        eq(Adv.get(id2).state, "formed", "full (成團), but not in its window: no 成行")
+        -- Another dungeon: nothing.
+        local id3 = Adv.open({ dungeon = "rfk", roles = { t = 1, h = 1, d = 1 }, leaderRole = "d" })
+        apply(ns, B, id3, ns.Share.serverNow(), "t"); apply(ns, C, id3, ns.Share.serverNow(), "h")
+        Adv.checkAuto()
+        ok(Adv.get(id3).state ~= "done", "SM is not RFK")
+        restore()
+    end)
+
+    test("GF-002-H R-16.24 the leader away: an accepted member's own record makes it 成行; the log goes up with member.share", function()
+        local ns = login()
+        local Adv = ns.Adventure
+        local t = ns.Share.serverNow()
+        offer(ns, B, "T", { { id = "abbb.1", src = "g", ver = 1, cr = t, ds = "sml", qs = "", tm = "n", rt = 1, rh = 0, rd = 2,
+            lr = "d", tg = 0, md = "a", st = "o", sa = t } })
+        apply(ns, C, "abbb.1", t + 1, "d")
+        wow.advance(5)
+        ok(Adv.worker("abbb.1", "apply"), "I am in")
+        wow.advance(60)
+        party({ C }); inside(189) -- the leader B is not in the party
+        eq(Adv.checkAuto(), 1, "one record written")
+        local e = Adv.listOf(A, "A")[1]
+        ok(e.dt, "dt on my own signup only"); eq(#Adv.listOf(A, "T"), 0, "nothing in anyone else's part")
+        local v = Adv.get("abbb.1")
+        eq(v.state, "done", "成行 from my record"); ok(v.auto, "auto")
+        eq((Adv.attention(v, C, ns.Share.serverNow()) or {}).code, "done", "the others hear of it")
+        local up = Adv.uploadFor(B)
+        local r = up.log and up.log.value["abbb.1"]
+        ok(r, "B's log record, derived"); eq(r and r.status, "done", "成行"); ok(r and r.auto, "auto"); eq(r and #r.members, 3, "B, C and me")
+        -- A record from someone who is not accepted does not count.
+        offer(ns, B, "T", { { id = "abbb.2", src = "g", ver = 1, cr = t, ds = "sml", qs = "", tm = "n", rt = 1, rh = 0, rd = 2,
+            lr = "t", tg = 0, md = "a", st = "o", sa = t, dc = D .. ":k:" .. ns.Share.b36(t + 2) } })
+        offer(ns, D, "A", { { id = "abbb.2", ac = "ap", at = t + 1, ap = t + 1, ak = "ap", ro = "d", rb = "", dt = t + 70 } }, t + 70)
+        eq(Adv.get("abbb.2").state, "open", "kicked D's record: ignored")
+        restore()
+    end)
+
+    test("GF-002-H R-16.23 quest ticket: a quest of the ticket turned in with enough accepted in the party", function()
+        local ns = login()
+        local Adv = ns.Adventure
+        local t = ns.Share.serverNow()
+        local id = Adv.open({ quests = { 1013, 1014 }, size = 4, leaderRole = "d" })
+        apply(ns, B, id, t + 1, "d"); apply(ns, C, id, t + 2, "d")
+        wow.advance(60)
+        party({ B, C })
+        eq(Adv.checkAuto(2000), 0, "another quest: nothing")
+        eq(Adv.checkAuto(), 0, "no quest turned in: nothing")
+        eq(Adv.checkAuto(1014), 1, "1014 turned in, 3 of 4 accepted here")
+        eq(Adv.get(id).state, "done", "成行")
+        restore()
+    end)
+
+    ---------------------------------------------------------------------------
+    -- v1.1a R-16.26 - R-16.29: quests easy to see
+    ---------------------------------------------------------------------------
+
+    local function questLog(rows)
+        C_QuestLog = { GetNumQuestLogEntries = function() return #rows, 0 end, GetInfo = function(i) return rows[i] end }
+    end
+    local ROWS = {
+        { isHeader = true, title = "貧瘠之地" },
+        { questID = 850, title = "測試任務：草原之心", level = 16 },
+        { questID = 851, title = "測試任務：綠洲", level = 22 },
+        { isHeader = true, title = "剃刀沼澤" },
+        { questID = 1101, title = "測試任務：沼澤之王", level = 34 },
+    }
+
+    test("GF-002-H R-16.27 quest picker: by zone, full names, colored levels; a dungeon quest brings its dungeon; up to 5", function()
+        local ns = login()
+        local U = ns.AdventureUI
+        questLog(ROWS)
+        local t = ns.Share.serverNow()
+        offer(ns, B, "T", { { id = "abbb.1", src = "g", ver = 1, cr = t, ds = "", qs = "851", tm = "n", sz = 4, lr = "d", tg = 0, md = "a", st = "o", sa = t } })
+        local d = U.openTicket()
+        local f = _G[U.TICKET_NAME]
+        wow.click(f.pickQuest)
+        local qp = U.questPickerFrame()
+        ok(qp:IsShown(), "open")
+        local heads = {}
+        for _, h in ipairs(qp.heads) do if h:IsShown() then heads[#heads + 1] = h:GetText() end end
+        eq(table.concat(heads, ","), "貧瘠之地,剃刀沼澤", "zone headers in log order")
+        local rows = {}
+        for _, r in ipairs(qp.rows) do if r:IsShown() then rows[r.questId] = r end end
+        eq(rows[850].name:GetText(), "測試任務：草原之心", "the full name")
+        ok(rows[850].level:GetText():find("16", 1, true) and rows[850].level:GetText():find("^|cff"), "a colored level")
+        ok(rows[851].wanted and not rows[850].wanted, "❗ on the quest B's ticket wants")
+        eq(U.questDungeon({ zone = "剃刀沼澤" }), "rfk", "a dungeon quest: its dungeon (its art on the row)")
+        wow.click(rows[1101])
+        eq(d.dungeon, "rfk", "brings its dungeon"); eq(#d.quests, 1, "and the quest")
+        wow.click(rows[850]); wow.click(rows[851])
+        wow.click(rows[1101])
+        eq(d.dungeon, nil, "no dungeon quest left: no dungeon")
+        local id = U.submitTicket()
+        local e
+        for _, x in ipairs(ns.Adventure.listOf(A, "T")) do if x.id == id then e = x end end
+        ok(e.qn and e.qn:find("850:測試任務：草原之心", 1, true), "names travel in-game: " .. tostring(e and e.qn))
+        local text = plain(U.destText(ns.Adventure.get(id)))
+        eq(text, "測試任務：草原之心 16 +1", "the first quest, its level, +1")
+        ns.Sync.recordSelf(true)
+        local entry
+        for _, x in ipairs(GreenFangToolkitDB.sync.outbox) do if x.kind == "character.self" then entry = x end end
+        local tk = entry.payload.adventure.tickets.value[id]
+        eq(table.concat(tk.quests, ","), "850,851", "the upload: quest IDs only")
+        for k, v in pairs(tk) do ok(type(v) ~= "string" or not v:find("測試任務", 1, true), "no quest names uploaded: " .. k) end
+        C_QuestLog = nil
+        -- Someone without the quests in their log still sees the names (qn).
+        offer(ns, B, "T", { { id = "abbb.2", src = "g", ver = 1, cr = t, ds = "", qs = "1101.850", qn = "1101:測試任務：沼澤之王;850:測試任務：草原之心",
+            ql = "1101:34;850:16", tm = "n", sz = 4, lr = "d", tg = 0, md = "a", st = "o", sa = t } })
+        eq(plain(U.destText(ns.Adventure.get("abbb.2"))), "測試任務：沼澤之王 34 +1", "from the ticket's names")
+        local tip = U.ticketTooltip(ns.Adventure.get("abbb.2"))
+        eq(#tip, 2, "the tooltip lists all"); ok(plain(tip[2]):find("草原之心", 1, true), "the second")
+        -- At most 5.
+        questLog({ { questID = 1, title = "q1", level = 10 }, { questID = 2, title = "q2", level = 10 }, { questID = 3, title = "q3", level = 10 },
+            { questID = 4, title = "q4", level = 10 }, { questID = 5, title = "q5", level = 10 }, { questID = 6, title = "q6", level = 10 } })
+        d = U.openTicket()
+        U.pickQuests(f.pickQuest)
+        for _, r in ipairs(qp.rows) do if r:IsShown() then wow.click(r) end end
+        eq(#d.quests, 5, "at most 5")
+        C_QuestLog = nil
+    end)
+
+    test("GF-002-H R-16.29 worker quests by name (+N); 日誌全部 with its count", function()
+        local ns = login()
+        local U = ns.AdventureUI
+        questLog(ROWS)
+        U.openWorker()
+        local wf = _G[U.WORKER_NAME]
+        U.pickWorkerQuests(wf.quests)
+        local qp = U.questPickerFrame()
+        ok(qp.all:IsShown(), "日誌全部 at the top"); eq(qp.all.label._text, "日誌全部 3", "with the count")
+        local rows = {}
+        for _, r in ipairs(qp.rows) do if r:IsShown() then rows[r.questId] = r end end
+        wow.click(rows[850]); wow.click(rows[851]); wow.click(rows[1101])
+        ok(plain(wf.quests:GetText()):find("測試任務：草原之心 16、測試任務：綠洲 22 +1", 1, true), "names on the button: " .. plain(wf.quests:GetText()))
+        U.saveWorker()
+        local w = ns.Adventure.myWorker()
+        eq(plain(U.workerDest(w)), "測試任務：草原之心 16、測試任務：綠洲 22 +1", "the row: names, not 任務 3")
+        U.openWorker()
+        U.pickWorkerQuests(wf.quests)
+        wow.click(qp.all)
+        ok(plain(wf.quests:GetText()):find("日誌全部 3", 1, true), "日誌全部 3")
+        U.saveWorker()
+        eq(plain(U.workerDest(ns.Adventure.myWorker())), "日誌全部 3", "shared with the count")
+        C_QuestLog = nil
+    end)
 end

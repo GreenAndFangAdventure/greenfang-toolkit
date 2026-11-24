@@ -241,7 +241,7 @@ for _, e in ipairs({ "TRADE_SHOW", "TRADE_CLOSED", "TRADE_ACCEPT_UPDATE", "TRADE
     "AUCTION_HOUSE_SHOW", "AUCTION_HOUSE_CLOSED", "REPLICATE_ITEM_LIST_UPDATE",
     "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED", "AUCTION_HOUSE_BROWSE_RESULTS_ADDED",
     "COMMODITY_SEARCH_RESULTS_UPDATED", "ITEM_SEARCH_RESULTS_UPDATED", "QUEST_LOG_UPDATE", "QUEST_REMOVED",
-    "QUEST_TURNED_IN", "PLAYER_ENTERING_WORLD", "ZONE_CHANGED_NEW_AREA" }) do
+    "QUEST_TURNED_IN", "PLAYER_ENTERING_WORLD", "ZONE_CHANGED_NEW_AREA", "GROUP_ROSTER_UPDATE" }) do
     local ok = pcall(orderEvents.RegisterEvent, orderEvents, e)
     if not ok then ns.missingEvents[#ns.missingEvents + 1] = e end
 end
@@ -268,9 +268,13 @@ orderEvents:SetScript("OnEvent", function(_, event, arg1, arg2)
     elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" or event == "ITEM_SEARCH_RESULTS_UPDATED" then
         Prices.onSearchResult(arg1)
     elseif event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" then
-        -- GF-002-B (R-7.3): entering the ticket's dungeon counts as departing.
+        -- GF-002-H (R-16.22): where I am; inside the destination with enough accepted people = 成行.
         if ns.adventureStarted then ns.after(2, function() pcall(ns.Adventure.onEnterWorld) end) end
+    elseif event == "GROUP_ROSTER_UPDATE" then
+        if ns.adventureStarted then ns.coalesce("adventure-auto", 2, function() pcall(ns.Adventure.checkAuto) end) end
     elseif event == "QUEST_LOG_UPDATE" or event == "QUEST_REMOVED" or event == "QUEST_TURNED_IN" then
+        -- GF-002-H (R-16.23): a quest of my quest ticket turned in (arg1 = questID).
+        if event == "QUEST_TURNED_IN" and ns.adventureStarted then pcall(ns.Adventure.checkAuto, arg1) end
         -- GF-002-B (R-5.2): quests that left my log come off my worker ticket.
         ns.coalesce("adventure-quests", 2, function()
             local log = ns.Adventure.questLog()

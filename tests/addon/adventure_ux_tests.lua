@@ -161,9 +161,10 @@ return function(T)
         local tf = _G[A.TICKET_NAME]
         local w, name = widest(tf)
         ok(w <= 200, "ticket window: widest button " .. w .. " (" .. name .. ")")
-        eq(plain(tf.dest:GetText()), "選擇目的地", "a small 選擇目的地")
+        ok(tf.pickDungeon:IsShown() and tf.pickQuest:IsShown(), "GF-002-H: 地城 / 任務 first (icon buttons, not long ones)")
         A.draft().dungeon = "smg"; A.drawTicket()
-        eq(plain(tf.dest:GetText()), "更換", "then the art + name + 更換")
+        eq(plain(tf.dest:GetText()), " 地城", "then the art + name + a small 地城 (change)")
+        ok(not tf.pickDungeon:IsShown(), "the big buttons step aside")
         ok(tf.destIcon:IsShown() and plain(tf.destName:GetText()):find("血色修道院：墓地", 1, true), "the chosen dungeon")
         A.openWorker()
         local wf = _G[A.WORKER_NAME]

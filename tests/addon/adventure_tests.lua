@@ -499,7 +499,7 @@ return function(T)
         eq(again.id, first, "nothing changed: not rewritten")
     end)
 
-    test("GF-002-H R-16.16 entering the ticket's dungeon only lights up 完成 (instance ID, then name)", function()
+    test("GF-002-H R-16.16 entering the ticket's dungeon alone (too few accepted in the party) lights up 完成 (instance ID, then name)", function()
         local ns = login()
         local Adv = ns.Adventure
         local id = Adv.open({ dungeon = "sml", leaderRole = "d" })
@@ -509,7 +509,7 @@ return function(T)
         GetInstanceInfo = function() return "x", "party", 1, "", 5, 0, false, 189 end
         eq(Adv.onEnterWorld(), 1, "one formed ticket here")
         ok(Adv.inDestination(Adv.get(id)) and not Adv.inDestination(Adv.get(other)), "SM, not RFK")
-        eq(Adv.get(id).state, "formed", "still 成團: nothing automatic"); eq(Adv.get(other).state, "open", "RFK untouched")
+        eq(Adv.get(id).state, "formed", "still 成團: only me in the party (R-16.22 needs 3)"); eq(Adv.get(other).state, "open", "RFK untouched")
         -- No usable ID: the name.
         GetInstanceInfo = function() return "剃刀沼澤", "party", 1, "", 5, 0, false, nil end
         Adv.onEnterWorld()

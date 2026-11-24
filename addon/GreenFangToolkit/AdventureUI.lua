@@ -202,6 +202,7 @@ end
 -- each tag as its icon and name, then the note.
 function UI.detailText(v)
     local parts = {}
+    if v.dungeon and #(v.quests or {}) > 0 then parts[#parts + 1] = tex("quest", 18) .. " " .. UI.questsText(v.quests, v.questNames, v.questLevels, 1) end
     for _, k in ipairs(UI.TAG_KEYS) do
         if math.floor((v.tags or 0) / A().TAGS[k]) % 2 == 1 then parts[#parts + 1] = tex("tag_" .. k, 18) .. " " .. UI.TAG_NAME[k] end
     end
@@ -211,13 +212,61 @@ function UI.detailText(v)
     return text
 end
 
+-- GF-002-H (R-16.28): a quest's name and level: the ticket's synced names (qn,
+-- in-game only), else my own log.
+function UI.questName(id, names, levels)
+    local log = A().questLog() or {}
+    local info = log[tonumber(id) or id]
+    local name = (names and names[tonumber(id)]) or (info and info.title) or ("#" .. tostring(id))
+    local lv = levels and levels[tonumber(id)]
+    if lv == nil and info then lv = info.scaling and "s" or info.level end
+    return name, lv
+end
+-- Quest difficulty colors (the game's own when it has them).
+function UI.questColor(level)
+    if type(level) ~= "number" then return 1, 0.82, 0 end
+    if type(GetQuestDifficultyColor) == "function" then
+        local okC, c = pcall(GetQuestDifficultyColor, level)
+        if okC and type(c) == "table" and c.r then return c.r, c.g, c.b end
+    end
+    local diff = level - (A().myLevel() or level)
+    if diff >= 5 then return 1, 0.1, 0.1 end
+    if diff >= 3 then return 1, 0.5, 0.25 end
+    if diff >= -2 then return 1, 1, 0 end
+    if diff >= -8 then return 0.25, 0.75, 0.25 end
+    return 0.5, 0.5, 0.5
+end
+function UI.levelMark(lv)
+    if lv == "s" then return "" end
+    if type(lv) ~= "number" or lv <= 0 then return "" end
+    local r, g, b = UI.questColor(lv)
+    return string.format("|cff%02x%02x%02x%d|r", math.floor(r * 255), math.floor(g * 255), math.floor(b * 255), lv)
+end
+-- "測試任務甲 24 +2"
+function UI.questsText(ids, names, levels, max)
+    max = max or 1
+    local parts = {}
+    for i, q in ipairs(ids or {}) do
+        if i <= max then
+            local name, lv = UI.questName(q, names, levels)
+            local mark = UI.levelMark(lv)
+            parts[#parts + 1] = name .. (mark ~= "" and (" " .. mark) or "")
+        end
+    end
+    local text = table.concat(parts, "、")
+    if #(ids or {}) > max then text = text .. " +" .. (#ids - max) end
+    return text
+end
+
 -- GF-002-G (owner: 「名稱盡量完整顯示」): the full dungeon name on the row.
+-- GF-002-H (R-16.28): a quest ticket shows its first quest's full name and level, +N.
 function UI.destText(v)
     if v.dungeon then
         local d = ns.AdventureData.byId[v.dungeon]
         return d and d.name or ns.AdventureData.short(v.dungeon)
     end
-    return "任務 " .. #v.quests
+    if #v.quests == 0 then return "任務" end
+    return UI.questsText(v.quests, v.questNames, v.questLevels, 1)
 end
 
 function UI.setDest(t, v)
@@ -238,10 +287,10 @@ function UI.ticketTooltip(v)
         local d = ns.AdventureData.byId[v.dungeon]
         lines[#lines + 1] = d and (d.name .. "  " .. UI.levelText(v.dungeon)) or v.dungeon
     end
-    local log = A().questLog() or {}
     for _, q in ipairs(v.quests) do
-        local info = log[tonumber(q) or q]
-        lines[#lines + 1] = tex("quest") .. " " .. ((info and info.title) or ("#" .. tostring(q)))
+        local name, lv = UI.questName(q, v.questNames, v.questLevels)
+        local mark = UI.levelMark(lv)
+        lines[#lines + 1] = tex("quest") .. " " .. name .. (mark ~= "" and ("  " .. mark) or "")
     end
     local tags = UI.tagNames(v.tags)
     if tags ~= "" then lines[#lines + 1] = tags end
@@ -533,8 +582,14 @@ function UI.workerDest(w)
     for i, d in ipairs(w.dungeons or {}) do if i <= 3 then names[#names + 1] = ns.AdventureData.short(d) end end
     local text = table.concat(names, "、")
     if #(w.dungeons or {}) > 3 then text = text .. " +" .. (#w.dungeons - 3) end
-    if text == "" then text = w.allQuests and "全部任務" or ("任務 " .. #(w.quests or {})) end
+    if text == "" then text = UI.workerQuests(w, 2) end
     return text
+end
+-- GF-002-H (R-16.29): the chosen quests by name (+N), or 日誌全部 N.
+function UI.workerQuests(w, max)
+    if w.allQuests then return "日誌全部" .. (w.questCount and (" " .. w.questCount) or "") end
+    if #(w.quests or {}) == 0 then return "" end
+    return UI.questsText(w.quests, w.questNames, nil, max or 2)
 end
 function UI.workerDetail(w)
     local parts = {}
@@ -543,8 +598,8 @@ function UI.workerDetail(w)
         for i = 4, #w.dungeons do rest[#rest + 1] = ns.AdventureData.short(w.dungeons[i]) end
         parts[#parts + 1] = table.concat(rest, "、")
     end
-    local q = w.allQuests and "全部任務" or (#(w.quests or {}) > 0 and ("任務 " .. #w.quests) or nil)
-    if q and #(w.dungeons or {}) > 0 then parts[#parts + 1] = tex("quest", 18) .. " " .. q end
+    local q = UI.workerQuests(w, 2)
+    if q ~= "" and #(w.dungeons or {}) > 0 then parts[#parts + 1] = tex("quest", 18) .. " " .. q end
     return table.concat(parts, "   ")
 end
 -- A worker's slots: the first two, then "+N" (GF-002-H: up to 5).
@@ -1172,20 +1227,29 @@ local function drawDest(f)
     elseif #d.quests > 0 then
         ns.GameIcons.set(f.destIcon, "quest")
         f.destIcon:Show()
-        f.destName:SetText("任務 " .. #d.quests)
+        f.destName:SetText(UI.questsText(d.quests, nil, nil, 1)) -- GF-002-H: the first quest, +N
     else
         f.destIcon:Hide()
         f.destName:SetText("")
     end
+    -- GF-002-H (R-16.26): step one is two big buttons, 地城 and 任務; once chosen,
+    -- the art + name, then a small 地城 and 任務 to change it.
     local chosen = d.dungeon or #d.quests > 0
-    f.dest:SetText(chosen and "更換" or "選擇目的地")
-    f.dest.gfWidth = ns.labelWidth(f.dest:GetText()) + 28
-    f.dest:SetSize(f.dest.gfWidth, ns.BUTTON_H)
-    f.dest:ClearAllPoints()
+    local hasLog = A().questLog() ~= nil
+    f.pickQuest.disabled = not hasLog
+    f.pickQuest.tex:SetAlpha(hasLog and 1 or 0.4)
+    if f.pickQuest.label then f.pickQuest.label:SetAlpha(hasLog and 1 or 0.4) end
+    f.pickQuest.tip = not hasLog and "任務日誌讀不到" or nil
     if chosen then
-        f.dest:SetPoint("LEFT", f.destName, "RIGHT", 16, 0)
+        f.pickDungeon:Hide(); f.pickQuest:Hide()
+        f.dest:Show(); f.destQuest:Show()
+        f.dest:ClearAllPoints(); f.dest:SetPoint("LEFT", f.destName, "RIGHT", 16, 0)
+        f.destQuest:ClearAllPoints(); f.destQuest:SetPoint("LEFT", f.dest, "RIGHT", 10, 0)
+        if hasLog then f.destQuest:Show() else f.destQuest:Hide() end
     else
-        f.dest:SetPoint("TOPLEFT", f, "TOPLEFT", f.controlX, f.rowY[1])
+        f.dest:Hide(); f.destQuest:Hide()
+        f.pickDungeon:Show(); f.pickQuest:Show()
+        ns.OrdersUI.flow(f, { f.pickDungeon, f.pickQuest }, f.controlX, f.rowY[1] + 6, 40)
     end
 end
 
@@ -1270,7 +1334,10 @@ function UI.openTicket(v)
         f.destIcon:SetPoint("TOPLEFT", f, "TOPLEFT", X, y[1] + 1)
         f.destName = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
         f.destName:SetPoint("LEFT", f.destIcon, "RIGHT", 8, 0)
-        f.dest = O.textButton(f, "選擇目的地", function(self) UI.pickDestination(self) end)
+        f.pickDungeon = iconButton(f, 40, "dungeon", nil, function(self) UI.pickDestination(self) end, "地城")
+        f.pickQuest = iconButton(f, 40, "quest", nil, function(self) if not self.disabled then UI.pickQuests(self) end end, "任務")
+        f.dest = O.textButton(f, tex("dungeon", 18) .. " 地城", function(self) UI.pickDestination(self) end)
+        f.destQuest = O.textButton(f, tex("quest", 18) .. " 任務", function(self) UI.pickQuests(self) end)
         -- 時段 [現在] [明天 20:00～22:00] [＋時段] (GF-002-H, R-16.1 - R-16.3)
         field(f, "時段", FX, y[2] - 8)
         f.slotChips = {}
@@ -1343,6 +1410,8 @@ local grid
 
 function UI.dungeonGrid(owner, onClick, isOn, onQuest, returnTo, showLfg)
     if ns.Framework.closeMenu then ns.Framework.closeMenu() end
+    local qp = UI.questPickerFrame and UI.questPickerFrame()
+    if qp and qp:IsShown() then qp:Hide() end
     if not grid then
         grid = CreateFrame("Frame", UI.GRID_NAME, UIParent)
         grid:SetFrameStrata("TOOLTIP") -- above the click-outside blocker
@@ -1453,31 +1522,184 @@ UI.titled = titled
 -- Dungeons (the picker); its quest cell opens my quest log instead (R-4.1).
 function UI.pickDestination(owner)
     local hasQuests = A().questLog() ~= nil
-    return UI.dungeonGrid(owner, function(id) draft.dungeon = id; draft.quests = {}; drawTicket() end, nil,
-        hasQuests and function() UI.pickQuests(owner) end or nil, popup, UI.hasNow(draft))
+    -- GF-002-H (R-16.26): quests have their own button; the grid is dungeons only.
+    return UI.dungeonGrid(owner, function(id) draft.dungeon = id; draft.quests = {}; draft.questDungeon = nil; drawTicket() end, nil,
+        nil, popup, UI.hasNow(draft))
 end
 
 function UI.pickQuests(owner)
-    local items = {}
-    local log = A().questLog()
-    if log then
-        local n = 0
-        for id, q in pairs(log) do
-            n = n + 1
-            if n > 15 then break end
-            local on = false
-            for _, x in ipairs(draft.quests) do if x == id then on = true end end
-            items[#items + 1] = { text = (on and (tex("yes") .. " ") or "") .. tex("quest") .. " " .. str(q.title), fn = function()
-                draft.dungeon = nil
-                for i, x in ipairs(draft.quests) do if x == id then table.remove(draft.quests, i); drawTicket(); return end end
-                if #draft.quests < A().MAX_QUESTS then draft.quests[#draft.quests + 1] = id end
-                drawTicket()
-            end }
+    -- R-16.27: up to 5; a quest of a dungeon brings that dungeon along.
+    return UI.questPicker(owner, { title = "選擇任務（最多 5 個）", max = A().MAX_QUESTS,
+        isOn = function(id) for _, x in ipairs(draft.quests) do if x == id then return true end end return false end,
+        onToggle = function(id, info)
+            for i, x in ipairs(draft.quests) do
+                if x == id then table.remove(draft.quests, i); UI.questDungeonFor(draft); drawTicket(); return end
+            end
+            if #draft.quests >= A().MAX_QUESTS then return end
+            draft.quests[#draft.quests + 1] = id
+            UI.questDungeonFor(draft)
+            drawTicket()
+        end })
+end
+-- The dungeon a draft's quests belong to (the first dungeon quest), R-16.27.
+function UI.questDungeonFor(d)
+    local log = A().questLog() or {}
+    local found
+    for _, q in ipairs(d.quests) do
+        local dg = UI.questDungeon(log[q])
+        if dg then found = dg; break end
+    end
+    if found then d.dungeon, d.questDungeon = found, true
+    elseif d.questDungeon then d.dungeon, d.questDungeon = nil, nil end
+end
+
+-- The dungeon a quest log zone header names (ids of AdventureData), or nil.
+function UI.questDungeon(info)
+    local zone = info and str(info.zone)
+    if not zone or zone == "" then return nil end
+    for _, dg in ipairs(ns.AdventureData.DUNGEONS) do
+        local base = dg.name:match("^(.-)：") or dg.name
+        if zone == dg.name or zone == base or zone:find(base, 1, true) then return dg.id end
+    end
+    return nil
+end
+
+---------------------------------------------------------------------------
+-- GF-002-H (R-16.27, R-16.29): the quest picker. Grouped by the quest log's
+-- zone headers; a row: the quest (or its dungeon's) art, the full name, the
+-- level in its difficulty color; ❗ when an open adventure ticket wants it.
+---------------------------------------------------------------------------
+
+UI.QUEST_PICKER_NAME = "GreenFangToolkit_QuestPicker"
+UI.QP_ROW, UI.QP_COL_W, UI.QP_MAX_Y = 30, 420, 560
+local qpicker
+function UI.questList()
+    local log = A().questLog() or {}
+    local list = {}
+    for id, info in pairs(log) do list[#list + 1] = { id = id, info = info } end
+    table.sort(list, function(x, y)
+        local ox, oy = x.info.order or 0, y.info.order or 0
+        if ox ~= oy then return ox < oy end
+        return x.id < y.id
+    end)
+    local groups, byZone = {}, {}
+    for _, q in ipairs(list) do
+        local z = str(q.info.zone) ~= "" and q.info.zone or "其他"
+        if not byZone[z] then byZone[z] = { zone = z, quests = {} }; groups[#groups + 1] = byZone[z] end
+        table.insert(byZone[z].quests, q)
+    end
+    return groups
+end
+function UI.questPicker(owner, opts)
+    -- opts = { title, max, isOn(id), onToggle(id, info), all = { on, count, toggle() } (worker) }
+    if ns.Framework.closeMenu then ns.Framework.closeMenu() end
+    local g = UI.grid and UI.grid()
+    if g and g:IsShown() then g:Hide() end
+    local O = ns.OrdersUI
+    if not qpicker then
+        qpicker = CreateFrame("Frame", UI.QUEST_PICKER_NAME, UIParent)
+        qpicker:SetFrameStrata("TOOLTIP")
+        if qpicker.SetFrameLevel then qpicker:SetFrameLevel(60) end
+        ns.makeOpaque(qpicker, 0)
+        qpicker:EnableMouse(true)
+        ns.escRegister(qpicker, ns.ESC_LEVEL.menu)
+        qpicker.title = ns.freeText(qpicker:CreateFontString(nil, "ARTWORK", ns.TITLE_FONT))
+        qpicker.title:SetPoint("TOPLEFT", qpicker, "TOPLEFT", 16, -12)
+        qpicker.all = iconButton(qpicker, 28, "quest", nil, function() if qpicker.opts.all then qpicker.opts.all.toggle(); qpicker.draw() end end, "")
+        qpicker.heads, qpicker.rows = {}, {}
+        qpicker.done = O.textButton(qpicker, tex("yes", 18) .. " 完成", function() qpicker:Hide() end, 96)
+        qpicker.empty = qpicker:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT)
+        qpicker.empty:SetPoint("TOPLEFT", qpicker, "TOPLEFT", 16, -50)
+        qpicker:Hide()
+        local function row(k)
+            local r = qpicker.rows[k]
+            if r then return r end
+            r = CreateFrame("Button", nil, qpicker)
+            r:SetSize(UI.QP_COL_W - 20, UI.QP_ROW - 2)
+            r.icon = r:CreateTexture(nil, "ARTWORK"); r.icon:SetSize(24, 24); r.icon:SetPoint("LEFT", r, "LEFT", 4, 0)
+            r.want = r:CreateTexture(nil, "OVERLAY"); r.want:SetSize(16, 16); r.want:SetPoint("TOPLEFT", r.icon, "TOPLEFT", -6, 6)
+            r.name = r:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
+            r.name:SetPoint("LEFT", r, "LEFT", 34, 0); r.name:SetWidth(UI.QP_COL_W - 120); r.name:SetJustifyH("LEFT"); r.name:SetWordWrap(false)
+            r.level = r:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
+            r.level:SetPoint("LEFT", r, "LEFT", UI.QP_COL_W - 80, 0)
+            r.sel = r:CreateTexture(nil, "BACKGROUND"); r.sel:SetAllPoints()
+            r.sel:SetColorTexture(1, 0.82, 0.2, 0.22)
+            if r.SetHighlightTexture then r:SetHighlightTexture("Interface\\Buttons\\UI-Listbox-Highlight2", "ADD") end
+            r:SetScript("OnClick", function(self) qpicker.opts.onToggle(self.questId, self.info); qpicker.draw() end)
+            qpicker.rows[k] = r
+            return r
+        end
+        local function head(k)
+            local h = qpicker.heads[k]
+            if h then return h end
+            h = ns.freeText(qpicker:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
+            h:SetTextColor(1, 0.82, 0)
+            qpicker.heads[k] = h
+            return h
+        end
+        function qpicker.draw()
+            local o = qpicker.opts
+            local wanted = A().wantedQuests()
+            local y, col, maxY = -48, 0, 0
+            if o.all then
+                qpicker.all:Show()
+                qpicker.all:ClearAllPoints(); qpicker.all:SetPoint("TOPLEFT", qpicker, "TOPLEFT", 16, y)
+                O.setLabel(qpicker.all, "日誌全部" .. (o.all.count and (" " .. o.all.count) or ""))
+                O.setSelected(qpicker.all, o.all.on())
+                y = y - 40
+            else qpicker.all:Hide() end
+            local top = y
+            local nh, nr = 0, 0
+            local groups = UI.questList()
+            local function place(w, h)
+                if y - h < -UI.QP_MAX_Y and col == 0 then col, y = 1, top end
+                w:ClearAllPoints()
+                w:SetPoint("TOPLEFT", qpicker, "TOPLEFT", 16 + col * UI.QP_COL_W, y)
+                y = y - h
+                maxY = math.max(maxY, -y)
+            end
+            for _, gr in ipairs(groups) do
+                nh = nh + 1
+                local h = head(nh)
+                h:SetText(gr.zone)
+                place(h, 26); h:Show()
+                for _, q in ipairs(gr.quests) do
+                    nr = nr + 1
+                    local r = row(nr)
+                    r.questId, r.info = q.id, q.info
+                    local dg = UI.questDungeon(q.info)
+                    if dg then ns.GameIcons.set(r.icon, ns.GameIcons.dungeonKey(dg)) else ns.GameIcons.set(r.icon, "quest") end
+                    r.name:SetText(str(q.info.title))
+                    local lv = q.info.scaling and "s" or q.info.level
+                    r.level:SetText(UI.levelMark(lv))
+                    if wanted[q.id] then setIcon(r.want, "attention"); r.want:Show() else r.want:Hide() end
+                    r.wanted = wanted[q.id] == true
+                    local on = o.isOn(q.id)
+                    r.selected = on
+                    if on then r.sel:Show() else r.sel:Hide() end
+                    if o.all and o.all.on() then r:SetAlpha(0.5) else r:SetAlpha(1) end
+                    place(r, UI.QP_ROW); r:Show()
+                end
+            end
+            for k = nh + 1, #qpicker.heads do qpicker.heads[k]:Hide() end
+            for k = nr + 1, #qpicker.rows do qpicker.rows[k]:Hide() end
+            qpicker.empty:SetText(nr == 0 and "任務日誌是空的" or "")
+            local width = 32 + (col + 1) * UI.QP_COL_W
+            qpicker.done:ClearAllPoints()
+            qpicker.done:SetPoint("BOTTOMRIGHT", qpicker, "BOTTOMRIGHT", -16, 12)
+            qpicker:SetSize(width, math.max(maxY, 90) + 60)
         end
     end
-    items[#items + 1] = { text = tex("no") .. " 清除", fn = function() draft.dungeon = nil; draft.quests = {}; drawTicket() end }
-    return UI.menu(owner, titled("任務", items))
+    qpicker.opts = opts
+    qpicker.title:SetText(opts.title or "任務")
+    qpicker:ClearAllPoints()
+    qpicker:SetPoint("TOPLEFT", owner or UIParent, owner and "BOTTOMLEFT" or "CENTER", 0, -4)
+    if qpicker.SetClampedToScreen then qpicker:SetClampedToScreen(true) end
+    qpicker:Show()
+    qpicker.draw()
+    return qpicker
 end
+function UI.questPickerFrame() return qpicker end
 
 -- Set a slot's start directly (scripts and tests): "n" 現在, "t" the next quarter,
 -- "f" 20:00 the day after tomorrow (其他日期). i = the slot (default 1).
@@ -1608,8 +1830,9 @@ function UI.drawWorker()
         O.setSelected(f.mainRoles[r], wdraft.main == r)
         O.setSelected(f.altRoles[r], wdraft.alt == r)
     end
-    local qText = wdraft.allQuests and (tex("quest", 20) .. " 全部任務")
-        or (#wdraft.quests > 0 and (tex("quest", 20) .. " 任務 " .. #wdraft.quests) or "選擇任務")
+    local qn = UI.workerQuests({ allQuests = wdraft.allQuests, quests = wdraft.quests, questNames = wdraft.questNames,
+        questCount = wdraft.allQuests and A().questCount() or nil }, 2)
+    local qText = qn ~= "" and (tex("quest", 20) .. " " .. qn) or "選擇任務"
     f.quests:SetText(qText)
     f.quests.gfWidth = ns.labelWidth(qText) + 28
     f.quests:SetSize(f.quests.gfWidth, ns.BUTTON_H)
@@ -1694,24 +1917,16 @@ function UI.pickWorkerDungeons(owner)
 end
 
 function UI.pickWorkerQuests(owner)
-    local items = { { text = (wdraft.allQuests and (tex("yes") .. " ") or "") .. tex("quest") .. " 全部任務",
-        fn = function() wdraft.allQuests = not wdraft.allQuests; drawWorker() end } }
-    local log = A().questLog()
-    if log then
-        local n = 0
-        for id, q in pairs(log) do
-            n = n + 1
-            if n > 15 then break end
-            local on = false
-            for _, x in ipairs(wdraft.quests) do if x == id then on = true end end
-            items[#items + 1] = { text = (on and (tex("yes") .. " ") or "") .. str(q.title), fn = function()
-                for i, x in ipairs(wdraft.quests) do if x == id then table.remove(wdraft.quests, i); drawWorker(); return end end
-                wdraft.quests[#wdraft.quests + 1] = id
-                drawWorker()
-            end }
-        end
-    end
-    return UI.menu(owner, titled("任務", items))
+    -- R-16.29: 日誌全部 (with the count) or the quests one by one; ❗ = an open ticket wants it.
+    return UI.questPicker(owner, { title = "選擇任務",
+        all = { count = A().questCount(), on = function() return wdraft.allQuests == true end,
+            toggle = function() wdraft.allQuests = not wdraft.allQuests; drawWorker() end },
+        isOn = function(id) for _, x in ipairs(wdraft.quests) do if x == id then return true end end return false end,
+        onToggle = function(id)
+            for i, x in ipairs(wdraft.quests) do if x == id then table.remove(wdraft.quests, i); drawWorker(); return end end
+            wdraft.quests[#wdraft.quests + 1] = id
+            drawWorker()
+        end })
 end
 
 function UI.pickWorkerRoles(owner)
