@@ -657,6 +657,7 @@ local function newRow(i)
     row.feeTex:SetPoint("LEFT", row, "LEFT", Recipes.COL_FEE, 0)
     row.fee = ns.freeText(row:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
     row.fee:SetPoint("LEFT", row, "LEFT", Recipes.COL_FEE + 22, 0)
+    row.fee:SetWidth(Recipes.COL_BUTTON - Recipes.COL_FEE - 22 - 12) -- GF-UI-C: never under 下單
     row.fee:SetJustifyH("LEFT")
     row.order = ns.OrdersUI.textButton(row, "我的工錢", function(self) Recipes.pressOrder(self:GetParent() or self.row) end, 104)
     row.order.row = row
@@ -813,8 +814,7 @@ function Recipes.layoutRows()
                 row.fee:SetText(ns.OrdersUI.feeText(fee))
                 local action = Recipes.rowAction(data)
                 if action then
-                    row.order:SetText(action == "order" and (ns.GameIcons.markup("order", 20) .. " 下單")
-                        or (ns.GameIcons.markup("services", 20) .. " 我的工錢"))
+                    row.order:SetText(action == "order" and "下單" or "我的工錢")
                     row.order.action = action
                     row.order:Show()
                 else
@@ -917,36 +917,42 @@ local function label(p, text, x, y)
     return l
 end
 local FILTER_Y2 = FILTER_Y - 38
+-- GF-UI-C (owner: 「選項沒對齊」): one grid for both filter lines. Four
+-- columns 250 px apart; a field name at the column's x, its control 80 px
+-- further (room for 4 characters); check boxes at the column's x.
+Recipes.COLS, Recipes.CONTROL_DX = { 22, 272, 522, 772 }, 80
 
 local function build(p)
-    label(p, "搜尋", 22)
+    local C, DX = Recipes.COLS, Recipes.CONTROL_DX
+    label(p, "搜尋", C[1])
     search = ns.createFrame("EditBox", nil, p, "InputBoxTemplate")
-    search:SetSize(180, 30)
-    search:SetPoint("TOPLEFT", p, "TOPLEFT", 70, FILTER_Y)
+    search:SetSize(150, 30)
+    search:SetPoint("TOPLEFT", p, "TOPLEFT", C[1] + DX, FILTER_Y)
     search:SetAutoFocus(false)
     search:SetMaxLetters(60)
     search:SetScript("OnTextChanged", function(self) current.query = str(self:GetText()); Recipes.refresh() end)
     search:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     Recipes.searchBox = search
-    label(p, "專業", 272)
+    label(p, "專業", C[2])
     -- GF-001-D22: check boxes (several professions at once), with icons.
-    Recipes.skillChoice = ns.multiChoiceButton(p, 130, 320, FILTER_Y, Recipes.skillOptions,
+    Recipes.skillChoice = ns.multiChoiceButton(p, 130, C[2] + DX, FILTER_Y, Recipes.skillOptions,
         function() Recipes.refresh() end, Recipes.skillSummary)
-    label(p, "會做的人", 470)
-    Recipes.whoChoice = ns.multiChoiceButton(p, 120, 546, FILTER_Y, function() return Recipes.WHO_OPTIONS end,
+    label(p, "會做的人", C[3])
+    Recipes.whoChoice = ns.multiChoiceButton(p, 130, C[3] + DX, FILTER_Y, function() return Recipes.WHO_OPTIONS end,
         function() Recipes.refresh() end, Recipes.whoSummary)
-    Recipes.onlineCheck = ns.checkBox(p, "只看在線", 690, FILTER_Y, function(on) current.online = on; Recipes.refresh() end)
+    -- Second line: the check boxes under 搜尋 and 專業, 工錢 under 會做的人.
+    Recipes.onlineCheck = ns.checkBox(p, "只看在線", C[1], FILTER_Y2, function(on) current.online = on; Recipes.refresh() end)
     -- GF-002-E (owner: 「工錢應直接顯示，且可篩選」): second line.
     -- GF-UI-B: a hammer and 「接單中」 (was the 5-character 「只看接單中」).
-    Recipes.activeCheck = ns.checkBox(p, ns.OrdersUI.tex("hammer", 16) .. " 接單中", 22, FILTER_Y2,
+    Recipes.activeCheck = ns.checkBox(p, "接單中", C[2], FILTER_Y2,
         function(on) current.active = on; Recipes.refresh() end)
-    label(p, "工錢", 170, FILTER_Y2)
-    Recipes.feeChoice = ns.choiceButton(p, 130, 218, FILTER_Y2, function() return Recipes.FEE_OPTIONS end,
+    label(p, "工錢", C[3], FILTER_Y2)
+    Recipes.feeChoice = ns.choiceButton(p, 130, C[3] + DX, FILTER_Y2, function() return Recipes.FEE_OPTIONS end,
         function(v) current.fee = v; Recipes.refresh() end, "工錢不限")
     filterLine = ns.freeText(p:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
-    filterLine:SetPoint("TOPLEFT", p, "TOPLEFT", 820, FILTER_Y - 5)
+    filterLine:SetPoint("TOPLEFT", p, "TOPLEFT", C[4], FILTER_Y - 5)
     filterLine:SetJustifyH("LEFT")
-    clearFilter = ns.OrdersUI.textButton(p, ns.GameIcons.markup("no", 20) .. " 全部", function() current.guid = nil; Recipes.refresh() end)
+    clearFilter = ns.OrdersUI.textButton(p, "全部", function() current.guid = nil; Recipes.refresh() end)
     clearFilter:SetPoint("TOPLEFT", p, "TOPLEFT", 960, FILTER_Y - 1)
     clearFilter:Hide()
     Recipes.clearFilterButton = clearFilter

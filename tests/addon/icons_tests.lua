@@ -186,7 +186,7 @@ return function(T)
         ok(f.plus.art and f.plus.art:find("NextPage", 1, true), "next-page arrow")
         wow.click(f.plus)
         eq(d.qty, 2, "arrow adds one")
-        ok(f.send:GetText():find("^|T"), "下單 has an icon")
+        eq(f.send:GetText(), "下單", "GF-UI-C: 下單 in words (no icon on text buttons)")
         -- Missing arrow art: text buttons, still working.
         local prev = "Interface" .. BS .. "Buttons" .. BS .. "UI-SpellbookIcon-PrevPage-Up"
         ns = login({ missingFiles = { [prev] = true } })

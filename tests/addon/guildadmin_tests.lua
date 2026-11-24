@@ -25,6 +25,19 @@ return function(T)
         for _, b in ipairs(ns.UI.actionBar.buttons) do if b:IsShown() then out[#out + 1] = b.action end end
         return table.concat(out, ",")
     end
+    -- GF-UI-C (owner): the bar keeps 密語 / 組隊 / 查看; every action is in the right-click menu.
+    local function menuKeys(ns, name)
+        local out = {}
+        for _, it in ipairs(ns.UI.memberMenuItems(memberOf(ns, name))) do
+            if not it.header and it.key ~= "recipes" then out[#out + 1] = it.key end
+        end
+        return table.concat(out, ",")
+    end
+    local function pressItem(ns, name, key)
+        for _, it in ipairs(ns.UI.memberMenuItems(memberOf(ns, name))) do
+            if it.key == key then it.fn(); return true end
+        end
+    end
     local function selectRow(ns, name)
         local row = rowFor(ns, name)
         ok(row, "row " .. name)
@@ -37,14 +50,14 @@ return function(T)
     test("GF-001-Q without guild rights: only whisper, group and look up; no admin buttons", function()
         local ns = login()
         selectRow(ns, C)
-        eq(barKeys(ns), "whisper,group,who", "the member bar")
+        eq(barKeys(ns), "whisper,group", "the member bar (查看 only for an inspectable unit, GF-UI-C)")
         local items = ns.UI.memberMenuItems(memberOf(ns, C))
         local texts = {}
         for _, it in ipairs(items) do texts[#texts + 1] = plain(it.text) end
-        eq(table.concat(texts, ","), "密語,組隊,查看", "the right-click menu has the same")
+        eq(table.concat(texts, ","), "會階 3 會員,密語,組隊", "the right-click menu: the rank, then the same")
         eq(ns.UI.inviteButton._shown, false, "no 邀請入會")
         eq(ns.UI.infoButton._shown, true, "公會資訊 (reading is for everyone)")
-        eq(ns.UI.gameGuildButton._shown, true, "開啟遊戲公會介面")
+        eq(ns.UI.gameGuildButton, nil, "GF-UI-C: no 遊戲公會 button")
         eq(ns.UI.officerVisible, false, "no 幹部註記 column")
         local row = rowFor(ns, C)
         eq(row.cell.note:GetText(), "公開備註", "the guild note is shown")
@@ -56,30 +69,27 @@ return function(T)
         -- Whisper, group and look up call the game's functions.
         selectRow(ns, C)
         for _, b in ipairs(ns.UI.actionBar.buttons) do if b:IsShown() then wow.click(b) end end
-        eq(calls(), "tell:" .. C .. ",group:" .. C .. ",who:n-\"測試丙\"", "whisper, group, /who")
+        eq(calls(), "tell:" .. C .. ",group:" .. C, "whisper, group")
     end)
 
     test("GF-001-Q with rights: by the target's rank (never up to mine, never on higher ranks or myself)", function()
         local ns = login({ guildPerms = ALL, myRankIndex = 1 })
         selectRow(ns, C) -- 會員 (2)
-        eq(barKeys(ns), "whisper,group,who,demote,publicNote,officerNote,remove", "會員: not promoted to my own rank")
-        selectRow(ns, D) -- 新進 (3, the lowest)
-        eq(barKeys(ns), "whisper,group,who,promote,publicNote,officerNote,remove", "新進: promote, no demote below the lowest")
-        selectRow(ns, B) -- 會長 (0)
-        eq(barKeys(ns), "whisper,group,who,publicNote,officerNote", "the guild master: notes only")
-        selectRow(ns, "測試甲-測試伺服器") -- myself
-        eq(barKeys(ns), "whisper,who,publicNote,officerNote", "myself: no group, no rank change, no remove")
+        eq(barKeys(ns), "whisper,group", "GF-UI-C: no officer tools in the bar")
+        eq(menuKeys(ns, C), "whisper,group,demote,publicNote,officerNote,remove", "會員: not promoted to my own rank")
+        eq(menuKeys(ns, D), "whisper,group,promote,publicNote,officerNote,remove", "新進: promote, no demote below the lowest")
+        eq(menuKeys(ns, B), "whisper,group,publicNote,officerNote", "the guild master: notes only")
+        eq(menuKeys(ns, "測試甲-測試伺服器"), "whisper,publicNote,officerNote", "myself: no group, no rank change, no remove")
         eq(ns.UI.inviteButton._shown, true, "邀請入會")
         eq(ns.UI.officerVisible, true, "幹部註記 column")
         eq(rowFor(ns, C).cell.officerNote:GetText(), "幹部備註", "officer note shown")
         local items = ns.UI.memberMenuItems(memberOf(ns, D))
-        eq(#items, 7, "right-click: the same 7 actions")
+        eq(#items, 7, "right-click: the rank and 6 actions")
     end)
 
     test("GF-001-Q removing and demoting ask first in the game's confirm box; promoting does not", function()
         local ns = login({ guildPerms = ALL, myRankIndex = 1 })
-        selectRow(ns, C)
-        local function press(key) for _, b in ipairs(ns.UI.actionBar.buttons) do if b:IsShown() and b.action == key then wow.click(b); return true end end end
+        local function press(key) return pressItem(ns, C, key) end
         ok(press("remove"), "踢出公會 pressed")
         eq(calls(), "", "nothing yet")
         local p = wow.popup()
@@ -95,16 +105,14 @@ return function(T)
         wow.acceptPopup()
         eq(calls(), "demote:" .. C, "confirmed: demoted")
         wow.state.guildCalls = {}
-        selectRow(ns, D)
-        press("promote")
+        pressItem(ns, D, "promote")
         eq(calls(), "promote:" .. D, "promote at once")
         eq(wow.popup(), nil, "no box for promoting")
     end)
 
     test("GF-001-Q notes, the message of the day, guild info, invite, the game's guild window", function()
         local ns = login({ guildPerms = ALL, myRankIndex = 1 })
-        selectRow(ns, C)
-        local function press(key) for _, b in ipairs(ns.UI.actionBar.buttons) do if b:IsShown() and b.action == key then wow.click(b) end end end
+        local function press(key) return pressItem(ns, C, key) end
         press("publicNote")
         eq(wow.popup().editBox:GetText(), "公開備註", "the box starts with the note")
         wow.acceptPopup("新的公會註記")
@@ -128,9 +136,6 @@ return function(T)
         wow.acceptPopup("明天打通靈")
         eq(calls(), "motd:明天打通靈", "GuildSetMOTD")
         eq(f.motd:GetText(), "明天打通靈", "shown at once")
-        wow.state.guildCalls = {}
-        wow.click(ns.UI.gameGuildButton)
-        eq(calls(), "guildFrame:nil", "the game's guild window")
         -- ESC closes the info window first, the roster after.
         ns.UI.openGuildInfo()
         wow.pressEscape()
@@ -140,10 +145,9 @@ return function(T)
     test("GF-001-Q functions the client lacks are hidden; 同步與診斷 says which", function()
         local ns = login({ guildPerms = ALL, myRankIndex = 1, noGuildAdmin = true })
         selectRow(ns, C)
-        eq(barKeys(ns), "whisper,group,who", "only what needs no guild function")
+        eq(menuKeys(ns, C), "whisper,group", "only what needs no guild function")
         eq(ns.UI.inviteButton._shown, false, "no 邀請入會")
         eq(ns.UI.officerVisible, false, "no officer column without CanViewOfficerNote")
-        eq(ns.UI.gameGuildButton._shown, false, "no ToggleGuildFrame / ToggleFriendsFrame: hidden")
         local text = ns.GuildAdmin.diagText()
         ok(text:find("GuildUninvite", 1, true) and text:find("沒有", 1, true), "diag lists the missing ones: " .. text)
         ok(text:find("沒有管理權限", 1, true), "and no rights")
@@ -156,7 +160,7 @@ return function(T)
         StaticPopup_Show = nil
         ns.GuildAdmin.invalidate()
         selectRow(ns, C)
-        eq(barKeys(ns), "whisper,group,who,publicNote,officerNote", "no remove / demote / notes edit without a confirm box")
+        eq(menuKeys(ns, C), "whisper,group,publicNote,officerNote", "no remove / demote without a confirm box")
     end)
 
     test("GF-001-Q the officer note never reaches SavedVariables, the outbox or shared records", function()
@@ -177,7 +181,7 @@ return function(T)
 
     test("GF-001-Q the page: the guild buttons (bottom row, GF-UI-B) and the member bar do not overlap", function()
         local ns = login({ guildPerms = ALL, myRankIndex = 1 })
-        local list = { ns.UI.inviteButton, ns.UI.infoButton, ns.UI.gameGuildButton }
+        local list = { ns.UI.inviteButton, ns.UI.infoButton }
         local prevRight
         for _, b in ipairs(list) do
             local x = b._points[1][4]
@@ -192,16 +196,12 @@ return function(T)
         local last
         for _, b in ipairs(ns.UI.actionBar.buttons) do
             if b:IsShown() then
-                ok(b.gfWidth >= 32, "32 px icons")
-                ok(not b.label._font:find("Small"), "16 px names")
-                if last then
-                    local need = last.flowX + last.gfWidth + 4 + wow.textWidth(last.label._text, last.label._font)
-                    ok(b.flowX >= need, "no overlap: " .. last.label._text .. " / " .. b.label._text)
-                end
+                eq(b._h, 30, "GF-UI-C: 30 px text buttons")
+                if last then ok(b.flowX >= last.flowX + last.gfWidth + 8, "no overlap: " .. last._text .. " / " .. b._text) end
                 last = b
             end
         end
-        ok(last.flowX + ns.OrdersUI.buttonSpan(last) <= ns.UI.ROW_WIDTH, "inside the bar")
+        ok(last.flowX + last.gfWidth <= ns.UI.ROW_WIDTH, "inside the bar")
         ok(ns.UI.actionBar.nameWidth >= 22 + wow.textWidth("測試丁", ns.FIELD_FONT), "the name before the buttons")
     end)
 end

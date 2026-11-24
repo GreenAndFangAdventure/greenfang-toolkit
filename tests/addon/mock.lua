@@ -493,7 +493,11 @@ function wow.installGlobals()
             if token == "DRUID" then return { r = 0.5, g = 0.25, b = 0.125 } end
         end }
     end
-    UnitGUID = function(unit) if unit == "player" then return p.guid end end
+    -- GF-UI-C: state.units = { target = "Player-...", party1 = ... } for the inspect checks.
+    UnitGUID = function(unit)
+        if unit == "player" then return p.guid end
+        return state.units and state.units[unit] or nil
+    end
     UnitName = function(unit) if unit == "player" then return p.name, nil end end
     UnitLevel = function(unit) if unit == "player" then return p.level end end
     UnitClass = function(unit) if unit == "player" then return p.class, p.classToken, 11 end end
@@ -567,6 +571,11 @@ function wow.installGlobals()
     SetGuildInfoText = function(t) call("info")(t); state.guildInfoText = t end
     GuildControlGetNumRanks = function() return 4 end
     ToggleGuildFrame = call("guildFrame")
+    -- GF-UI-C: inspect (state.units holds the unit tokens; state.farAway = out of range).
+    InspectUnit = call("inspect")
+    CanInspect = function(unit) return state.units ~= nil and state.units[unit] ~= nil end
+    CheckInteractDistance = function(unit) return not state.farAway end
+    GuildControlGetRankName = function(i) return ({ "會長", "幹部", "會員", "新進" })[i] or "" end
     ChatFrame_SendTell = call("tell")
     C_PartyInfo = { InviteUnit = call("group") }
     C_FriendList = { SendWho = call("who") }

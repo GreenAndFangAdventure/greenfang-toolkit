@@ -131,7 +131,7 @@ test("fresh install creates schema v2 defaults", function()
     local db = GreenFangToolkitDB
     eq(db.schema, "gf.toolkit", "schema")
     eq(db.schemaVersion, 2, "schemaVersion")
-    eq(db.addonVersion, "0.14.0", "addonVersion")
+    eq(db.addonVersion, "0.14.1", "addonVersion")
     eq(db.sync.enabled, true, "sync.enabled default")
     eq(db.sync.noticeShown, false, "noticeShown before login")
     eq(#db.sync.outbox, 0, "outbox empty")
@@ -157,7 +157,7 @@ test("TOC declares the agreed names and loads every file", function()
     ok(toc:find("## Interface: 16001", 1, true), "Interface")
     ok(toc:find("## Title: 綠皮冒險工具箱", 1, true), "Title")
     ok(toc:find("## Author: 綠皮與獠牙冒險事務所", 1, true), "Author")
-    ok(toc:find("## Version: 0.14.0", 1, true), "Version")
+    ok(toc:find("## Version: 0.14.1", 1, true), "Version")
     ok(toc:find("## SavedVariables: GreenFangToolkitDB\r?\n"), "SavedVariables")
     local listed = {}
     for line in toc:gmatch("[^\r\n]+") do
@@ -429,7 +429,7 @@ test("unknown fields in an existing v2 table are preserved", function()
         sync = { enabled = false, noticeShown = true, outbox = {} },
     } })
     eq(GreenFangToolkitDB.futureModule.keep, true, "unknown field kept")
-    eq(GreenFangToolkitDB.addonVersion, "0.14.0", "addonVersion updated")
+    eq(GreenFangToolkitDB.addonVersion, "0.14.1", "addonVersion updated")
     eq(GreenFangToolkitDB.sync.enabled, true, "old off ignored (D-015)")
 end)
 
@@ -479,7 +479,7 @@ test("TSV/JSON export keep the v0.3.1 format", function()
     local s = ns.Roster.current()
     local json = ns.Export.jsonParts(s)
     eq(#json, 1, "one part")
-    ok(json[1]:find('^{"schema":"gfguildroster.report","schemaVersion":1,"addonVersion":"0.14.0"'), "json header")
+    ok(json[1]:find('^{"schema":"gfguildroster.report","schemaVersion":1,"addonVersion":"0.14.1"'), "json header")
     ok(json[1]:find('"part":1,"partCount":1', 1, true), "parts")
     ok(json[1]:find('"onlineAtCapture":true', 1, true), "member online in manual export")
     ok(not json[1]:find('"guid":', 1, true), "no guid in v1 export")
@@ -2642,18 +2642,18 @@ test("D10 roster: tooltip shows recipe counts; clicking a member opens their rec
     ok(not has(lines, "小時前"), "no age (D19)")
     ok(not has(lines, "點一下看他的配方"), "no click hint (D19)")
     row._scripts.OnMouseUp(row, "LeftButton")
-    -- GF-001-Q: a left click selects the member; 配方 is in the bar under the list.
-    local recipesButton
-    for _, b in ipairs(ns.UI.actionBar.buttons) do if b:IsShown() and b.action == "recipes" then recipesButton = b end end
-    ok(recipesButton, "配方 in the member bar")
-    wow.click(recipesButton)
+    -- GF-UI-C (owner): 配方 is in the right-click menu (the bar keeps 密語 / 組隊 / 查看).
+    local recipesItem
+    for _, it in ipairs(ns.UI.memberMenuItems(row.member)) do if it.key == "recipes" then recipesItem = it end end
+    ok(recipesItem, "配方 in the member menu")
+    recipesItem.fn()
     ok(ns.Framework.isModuleShown("recipes"), "recipe page opened")
     eq(ns.Recipes.state.guid, "Player-0000-0000000B", "filtered to that member")
     ns.Framework.open("roster")
     local other = rowFor(ns, "測試丁-測試伺服器")
     other._scripts.OnMouseUp(other, "LeftButton")
     ok(ns.Framework.isModuleShown("roster"), "no recipes: stays on the roster")
-    for _, b in ipairs(ns.UI.actionBar.buttons) do ok(not (b:IsShown() and b.action == "recipes"), "no 配方 button") end
+    for _, it in ipairs(ns.UI.memberMenuItems(other.member)) do ok(it.key ~= "recipes", "no 配方 item") end
 end)
 
 test("D10 character page: recipe line per craft profession", function()
@@ -2662,6 +2662,7 @@ test("D10 character page: recipe line per craft profession", function()
     local function texts() return table.concat(wow.allTexts(), "\n") end
     ok(not has(texts(), "還沒記錄配方"), "no hint before the window was opened (D19)")
     wow.fire("TRADE_SKILL_SHOW")
+    wow.fire("TRADE_SKILL_CLOSE") -- GF-UI-C: the toolkit steps aside while it is open
     ok(has(texts(), "配方 2 個"), "after opening the window")
     ok(not has(texts(), "剛剛記錄"), "no time (D19)")
 end)
@@ -2678,7 +2679,7 @@ test("D10 diag window: sections, sharing stats, export moved here, /gftk sync st
     ok(has(all, "GF Sync 只是補充來源"), "site note")
     ok(has(all, "記錄 ") and has(all, "這次登入：送出"), "sharing statistics")
     ok(has(all, "掃描時間："), "roster scan")
-    ok(has(all, "工具箱 0.14.0"), "version")
+    ok(has(all, "工具箱 0.14.1"), "version")
     wow.click(ns.Diag.exportJSONButton)
     ok(_G.GreenFangToolkit_ExportWindow and _G.GreenFangToolkit_ExportWindow:IsShown(), "export from the window")
     GreenFangToolkitDB.settings.minimapAngle = 10
@@ -3829,16 +3830,17 @@ test("D19 roster: the 專業 filter keeps members of that profession (GF-UI-B: t
     ns.Framework.open("roster")
     local peer = rowFor(ns, PEER)
     -- GF-UI-B (owner): filtering is on the filter bar only; a click on an icon opens that member's recipes.
-    ns.UI.skillChoice.choose(356)
-    eq(ns.UI.filters.skill, 356, "fishing filter")
+    -- GF-UI-C: a multi-select list.
+    ns.UI.skillChoice.setOnly(356)
+    eq(ns.UI.filters.skills and ns.UI.filters.skills[356], true, "fishing filter")
     ok(ns.UI.skillChoice:GetText():find("釣魚", 1, true), "the profession button shows it")
     ok(ns.Framework.isModuleShown("roster"), "stays on the roster")
     local names = {}
     for _, row in ipairs(ns.UI.rows()) do if row:IsShown() then names[#names + 1] = row.memberName end end
     table.sort(names)
     eq(table.concat(names, ","), "測試乙-測試伺服器,測試甲-測試伺服器", "only members who fish")
-    ns.UI.skillChoice.choose(nil)
-    eq(ns.UI.filters.skill, nil, "全部專業: cleared")
+    ns.UI.skillChoice.selectAll()
+    eq(ns.UI.filters.skills, nil, "全選: cleared")
 end)
 
 test("D19 roster filters: profession (incl. secondary), class, online, minimum level, clear", function()
@@ -3854,15 +3856,15 @@ test("D19 roster filters: profession (incl. secondary), class, online, minimum l
     eq(shown(), "測試丁,測試丙,測試乙,測試甲", "everyone")
     local opts = {}
     for _, o in ipairs(ns.UI.professionOptions()) do opts[#opts + 1] = o.text end
-    eq(table.concat(opts, ","), "全部專業,鍛造,採礦,裁縫,附魔,烹飪,急救,釣魚", "professions in the roster, secondary last")
-    ns.UI.skillChoice.choose(197)
+    eq(table.concat(opts, ","), "鍛造,採礦,裁縫,附魔,烹飪,急救,釣魚", "professions in the roster, secondary last (GF-UI-C: 全選 is in the list)")
+    ns.UI.skillChoice.setOnly(197)
     eq(shown(), "測試丙", "tailoring (from the guild roster names)")
-    ns.UI.skillChoice.choose(129)
+    ns.UI.skillChoice.setOnly(129)
     eq(shown(), "測試乙,測試甲", "first aid (secondary, shared)")
-    ns.UI.skillChoice.choose(nil)
-    ns.UI.classChoice.choose("WARRIOR")
+    ns.UI.skillChoice.selectAll()
+    ns.UI.classChoice.setOnly("WARRIOR")
     eq(shown(), "測試乙", "warriors")
-    ns.UI.classChoice.choose(nil)
+    ns.UI.classChoice.selectAll()
     wow.click(ns.UI.onlineCheck)
     eq(shown(), "測試乙,測試甲", "online only")
     ns.UI.levelBox:SetText("30")
@@ -3873,19 +3875,21 @@ test("D19 roster filters: profession (incl. secondary), class, online, minimum l
     ns.UI.levelBox:SetText("50")
     ns.UI.levelBox._scripts.OnTextChanged(ns.UI.levelBox)
     eq(shown(), "測試乙", "level 50+")
-    ns.UI.skillChoice.choose(197)
+    ns.UI.skillChoice.setOnly(197)
     eq(shown(), "", "nobody: tailoring and 50+")
     wow.click(ns.UI.clearButton)
     eq(shown(), "測試丁,測試丙,測試乙,測試甲", "清除 resets every filter")
     eq(ns.UI.filters.skill, nil, "skill cleared"); eq(ns.UI.filters.minLevel, nil, "level cleared")
     eq(ns.UI.onlineCheck.checked, false, "online cleared")
-    -- The list opens with the options and a pick closes it.
+    -- The list opens with the options; GF-UI-C: a check list stays open (tick several).
     wow.click(ns.UI.classChoice)
     ok(ns.UI.classChoice.menu:IsShown(), "class list open")
-    local item = ns.UI.classChoice.menu.items[2]
+    local item = ns.UI.classChoice.menu.items[3] -- the first class (after 全選, 全不選)
     wow.click(item)
-    ok(not ns.UI.classChoice.menu:IsShown(), "closed after a pick")
-    ok(ns.UI.filters.class ~= nil, "a class picked")
+    ok(ns.UI.classChoice.menu:IsShown(), "stays open after a tick")
+    ok(ns.UI.filters.classes ~= nil, "a class unticked")
+    wow.click(ns.UI.classChoice)
+    ok(not ns.UI.classChoice.menu:IsShown(), "the button again closes it")
 end)
 
 test("D19 roster page text: footer is just the count, header time without seconds", function()
@@ -4037,7 +4041,7 @@ test("D20 recipe clicks: mine opens, others pinned, Shift links, right-click whi
     eq(#wow.state.blocked, 0, "nothing blocked")
 end)
 
-test("D20 recipe filter line: 搜尋, 專業, 會做的人, 只看在線 on one line; no tabs", function()
+test("D20 recipe filter lines: 搜尋, 專業, 會做的人 on one line, 只看在線 under 搜尋 (GF-UI-C grid); no tabs", function()
     local ns = shareLogin({ tradeSkill = leatherWindow() })
     wow.fire("TRADE_SKILL_SHOW")
     shareFrom(ns, PEER, (rMsg(ns, A_PEER, 164, wow.state.now - 600, { 2660, 2661 })))
@@ -4047,7 +4051,7 @@ test("D20 recipe filter line: 搜尋, 專業, 會做的人, 只看在線 on one 
     eq(y(R.searchBox), -44, "search on the filter line")
     eq(y(R.skillChoice), -44, "專業 on the filter line")
     eq(y(R.whoChoice), -44, "會做的人 on the filter line")
-    eq(y(R.onlineCheck), -44, "只看在線 on the filter line")
+    eq(y(R.onlineCheck), -82, "只看在線 on the second line, under 搜尋 (GF-UI-C)")
     local texts = table.concat(wow.allTexts(), "\n")
     for _, want in ipairs({ "搜尋", "專業", "會做的人", "只看在線" }) do ok(texts:find(want, 1, true), "label " .. want) end
     ok(R.skillChoice:GetText():find("全部專業", 1, true), "all ticked at first: " .. R.skillChoice:GetText())
@@ -4629,6 +4633,9 @@ assert(loadfile(ROOT .. "/tests/addon/adventure_slots_tests.lua"))()({ test = te
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 -- GF-UI-B: batch 1 of the UI review, the roster click, the order test mode (tests/addon/uib_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/uib_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-UI-C: the owner's 0.14.0 fixes for the roster, guild, orders, recipes and framework (tests/addon/uic_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/uic_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 -- GF-002-I: §17 simpler states, step back, worker tickets close, the badge and its checklist, data-driven destinations (tests/addon/adventure_simplify_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/adventure_simplify_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,

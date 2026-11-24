@@ -37,7 +37,7 @@ G.API = {
     "GetGuildInfoText", "SetGuildInfoText",
     "CanGuildInvite", "CanGuildPromote", "CanGuildDemote", "CanGuildRemove",
     "CanEditPublicNote", "CanEditOfficerNote", "CanViewOfficerNote", "CanEditMOTD", "CanEditGuildInfo",
-    "GuildControlGetNumRanks", "StaticPopup_Show", "ToggleGuildFrame", "ToggleFriendsFrame",
+    "GuildControlGetNumRanks", "GuildControlGetRankName", "StaticPopup_Show", "InspectUnit", "CanInspect",
 }
 
 -- Permission -> { the game's check, the function the action calls }.
@@ -163,6 +163,60 @@ function G.who(m)
 end
 
 function G.canWho() return G.has("C_FriendList.SendWho") or G.has("SendWho") end
+
+-- GF-UI-C (owner: 「查看」 did nothing): 查看 is the game's inspect window.
+-- InspectUnit needs a unit token, and the game only has one for a guild
+-- member who is my target, under the mouse, or in my party / raid; it must
+-- also be close enough (CheckInteractDistance 1). Otherwise the button is
+-- not shown at all (never a dead button).
+G.UNITS = { "target", "mouseover", "focus" }
+for i = 1, 4 do G.UNITS[#G.UNITS + 1] = "party" .. i end
+for i = 1, 40 do G.UNITS[#G.UNITS + 1] = "raid" .. i end
+function G.unitFor(m)
+    local guid = m and str(m.guid)
+    if not guid or guid == "" then return nil end
+    for _, u in ipairs(G.UNITS) do
+        local g = ns.call(UnitGUID, u)
+        if g ~= nil and str(g) == guid then return u end
+    end
+    return nil
+end
+function G.canInspect(m)
+    if isSelf(m) or not G.has("InspectUnit") then return false end
+    local unit = G.unitFor(m)
+    if not unit then return false end
+    if G.has("CanInspect") then
+        local ok, yes = pcall(CanInspect, unit, true)
+        if not (ok and truthy(yes)) then return false end
+    end
+    if G.has("CheckInteractDistance") then
+        local ok, near = pcall(CheckInteractDistance, unit, 1)
+        if ok and not truthy(near) then return false end
+    end
+    return true
+end
+function G.inspect(m)
+    if not G.canInspect(m) then return false end
+    pcall(InspectUnit, G.unitFor(m))
+    return true
+end
+
+-- GF-UI-C: rank number and name, "3 會員" (number = rank index + 1, as in the game's guild window).
+function G.rankName(index)
+    if not index then return "" end
+    local name = str((ns.call(GuildControlGetRankName, index + 1)))
+    return name
+end
+function G.rankLabel(index, fallback)
+    if not index then return str(fallback) end
+    local name = G.rankName(index)
+    if name == "" then name = str(fallback) end
+    return tostring(index + 1) .. (name ~= "" and (" " .. name) or "")
+end
+function G.rankOf(m)
+    local e = m and G.entry(m.name)
+    return (e and e.rankIndex) or ns.num(m and m.rankIndex)
+end
 function G.canWhisper() return G.has("ChatFrame_SendTell") or G.has("ChatFrame_OpenChat") end
 function G.canInviteGroup() return G.has("C_PartyInfo.InviteUnit") or G.has("InviteUnit") end
 
@@ -257,9 +311,19 @@ function G.editMOTD()
     if not G.can("motd") then return false end
     return G.edit("今日訊息", G.motd(), 128, function(text) GuildSetMOTD(text); afterChange() end) ~= nil
 end
+-- GF-UI-C (owner: the info is long): a large multi-line editor on the
+-- roster page (UI.openInfoEditor); the one-line game box only as a fallback.
+G.INFO_MAX = 500
+function G.saveInfo(text)
+    if not G.can("info") then return false end
+    SetGuildInfoText(str(text):sub(1, 2000))
+    afterChange()
+    return true
+end
 function G.editInfo()
     if not G.can("info") then return false end
-    return G.edit("公會資訊", G.infoText(), 500, function(text) SetGuildInfoText(text); afterChange() end) ~= nil
+    if ns.UI and ns.UI.openInfoEditor then return ns.UI.openInfoEditor() ~= nil end
+    return G.edit("公會資訊", G.infoText(), G.INFO_MAX, function(text) G.saveInfo(text) end) ~= nil
 end
 function G.motd() return str((ns.call(GetGuildRosterMOTD))) end
 function G.infoText() return str((ns.call(GetGuildInfoText))) end
@@ -273,28 +337,44 @@ function G.openGameUI()
 end
 
 -- The actions for member m, in order: { key, text, icon, fn }. Only what may be done.
+-- GF-UI-C (owner): bar = true are the everyday ones under the list (密語,
+-- 組隊, 查看); the officer tools are only in the right-click menu.
 G.ACTIONS = {
-    { key = "whisper", text = "密語", icon = "Interface\\Icons\\INV_Letter_15", ok = function() return G.canWhisper() end, fn = G.whisper },
-    { key = "group", text = "組隊", icon = "Interface\\Icons\\INV_Misc_GroupNeedMore", ok = function(m) return G.canInviteGroup() and not isSelf(m) end, fn = G.inviteGroup },
-    { key = "who", text = "查看", icon = "Interface\\Icons\\INV_Misc_Spyglass_02", ok = function() return G.canWho() end, fn = G.who },
+    { key = "whisper", text = "密語", bar = true, icon = "Interface\\Icons\\INV_Letter_15", ok = function() return G.canWhisper() end, fn = G.whisper },
+    { key = "group", text = "組隊", bar = true, icon = "Interface\\Icons\\INV_Misc_GroupNeedMore", ok = function(m) return G.canInviteGroup() and not isSelf(m) end, fn = G.inviteGroup },
+    { key = "inspect", text = "查看", bar = true, icon = "Interface\\Icons\\INV_Misc_Spyglass_02", ok = function(m) return G.canInspect(m) end, fn = G.inspect },
     { key = "promote", text = "升階", icon = "Interface\\Buttons\\UI-PlusButton-Up", ok = function(m) return G.allowed(m, "promote") end, fn = G.promote },
     { key = "demote", text = "降階", icon = "Interface\\Buttons\\UI-MinusButton-Up", ok = function(m) return G.allowed(m, "demote") end, fn = G.demote },
     { key = "publicNote", text = "公會註記", icon = "Interface\\Icons\\INV_Misc_Note_01", ok = function(m) return G.allowed(m, "publicNote") end, fn = G.editPublicNote },
     { key = "officerNote", text = "幹部註記", icon = "Interface\\Icons\\INV_Misc_Note_02", ok = function(m) return G.allowed(m, "officerNote") end, fn = G.editOfficerNote },
     { key = "remove", text = "踢出公會", icon = "Interface\\RaidFrame\\ReadyCheck-NotReady", ok = function(m) return G.allowed(m, "remove") end, fn = G.remove },
 }
-function G.actionsFor(m)
+function G.actionsFor(m, barOnly)
     local out = {}
     for _, a in ipairs(G.ACTIONS) do
         local okA, yes = pcall(a.ok, m)
-        if okA and yes then out[#out + 1] = a end
+        if okA and yes and (not barOnly or a.bar) then out[#out + 1] = a end
     end
     return out
 end
+function G.barActions(m) return G.actionsFor(m, true) end
+
+-- GF-UI-C: the menu text. 升階 / 降階 name the rank they lead to ("升階 ＞ 2 幹部").
+function G.actionText(a, m)
+    local r = G.rankOf(m)
+    if a.key == "promote" and r then return a.text .. " ＞ " .. G.rankLabel(r - 1) end
+    if a.key == "demote" and r then return a.text .. " ＞ " .. G.rankLabel(r + 1) end
+    return a.text
+end
+
+-- The right-click menu: the current rank first (not clickable, when known),
+-- then every action, text only (GF-UI-C item 12: no mixed icons).
 function G.menuItems(m)
     local items = {}
+    local r = G.rankOf(m)
+    if r then items[#items + 1] = { text = "會階 " .. G.rankLabel(r, m and m.guildRank), header = true } end
     for _, a in ipairs(G.actionsFor(m)) do
-        items[#items + 1] = { text = "|T" .. a.icon .. ":16|t " .. a.text, fn = function() a.fn(m) end }
+        items[#items + 1] = { text = G.actionText(a, m), key = a.key, fn = function() a.fn(m) end }
     end
     return items
 end

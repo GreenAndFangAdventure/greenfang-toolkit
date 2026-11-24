@@ -236,20 +236,22 @@ local function create()
         if body.SetWordWrap then body:SetWordWrap(true) end
         lines[i] = body
     end
-    local GI = ns.GameIcons
-    -- 匯出 [TSV] [JSON]  [更新]  [小地圖]  [ ] 測試
+    -- GF-UI-C (item 12): text only.
+    -- 匯出 [TSV] [JSON]  [更新]  [小地圖]  [清除紀錄]  [ ] 測試
     f.exportLabel = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
     f.exportLabel:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 20, 22)
-    f.exportLabel:SetText(GI.markup("export", 20) .. " 匯出")
+    f.exportLabel:SetText("匯出")
     local x = 20 + ns.labelWidth(f.exportLabel:GetText()) + 6
     Diag.exportTSVButton, x = button(f, "TSV", x, function() ns.UI.startExport("tsv") end)
     Diag.exportJSONButton, x = button(f, "JSON", x, function() ns.UI.startExport("json") end)
-    Diag.refreshButton, x = button(f, GI.markup("refresh", 20) .. " 更新", x + 6, Diag.refresh)
-    Diag.minimapButton, x = button(f, GI.markup("minimap", 20) .. " 小地圖", x, function(self)
+    Diag.refreshButton, x = button(f, "更新", x + 6, Diag.refresh)
+    Diag.minimapButton, x = button(f, "小地圖", x, function(self)
         ns.Framework.resetMinimap()
-        self:SetText(GI.markup("yes", 20) .. " 小地圖")
-        ns.after(3, function() self:SetText(GI.markup("minimap", 20) .. " 小地圖") end)
+        self:SetText("已重置")
+        ns.after(3, function() self:SetText("小地圖") end)
     end)
+    -- GF-UI-C (owner): delete my closed orders, after the game's confirm box.
+    Diag.clearButton, x = button(f, "清除紀錄", x, function() Diag.askClearOrders() end)
     Diag.minimapButton:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("重置")
@@ -257,7 +259,7 @@ local function create()
     end)
     Diag.minimapButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
     -- GF-UI-B: the order test mode (Orders.setTestMode). Off deletes the test orders.
-    Diag.testCheck = ns.checkBox(f, GI.markup("test", 20) .. " 測試", x + 6, -(Diag.HEIGHT - 16 - 29), function(on)
+    Diag.testCheck = ns.checkBox(f, "測試", x + 6, -(Diag.HEIGHT - 16 - 29), function(on)
         if ns.Orders then ns.Orders.setTestMode(on) end
         Diag.refresh()
         if ns.OrdersUI and ns.OrdersUI.refresh then ns.OrdersUI.refresh() end
@@ -267,6 +269,26 @@ local function create()
     f:Hide()
     window = f
     return f
+end
+
+-- 清除紀錄: the game's confirm box with how many; nothing to delete = nothing asked.
+function Diag.askClearOrders()
+    local O = ns.Orders
+    if not O then return nil end
+    local n = O.closedCounts()
+    if n.total == 0 then
+        if Diag.clearButton then
+            Diag.clearButton:SetText("沒有紀錄")
+            ns.after(3, function() Diag.clearButton:SetText("清除紀錄") end)
+        end
+        return nil
+    end
+    return ns.GuildAdmin.confirm(string.format("清除已結案的訂單紀錄？\n我下的 %d、我接的 %d、測試 %d、歷史 %d",
+        n.w, n.j, n.test, n.history), function()
+        O.clearClosed()
+        Diag.refresh()
+        if ns.OrdersUI and ns.OrdersUI.refresh then ns.OrdersUI.refresh() end
+    end)
 end
 
 function Diag.open()
@@ -292,7 +314,8 @@ function Diag.window() return window end
 local smallButtons = {}
 Diag.BUTTON_TEXT = "診斷"
 function Diag.smallButton(parent, point, x, y)
-    local b = ns.OrdersUI.textButton(parent, ns.GameIcons.markup("diag", 20) .. " " .. Diag.BUTTON_TEXT, Diag.toggle)
+    -- GF-UI-C (owner): text only.
+    local b = ns.OrdersUI.textButton(parent, Diag.BUTTON_TEXT, Diag.toggle)
     b:SetPoint(point, parent, point, x, y)
     b.label = b.GetFontString and b:GetFontString() or nil
     b:SetScript("OnEnter", function(self)
