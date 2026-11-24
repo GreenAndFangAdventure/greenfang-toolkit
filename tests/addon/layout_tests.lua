@@ -344,7 +344,7 @@ return function(T)
         local wf = _G[A.WORKER_NAME]
         ok(wf:IsShown(), "編輯 opens the worker window")
         eq(#A.workerDraft().dungeons, 2, "with what was registered")
-        ok(plain(wf.TitleText._text):find("已登記", 1, true), "the title says it is registered")
+        eq(plain(wf.TitleText._text), "職工單", "GF-UI-A §2.6: no brackets in the title")
         ok(plain(wf.save:GetText()):find("更新", 1, true), "and the button says 更新")
         -- The chosen dungeons are listed one by one, big, with names; a click removes one.
         local chips = {}

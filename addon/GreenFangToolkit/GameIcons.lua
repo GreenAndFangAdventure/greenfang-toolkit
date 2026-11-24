@@ -45,6 +45,7 @@ G.ART = {
     next = { { "Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up" } },
     yes = { { "Interface\\RaidFrame\\ReadyCheck-Ready" } },
     no = { { "Interface\\RaidFrame\\ReadyCheck-NotReady" } },
+    wait = { { "Interface\\RaidFrame\\ReadyCheck-Waiting" } }, -- GF-002-I: ⏳ in the checklists
     paste = { { "Interface\\Icons\\INV_Scroll_03" } },
     received = { { "Interface\\Icons\\INV_Letter_15" } },
     placed = { { "Interface\\Icons\\INV_Misc_Note_02" } },
@@ -77,20 +78,49 @@ G.ART = {
     services = { { "Interface\\Icons\\Trade_BlackSmithing" }, { "Interface\\Icons\\INV_Hammer_20" } },
     -- ＋下單 (place an order): a letter (an order sent to a crafter).
     order = { { "Interface\\Icons\\INV_Letter_15" }, { "Interface\\Icons\\INV_Misc_Note_02" } },
+    -- GF-002-I (spec §17, design review GF-UI-A §1.4 / §1.7; MANUAL §3ae): the state
+    -- badges, 退回, 規則, the arrow of the rules card, 邀請, a raid's fallback.
+    state_open = { { "Interface\\FriendsFrame\\UI-Toast-FriendOnlineIcon" }, { "Interface\\Icons\\INV_Misc_GroupLooking" },
+        { "Interface\\Icons\\INV_Misc_Head_Human_01" } },
+    state_final = { { "Interface\\Icons\\INV_Scroll_04" }, { "Interface\\Icons\\INV_Scroll_03" }, { "Interface\\RaidFrame\\ReadyCheck-Ready" } },
+    state_formed = { { "Interface\\Icons\\INV_Misc_GroupNeedMore" }, { "Interface\\FriendsFrame\\UI-Toast-ChatInviteIcon" },
+        { "Interface\\Icons\\Ability_Warrior_BattleShout" } },
+    state_done = { { "Interface\\RaidFrame\\ReadyCheck-Ready" } },
+    -- 過期 = the time ran out: Borrowed Time (an hourglass), a watch, then the waiting mark.
+    state_ended = { { "Interface\\Icons\\Spell_Holy_BorrowedTime" }, { "Interface\\Icons\\INV_Misc_PocketWatch_02" },
+        { "Interface\\RaidFrame\\ReadyCheck-Waiting" } },
+    -- 未成行 = formed but never went: lying down (Feign Death).
+    state_unfinished = { { "Interface\\Icons\\Ability_Rogue_FeignDeath" }, { "Interface\\RaidFrame\\ReadyCheck-NotReady" } },
+    state_cancel = { { "Interface\\RaidFrame\\ReadyCheck-NotReady" } },
+    -- A worker ticket that is up (上架): the same raised hand as 職工單.
+    state_worker = { { "Interface\\Icons\\Spell_Holy_SealOfSalvation" }, { "Interface\\Icons\\INV_Scroll_05" },
+        { "Interface\\Icons\\INV_Misc_Note_01" } },
+    -- 退回 = a step back (Feint), then the page-back arrow.
+    back = { { "Interface\\Icons\\Ability_Rogue_Feint" }, { "Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Up" } },
+    rules = { { "Interface\\Icons\\INV_Misc_QuestionMark" } },
+    -- 重開 (the same as the row button, AdventureUI.ICON.reopen) for the rules card.
+    reopen = { { "Interface\\Buttons\\UI-RefreshButton" }, { "Interface\\Icons\\Spell_Nature_Reincarnation" } },
+    arrow = { { "Interface\\ChatFrame\\ChatFrameExpandArrow" }, { "Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up" } },
+    -- 邀請 (design review §1.4: the letter stays for orders): a group prayer.
+    invite = { { "Interface\\Icons\\Spell_Holy_PrayerOfSpirit" }, { "Interface\\Icons\\INV_Letter_15" } },
+    raid = { { "Interface\\Icons\\INV_Misc_Head_Dragon_01" }, { "Interface\\Icons\\INV_Misc_Key_03" } },
 }
 
 -- Group finder dungeon art (LFGIcon-<name>), the key when the client has none.
+-- GF-002-I (R-17.14): the names come from AdventureData's icon field; it calls
+-- registerDungeons when it loads (and again after Data.add).
 local LFG = "Interface\\LFGFrame\\LFGIcon-"
-G.DUNGEON_FILE = {
-    rfc = "RagefireChasm", wc = "WailingCaverns", dm = "Deadmines", sfk = "ShadowFangKeep",
-    bfd = "BlackfathomDeeps", stk = "StormwindStockades", gnr = "Gnomeregan", rfk = "RazorfenKraul",
-    smg = "ScarletMonastery", sml = "ScarletMonastery", sma = "ScarletMonastery", smc = "ScarletMonastery",
-    rfd = "RazorfenDowns", ul = "Uldaman", zf = "ZulFarak", mar = "Maraudon", st = "SunkenTemple",
-    brd = "BlackrockDepths", lbrs = "BlackrockSpire", ubrs = "BlackrockSpire",
-    dme = "DireMaul", dmw = "DireMaul", dmn = "DireMaul", strat = "Stratholme", scholo = "Scholomance",
-}
-for id, name in pairs(G.DUNGEON_FILE) do
-    G.ART["dungeon_" .. id] = { { LFG .. name }, { "Interface\\Icons\\INV_Misc_Key_03" } }
+G.DUNGEON_FILE = {}
+function G.registerDungeons(list)
+    for _, d in ipairs(list or {}) do
+        if d.icon then
+            G.DUNGEON_FILE[d.id] = d.icon
+            local art = { { LFG .. d.icon } }
+            if d.category == "raid" then art[#art + 1] = { G.ART.raid[1][1] } end
+            art[#art + 1] = { "Interface\\Icons\\INV_Misc_Key_03" }
+            G.ART["dungeon_" .. d.id] = art
+        end
+    end
 end
 
 local function coords(box)

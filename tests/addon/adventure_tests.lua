@@ -345,8 +345,8 @@ return function(T)
         C_PartyInfo = { InviteUnit = function(name) invited[#invited + 1] = name end }
         local n = Adv.form(id)
         eq(n, 1, "one online member"); eq(invited[1], NAME[B], "full name")
-        eq(Adv.get(id).state, "formed", "GF-002-H R-16.15: 組隊 on the finalized slot = 成團"); ok(Adv.get(id).departed, "no new applications")
-        eq(Adv.worker(id, "apply") == false or true, true, "no new applications after departure")
+        -- GF-002-I (R-17.3): 組隊 only sends the invitations; 成團 comes by itself.
+        eq(Adv.get(id).state, "final", "GF-002-I R-17.3: 組隊 does not change the state"); ok(not Adv.get(id).departed, "still open")
         -- Refused (protected): one by one.
         ns = login()
         Adv = ns.Adventure
@@ -502,9 +502,10 @@ return function(T)
     test("GF-002-H R-16.16 entering the ticket's dungeon alone (too few accepted in the party) lights up 完成 (instance ID, then name)", function()
         local ns = login()
         local Adv = ns.Adventure
-        local id = Adv.open({ dungeon = "sml", leaderRole = "d" })
+        -- GF-002-I (R-17.3): 成團 by itself when full (組隊 only invites).
+        local id = Adv.open({ dungeon = "sml", roles = { t = 1, h = 0, d = 1 }, leaderRole = "d" })
         local other = Adv.open({ dungeon = "rfk", leaderRole = "d" })
-        Adv.form(id)
+        peer(ns, B, "A", { act(id, "ap", ns.Share.serverNow() + 1, "t") })
         IsInInstance = function() return true end
         GetInstanceInfo = function() return "x", "party", 1, "", 5, 0, false, 189 end
         eq(Adv.onEnterWorld(), 1, "one formed ticket here")

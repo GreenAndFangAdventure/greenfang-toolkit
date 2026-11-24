@@ -30,6 +30,8 @@ Adv.UNFINISHED_AFTER = 86400   -- R-16.17: formed, no 完成: ends 24 h after th
 Adv.LOG_DAYS, Adv.LOG_MAX = 30, 50 -- R-16.19
 Adv.AUTO_BEFORE, Adv.AUTO_NO_LENGTH = 3600, 4 * 3600 -- R-16.24: from 60 min before; no length = 4 h
 Adv.AUTO_SHARE = 0.6 -- R-16.22: 60% of the set size, rounded up, at least 2
+Adv.FINAL_DUE = 3600 -- R-17.2: ❗ for the leader when the earliest slot is this close and nothing is finalized
+Adv.KEEP_EXPIRED = 86400 -- R-17.5 / R-17.10: 過期 tickets and closed worker tickets stay 1 day
 Adv.MAX_QUESTS = 5             -- R-4.1
 Adv.NOTE_MAX = 40              -- R-4.4 / R-10.2
 Adv.REMIND = { 3600, 900 }     -- R-7.1
@@ -53,7 +55,10 @@ local NUM = { ver = true, cr = true, s = true, e = true, rt = true, rh = true, r
     -- GF-002-H: fx finalized slot id, fa finalized at, fm formed at, su my slot choice changed at.
     fx = true, fa = true, fm = true, su = true,
     -- GF-002-H v1.1a: dt auto completion detected at (R-16.24), qc my quest log count (R-16.29).
-    dt = true, qc = true }
+    dt = true, qc = true,
+    -- GF-002-I (R-17.3, R-17.7): fp party seen together (leader T / member A), fb stepped
+    -- back from 成團 at, bk stepped back from 成行 at, ff kept 成團 (the step back from 成行).
+    fp = true, fb = true, bk = true, ff = true }
 
 function Adv.encodeEntry(e)
     local keys = {}
@@ -408,7 +413,7 @@ function Adv.view(t, leader, actions, opts)
     local v = { id = t.id, leader = leader, src = t.src or "g", created = t.cr or 0, dungeon = t.ds ~= "" and t.ds or nil,
         quests = splitDots(t.qs), questLevels = Adv.decodeQuestLevels(t.ql), tags = t.tg or 0,
         note = t.nt, mode = t.md or "a", state = "open", members = {}, waitlist = {}, pending = {}, invited = {},
-        kicked = {}, level = t.lv, leaderRole = t.lr, edited = t.ed, slots = slots, slotById = byId,
+        kicked = {}, level = t.lv, leaderRole = t.lr, edited = t.ed, slots = slots, slotById = byId, workerGone = {},
         questNames = Adv.decodeQuestNames(t.qn),
         -- GF-002-G: roles / size as the leader set them (the editor starts from these).
         roles = t.ds ~= "" and { t = t.rt or 1, h = t.rh or 1, d = t.rd or 3 } or nil, size = t.sz }
@@ -434,9 +439,12 @@ function Adv.view(t, leader, actions, opts)
     end
     local roles = {}
     local detected = {} -- [a] = the earliest auto completion that author saw (R-16.24)
+    local partySeen = {} -- [a] = when that author saw enough accepted people together (R-17.3)
     for a, list in pairs(actions or {}) do
         for _, e in ipairs(list) do
-            if e.dt and (not detected[a] or e.dt < detected[a]) then detected[a] = e.dt end
+            -- GF-002-I (R-17.7): what was seen before a step back no longer counts.
+            if e.dt and e.dt > (t.bk or 0) and (not detected[a] or e.dt < detected[a]) then detected[a] = e.dt end
+            if e.fp and (not partySeen[a] or e.fp > partySeen[a]) then partySeen[a] = e.fp end
             local kind = ({ ap = "apply", wd = "withdraw", ia = "accept", ir = "refuse" })[e.ac]
             local sx, any = slotsOf(e)
             local gone = sx and not any -- every slot it named was removed (R-16.4)
@@ -447,7 +455,7 @@ function Adv.view(t, leader, actions, opts)
                 if start then events[#events + 1] = { t = e.ap, a = a, kind = start, main = e.ro, alt = e.rb, sx = sx } end
             end
             if kind and e.at and not (gone and (kind == "apply" or kind == "accept")) then
-                events[#events + 1] = { t = e.at, a = a, kind = kind, main = e.ro, alt = e.rb, sx = sx }
+                events[#events + 1] = { t = e.at, a = a, kind = kind, main = e.ro, alt = e.rb, sx = sx, wr = e.wr }
             end
         end
     end
@@ -543,6 +551,8 @@ function Adv.view(t, leader, actions, opts)
         elseif e.kind == "refuse" then
             invited[e.a] = nil
         elseif e.kind == "withdraw" then
+            -- GF-002-I (R-17.9): withdrawn because the worker ticket expired: the leader is told.
+            if status[e.a] and e.wr == "x" then v.workerGone[#v.workerGone + 1] = { a = e.a, at = e.t } end
             if status[e.a] then leave(e.a, e.t) end
         elseif e.kind == "kick" then
             invited[e.a] = nil
@@ -610,27 +620,44 @@ function Adv.view(t, leader, actions, opts)
             v.start, v.finish = main.s, main.d and (main.s + main.d) or nil
         end
     else v.timeMode = "n" end
-    -- State (R-16.15 - R-16.17; R-4.7 / R-4.8 for the leader away).
+    -- State. GF-002-I (spec §17): 招募中 open -> 已定案 final -> 成團 formed -> 成行 done;
+    -- ends: 過期 ended, 未成行 unfinished, 取消 cancel (R-4.7 / R-4.8 for the leader away).
     local tnow = opts.now or now()
-    v.departed = t.st == "g"
+    v.departed = t.st == "g" -- 0.13.x 組隊 (0.14.0 never writes it: 組隊 only invites, R-17.3)
+    v.full = left == 0
+    v.formedBack, v.doneBack = t.fb, t.bk
+    -- R-17.3: 成團 by itself once finalized: the accepted seats full, or enough accepted
+    -- people seen in one party (by the leader or a member, while finalized). Triggers
+    -- from before a step back (fb) do not count; ff keeps 成團 after a step back from 成行.
+    local trig, by
+    local function consider(at, why)
+        if at and at > (t.fb or 0) and (not trig or at < trig) then trig, by = at, why end
+    end
+    if left == 0 and fullAt then consider(fullAt, "full") end
+    if v.departed then consider(t.sa, "group") end
+    consider(t.ff, "kept")
+    if v.final then
+        local function seen(at) if at and at >= (v.finalAt or 0) then consider(at, "party") end end
+        seen(t.fp)
+        for _, m in ipairs(v.members) do seen(partySeen[m.a]) end
+    end
     if t.st == "x" then
         v.state, v.closedAt, v.closeReason = (t.rs == "unfinished") and "unfinished" or (t.rs == "time") and "ended" or "cancel", t.sa, t.rs
     elseif t.st == "c" then v.state, v.closedAt = "done", t.sa
     else
-        v.formed = v.final ~= nil and (v.departed or left == 0)
+        v.formed = v.final ~= nil and trig ~= nil
         if v.formed then
-            v.state = "formed"
-            local trig = v.departed and t.sa or nil
-            if left == 0 and fullAt and (not trig or fullAt < trig) then trig = fullAt end
+            v.state, v.formedBy = "formed", by
             v.formedAt = math.max(v.finalAt or 0, trig or 0)
             local base = (v.slot and Adv.slotEnd(v.slot)) or v.formedAt
+            v.unfinishedAt = base + Adv.UNFINISHED_AFTER
             if tnow >= base + Adv.UNFINISHED_AFTER then
                 v.state, v.closedAt, v.closeReason = "unfinished", base + Adv.UNFINISHED_AFTER, "unfinished"
             end
             if opts.offline then v.leaderOffline = true end
         else
-            if left == 0 then v.state = "full" end
-            -- Over when its slot is (the finalized one, else the last of them).
+            v.state = v.final and "final" or "open"
+            -- Over when its slot is (the finalized one, else the last of them): 過期 (R-17.5).
             local over
             if v.slot then over = Adv.slotEnd(v.slot)
             else
@@ -640,6 +667,7 @@ function Adv.view(t, leader, actions, opts)
                     if not over or e > over then over = e end
                 end
             end
+            v.overAt = over
             if over and tnow >= over then
                 v.state, v.closedAt, v.closeReason = "ended", over, "time"
             elseif opts.offline then
@@ -707,11 +735,13 @@ function Adv.workers()
     for _, a in ipairs(led:authors()) do
         local e = listOf(a, "W")[1]
         if e and e.st ~= "x" and (e.ex or 0) > t then
-            local ds, qs = {}, {}
-            for _, d in ipairs(splitDots(e.ds)) do ds[d] = true end
-            for _, q in ipairs(splitDots(e.qs)) do qs[tonumber(q) or q] = true end
+            local ds, qs, dl, ql = {}, {}, {}, {}
+            for _, d in ipairs(splitDots(e.ds)) do ds[d] = true; dl[#dl + 1] = d end
+            for _, q in ipairs(splitDots(e.qs)) do qs[tonumber(q) or q] = true; ql[#ql + 1] = tonumber(q) or q end
+            -- GF-002-I (R-17.17): dungeonList / questList keep the order for the rows.
             out[a] = { entry = e, slots = Adv.workerSlots(e), dungeons = ds, questNames = Adv.decodeQuestNames(e.qn), questCount = e.qc, quests = qs, allQuests = e.qa == "1",
-                main = e.rm, alt = e.ra ~= "" and e.ra or nil, online = Adv.isOnline(a) }
+                main = e.rm, alt = e.ra ~= "" and e.ra or nil, online = Adv.isOnline(a), dungeonList = dl, questList = ql,
+                expires = e.ex }
         end
     end
     return out
@@ -943,8 +973,25 @@ function Adv.leader(id, action, arg, extra)
     local mine = listOf(me(), "T")
     local e = findIn(mine, id)
     if not e then return false, "unknown" end
-    if e.st == "x" or e.st == "c" then return false, "closed" end
     local t = now()
+    if action == "back" then
+        -- GF-002-I (R-17.7): one step back: 成行 -> 成團 (its log record goes),
+        -- 成團 -> 已定案, 已定案 -> 招募中 (the standbys of 定案 get their signups back).
+        local v = Adv.get(id)
+        if not v then return false, "unknown" end
+        if v.state == "done" then
+            e.st, e.sa, e.bk, e.ff, e.dt = "o", t, t, t, nil
+            Adv.removeLog(id)
+        elseif v.state == "formed" then
+            if e.st == "g" then e.st = "o" end
+            e.sa, e.fb, e.ff, e.fp = t, t, nil, nil
+        elseif v.state == "final" and #v.slots > 1 then
+            e.fx, e.fa, e.fp = nil, nil, nil
+            e.tm, e.s, e.e = Adv.legacyTime(entrySlots(e), nil, t)
+        else return false, "back" end
+        return save("T", mine)
+    end
+    if e.st == "x" or e.st == "c" then return false, "closed" end
     if action == "cancel" then e.st, e.sa, e.rs = "x", t, arg or "manual"
     elseif action == "done" then
         local v = Adv.get(id)
@@ -1104,6 +1151,45 @@ function Adv.removeWorker()
     return save("W", {})
 end
 
+-- GF-002-I (R-17.9): is this worker ticket over? 24 hours (ex), or every slot ended
+-- (a 現在 slot without a length only ends with ex).
+function Adv.workerOver(e, t)
+    t = t or now()
+    if (e.ex or 0) <= t then return true end
+    local slots = Adv.workerSlots(e)
+    if #slots == 0 then return false end
+    for _, sl in ipairs(slots) do
+        local fin = Adv.slotEnd(sl)
+        if not fin or fin > t then return false end
+    end
+    return true
+end
+
+-- R-17.9: withdraw my signups that are still waiting (pending or on a waitlist), with a
+-- reason the leader sees (wr = "x": the worker ticket expired). Seats I hold stay mine.
+function Adv.withdrawWaiting(reason)
+    local my = me()
+    local acts = listOf(my, "A")
+    local t = now()
+    local n = 0
+    for _, e in ipairs(acts) do
+        if e.ac == "ap" or e.ac == "ia" then
+            local v = Adv.get(e.id)
+            local waiting = false
+            for _, list in ipairs(v and { v.pending, v.waitlist } or {}) do
+                for _, x in ipairs(list) do if x.a == my then waiting = true end end
+            end
+            if waiting and not v.closed then
+                e.ap, e.ak = e.ap or e.at, e.ac
+                e.ac, e.at, e.wr = "wd", t, reason
+                n = n + 1
+            end
+        end
+    end
+    if n > 0 then save("A", acts) end
+    return n
+end
+
 function Adv.myWorker()
     local e = listOf(me(), "W")[1]
     if not e then return nil end
@@ -1111,7 +1197,9 @@ function Adv.myWorker()
     for _, d in ipairs(splitDots(e.ds)) do ds[#ds + 1] = d end
     for _, q in ipairs(splitDots(e.qs)) do qs[#qs + 1] = tonumber(q) or q end
     return { dungeons = ds, quests = qs, allQuests = e.qa == "1", main = e.rm, alt = e.ra ~= "" and e.ra or nil,
-        slots = Adv.workerSlots(e), expires = e.ex, questNames = Adv.decodeQuestNames(e.qn), questCount = e.qc }
+        slots = Adv.workerSlots(e), expires = e.ex, questNames = Adv.decodeQuestNames(e.qn), questCount = e.qc,
+        -- GF-002-I (R-17.10): 已結案, kept 1 day for 重開 (nobody else sees it).
+        closed = e.st == "x" or nil, closedAt = e.st == "x" and e.sa or nil }
 end
 
 -- R-5.2: edit one piece and keep the rest.
@@ -1125,7 +1213,7 @@ end
 -- R-5.2: quests that left my log (done, abandoned) are removed from my worker ticket.
 function Adv.syncQuests(logSet)
     local w = Adv.myWorker()
-    if not w or w.allQuests then return false end
+    if not w or w.allQuests or w.closed then return false end
     local kept, changed = {}, false
     for _, q in ipairs(w.quests) do if logSet[q] then kept[#kept + 1] = q else changed = true end end
     if not changed then return false end
@@ -1187,6 +1275,24 @@ function Adv.addLog(e, status)
     local kept = Adv.pruneLog(list)
     Adv.local_().log[me()] = kept
     return r
+end
+
+-- GF-002-I (R-17.7): a step back from 成行 takes its record out of my log.
+function Adv.removeLog(id)
+    local list = Adv.myLog()
+    local n = 0
+    for i = #list, 1, -1 do if list[i].id == id then table.remove(list, i); n = n + 1 end end
+    return n
+end
+
+-- GF-002-I (R-17.5, R-17.7): 重開 put a new ticket up; the ended one leaves my list.
+function Adv.forget(id)
+    local mine = listOf(me(), "T")
+    local e, i = findIn(mine, id)
+    if not e or not (e.st == "x") then return false end
+    table.remove(mine, i)
+    Adv.local_().reopen[id] = nil
+    return save("T", mine)
 end
 
 -- Another computer of mine wrote an older copy: merge by id (later sa / at wins).
@@ -1270,7 +1376,8 @@ function Adv.dismissReopen(id) Adv.local_().reopen[id] = nil end
 -- Every minute: finish my timed tickets whose time is over, prune old ones (R-4.8, R-4.9, R-9.4).
 function Adv.maintain()
     local t = now()
-    if here then pcall(Adv.checkAuto) end -- R-16.24: the window may have opened while I was inside
+    -- R-16.24 / R-17.3: the window may have opened while I was inside or grouped.
+    pcall(Adv.checkAuto)
     local mine = listOf(me(), "T")
     local kept, dirty = {}, false
     local before = Adv.all()
@@ -1302,9 +1409,18 @@ function Adv.maintain()
         if views[e.id] or t - (e.at or t) < Adv.KEEP_CLOSED then keptA[#keptA + 1] = e else dirtyA = true end
     end
     if dirtyA then save("A", keptA) end
-    -- My expired worker ticket.
+    -- GF-002-I (R-17.9, R-17.10): my worker ticket closes when it expires (24 hours, or
+    -- every slot over) and my open signups go with it; the closed one stays 1 day for 重開.
     local w = listOf(me(), "W")[1]
-    if w and (w.ex or 0) <= t then save("W", {}) end
+    if w then
+        if w.st == "x" then
+            if t - (w.sa or t) >= Adv.KEEP_EXPIRED then save("W", {}) end
+        elseif Adv.workerOver(w, t) then
+            w.st, w.sa = "x", t
+            save("W", { w })
+            Adv.withdrawWaiting("x")
+        end
+    end
     -- Records of members who left.
     if ns.Roster.current() then
         for _, a in ipairs(led:authors()) do
@@ -1332,6 +1448,13 @@ function Adv.attention(v, my, t, myWorker, questLog)
         if Adv.local_().reopen[v.id] then return { key = v.id .. "|reopen", decide = true, code = "reopen" } end
         if v.closed then return nil end
         if #v.pending > 0 then return { key = v.id .. "|pending|" .. #v.pending, decide = true, code = "pending" } end
+        -- GF-002-I (R-17.2): the earliest slot is within 60 minutes and nothing is finalized.
+        if Adv.finalDue(v, t) then return { key = v.id .. "|due", decide = true, code = "finalize" } end
+        -- R-17.9: a waiting signup left because its worker ticket expired.
+        local gone = v.workerGone[#v.workerGone]
+        if gone and t - gone.at < Adv.KEEP_CLOSED then
+            return { key = v.id .. "|gone|" .. gone.a .. "|" .. gone.at, decide = false, code = "worker-gone" }
+        end
         for _, m in ipairs(v.members) do
             if m.refilled then return { key = v.id .. "|refill|" .. m.a .. "|" .. m.refilled, decide = false, code = "refill" } end
         end
@@ -1549,7 +1672,8 @@ end
 function Adv.currentDungeon()
     if ns.call(IsInInstance) ~= true then return nil end
     local name, kind, _, _, _, _, _, instanceID = ns.call(GetInstanceInfo)
-    if kind ~= nil and kind ~= "party" then return nil end
+    -- GF-002-I (R-17.16): raids too, once the data has them.
+    if kind ~= nil and kind ~= "party" and kind ~= "raid" then return nil end
     local list = {}
     local id = ns.num(instanceID)
     for _, d in ipairs(ns.AdventureData.DUNGEONS) do
@@ -1615,27 +1739,84 @@ function Adv.acceptedInParty(v, party)
     return n
 end
 
+-- GF-002-I: the checks the rules use, each in one place (whyState reads the same ones).
+-- R-17.2: the earliest slot (a 現在 slot: already) is within FINAL_DUE and none is finalized.
+function Adv.finalDue(v, t)
+    t = t or now()
+    if v.closed or v.final or #(v.slots or {}) <= 1 then return false end
+    local first
+    for _, sl in ipairs(v.slots) do
+        local s = sl.now and (sl.s or v.created) or sl.s
+        if s and (not first or s < first) then first = s end
+    end
+    return first ~= nil and first - t <= Adv.FINAL_DUE
+end
+-- R-16.24: inside the window of the finalized slot? true; before it: nil (not yet); after: false.
+function Adv.inWindow(v, t)
+    if not v.slot then return nil end
+    t = t or now()
+    local from, to = Adv.autoWindow(v.slot)
+    if t < from then return nil end
+    return t <= to
+end
+-- R-16.22 / R-17.3: accepted people in my party (the leader counts) and how many it takes.
+function Adv.partyReady(v, party)
+    local n, need = Adv.acceptedInParty(v, party), Adv.autoNeeded(v)
+    return n >= need, n, need
+end
+
+-- After a step back (R-17.7) the same party does not form / finish the ticket again
+-- at once: it takes a new start (the condition false, then true, in this session).
+local edgeWas = {}
+local function fires(key, cond, steppedBack)
+    local was = edgeWas[key]
+    edgeWas[key] = cond and true or false
+    if not cond then return false end
+    if not steppedBack then return true end
+    return was == false
+end
+function Adv.resetEdges() for k in pairs(edgeWas) do edgeWas[k] = nil end end
+
 -- questId: a quest I just turned in (QUEST_TURNED_IN), or nil. Returns how many tickets it wrote.
+-- GF-002-I (R-17.3): also 成團 by itself: finalized, in the window, enough accepted people
+-- in my party: the leader writes fp on the ticket, a member on its own signup.
 function Adv.checkAuto(questId, t)
     t = t or now()
     local my = me()
     if not my then return 0 end
     here = Adv.currentDungeon()
     local party = Adv.partyAuthors()
-    local hits = {}
+    local hits, formed = {}, {}
     for _, v in pairs(Adv.all()) do
         local inIt = v.leader == my
         for _, m in ipairs(v.members) do if m.a == my then inIt = true end end
         if inIt and not v.closed and v.final and v.slot then
-            local from, to = Adv.autoWindow(v.slot)
-            if t >= from and t <= to and Adv.acceptedInParty(v, party) >= Adv.autoNeeded(v) then
-                local done = false
+            local ready = Adv.inWindow(v, t) == true and Adv.partyReady(v, party)
+            local done = false
+            if ready then
                 if v.dungeon then done = Adv.inDestination(v)
                 elseif questId then
                     for _, q in ipairs(v.quests) do if tonumber(q) == tonumber(questId) then done = true end end
                 end
-                if done then hits[#hits + 1] = v end
             end
+            -- A quest turned in is itself the new start; being inside is a state.
+            local doneFires = done
+            if v.dungeon or not questId then doneFires = fires("d" .. v.id, done, v.doneBack ~= nil) end
+            if doneFires then hits[#hits + 1] = v end
+            if not v.formed and fires("p" .. v.id, ready, v.formedBack ~= nil) then formed[#formed + 1] = v end
+        end
+    end
+    local nf = 0
+    for _, v in ipairs(formed) do
+        local stale = function(at) return not at or at <= (v.formedBack or 0) or at < (v.finalAt or 0) end
+        if v.leader == my then
+            local mine = listOf(my, "T")
+            local e = findIn(mine, v.id)
+            if e and stale(e.fp) then e.fp = t; if save("T", mine) then nf = nf + 1 end end
+        else
+            local list = listOf(my, "A")
+            local e = findIn(list, v.id)
+            if e and stale(e.fp) then e.fp = t; if save("A", list) then nf = nf + 1 end end
         end
     end
     local n = 0
@@ -1645,13 +1826,144 @@ function Adv.checkAuto(questId, t)
         else
             local list = listOf(my, "A")
             local e = findIn(list, v.id)
-            if e and not e.dt then
+            if e and (not e.dt or e.dt <= (v.doneBack or 0)) then
                 e.dt = t
                 if save("A", list) then n = n + 1 end
             end
         end
     end
-    return n
+    return n, nf -- 成行 records written, 成團 records written
+end
+
+---------------------------------------------------------------------------
+-- GF-002-I (R-17.11 - R-17.13): why a ticket is where it is. Read-only: it
+-- asks the same functions the state comes from (view, partyReady, inWindow,
+-- inDestination, finalDue) and writes nothing; the UI draws only this.
+-- Each item: { ok = true | false | nil (not yet), text (2-6 characters),
+-- value = a number like "2/3", at / span = times the UI writes as a clock }.
+---------------------------------------------------------------------------
+
+Adv.STATE_NAME = { open = "招募中", final = "已定案", formed = "成團", done = "成行",
+    ended = "過期", unfinished = "未成行", cancel = "取消", worker = "上架", closed = "已結案" }
+Adv.STATE_NEXT = { open = "final", final = "formed", formed = "done" }
+
+-- opts: { now, me, party (a set of authors; default my party) }.
+function Adv.whyState(v, opts)
+    opts = opts or {}
+    local t = opts.now or now()
+    local my = opts.me or me()
+    local party = opts.party or Adv.partyAuthors()
+    local leader = v.leader == my
+    local involved = leader
+    for _, m in ipairs(v.members) do if m.a == my then involved = true end end
+    local function item(okv, text, value, extra)
+        local it = { ok = okv, text = text, value = value }
+        for k, x in pairs(extra or {}) do it[k] = x end
+        return it
+    end
+    local cap, filled = 0, 0
+    for k, n in pairs(v.capacity) do cap = cap + n; filled = filled + n - (v.seats[k] or 0) end
+    local seats = filled .. "/" .. cap
+    local function partyItem()
+        if not involved then return item(nil, "隊伍", "-/" .. Adv.autoNeeded(v)) end
+        local okP, n, need = Adv.partyReady(v, party)
+        return item(okP, "隊伍", n .. "/" .. need)
+    end
+    local function windowItem()
+        if not v.slot then return item(nil, "時段內") end
+        local from, to = Adv.autoWindow(v.slot)
+        return item(Adv.inWindow(v, t), "時段內", nil, { span = { from, to } })
+    end
+    local cur, nxt, action = {}, {}, nil
+    local st = v.state
+    if st == "open" then
+        cur[#cur + 1] = item(true, "錄取", seats)
+        if v.overAt then cur[#cur + 1] = item(nil, "期限", nil, { at = v.overAt }) end
+        if #v.slots > 1 then
+            nxt[#nxt + 1] = item(false, "定案")
+            action = "finalize"
+        else
+            nxt[#nxt + 1] = item(false, "錄取", "0/1")
+        end
+    elseif st == "final" then
+        cur[#cur + 1] = item(true, "定案")
+        if v.overAt then cur[#cur + 1] = item(nil, "期限", nil, { at = v.overAt }) end
+        nxt[#nxt + 1] = item(v.full, "滿員", seats)
+        nxt[#nxt + 1] = item(nil, "或", nil, { sep = true })
+        nxt[#nxt + 1] = partyItem()
+        nxt[#nxt + 1] = windowItem()
+        action = "form"
+    elseif st == "formed" then
+        cur[#cur + 1] = item(true, "定案")
+        local by = v.formedBy
+        if by == "full" then cur[#cur + 1] = item(true, "滿員", seats)
+        elseif by == "party" then cur[#cur + 1] = item(true, "隊伍")
+        elseif by == "kept" then cur[#cur + 1] = item(true, "退回")
+        else cur[#cur + 1] = item(true, "組隊") end
+        if v.unfinishedAt then cur[#cur + 1] = item(nil, "期限", nil, { at = v.unfinishedAt }) end
+        nxt[#nxt + 1] = windowItem()
+        nxt[#nxt + 1] = partyItem()
+        if v.dungeon then
+            local inside -- nil for someone outside the ticket (their place says nothing)
+            if involved then inside = Adv.inDestination(v) end
+            nxt[#nxt + 1] = item(inside, "目的地")
+        else
+            nxt[#nxt + 1] = item(nil, "交任務")
+        end
+        if v.doneBack then nxt[#nxt + 1] = item(false, "自動") end
+        action = "done"
+    elseif st == "done" then
+        cur[#cur + 1] = item(true, v.auto and "自動" or "完成")
+        action = "back"
+    elseif st == "ended" then
+        cur[#cur + 1] = item(false, "成團")
+        cur[#cur + 1] = item(true, "時段過", nil, { at = v.closedAt })
+        action = "reopen"
+    elseif st == "unfinished" then
+        cur[#cur + 1] = item(true, "成團")
+        cur[#cur + 1] = item(false, "成行")
+        cur[#cur + 1] = item(true, "時段後", "24h")
+        action = "reopen"
+    else -- cancel
+        if v.closeReason == "offline" then
+            cur[#cur + 1] = item(false, "團長在線")
+            cur[#cur + 1] = item(true, "時段開始")
+        else
+            cur[#cur + 1] = item(true, "取消")
+        end
+        action = "reopen"
+    end
+    local groups = { { state = st, name = Adv.STATE_NAME[st], items = cur } }
+    local nextState = Adv.STATE_NEXT[st]
+    if nextState then groups[2] = { state = nextState, name = Adv.STATE_NAME[nextState], items = nxt } end
+    return { state = st, name = Adv.STATE_NAME[st], groups = groups, action = leader and action or nil,
+        due = leader and Adv.finalDue(v, t) or nil }
+end
+
+-- When a worker ticket ends by itself: the 24 hours, or its last slot when every slot has an end.
+function Adv.workerEnd(slots, ex)
+    local last
+    for _, sl in ipairs(slots or {}) do
+        local fin = Adv.slotEnd(sl)
+        if not fin then last = nil; break end
+        if not last or fin > last then last = fin end
+    end
+    if last and ex then return math.min(last, ex) end
+    return ex or last
+end
+
+-- R-17.10: my worker ticket (Adv.myWorker()) or anyone's (Adv.workers()[a]).
+function Adv.whyWorker(w)
+    local ex = w.expires or (w.entry and w.entry.ex)
+    if w.closed then
+        return { state = "closed", name = Adv.STATE_NAME.closed, action = "reopen",
+            groups = { { state = "closed", name = Adv.STATE_NAME.closed,
+                items = { { ok = false, text = "期限", at = w.closedAt } } } } }
+    end
+    return { state = "worker", name = Adv.STATE_NAME.worker,
+        groups = { { state = "worker", name = Adv.STATE_NAME.worker, items = {
+            { ok = true, text = "時段", value = tostring(#(w.slots or {})) },
+            { ok = nil, text = "期限", at = Adv.workerEnd(w.slots, ex) } } } } }
 end
 
 ---------------------------------------------------------------------------
@@ -1689,7 +2001,7 @@ local function idsOf(s)
     for i = 1, 5 do if set[i] then out[#out + 1] = i end end
     return out
 end
-local PHASE = { open = "open", full = "open", formed = "formed", done = "done", ended = "ended",
+local PHASE = { open = "open", full = "open", final = "open", formed = "formed", done = "done", ended = "ended",
     unfinished = "unfinished", cancel = "cancel" }
 
 function Adv.ticketUpload(e, view)
@@ -1872,7 +2184,7 @@ function Adv.form(id)
     local names = Adv.inviteList(v)
     local invite = (type(C_PartyInfo) == "table" and type(C_PartyInfo.InviteUnit) == "function" and C_PartyInfo.InviteUnit)
         or (type(InviteUnit) == "function" and InviteUnit) or nil
-    Adv.leader(id, "depart")
+    -- GF-002-I (R-17.3): 組隊 only sends the invitations; 成團 comes by itself.
     if not invite then inviteQueue = names; return 0, "no-api" end
     local n = 0
     inviteQueue = {}
@@ -1899,5 +2211,6 @@ function Adv.resetSession()
     for k in pairs(offlineSince) do offlineSince[k] = nil end
     inviteQueue = {}
     here = nil
+    Adv.resetEdges()
     led:resetSession()
 end

@@ -276,13 +276,23 @@ return function(T)
         eq(select(2, Adv.leader(id, "done")), "not-formed", "open: no 完成")
         apply(ns, B, id, t + 1, "t")
         local v = Adv.get(id)
-        eq(v.state, "open", "finalized, not full, no 組隊")
+        eq(v.state, "final", "GF-002-I: one slot, finalized by the first member: 已定案, not full")
         wow.advance(60)
         C_PartyInfo = { InviteUnit = function() end }
         Adv.form(id)
         C_PartyInfo = nil
         v = Adv.get(id)
-        eq(v.state, "formed", "組隊 -> 成團"); ok(v.formedAt, "formedAt")
+        eq(v.state, "final", "GF-002-I R-17.3: 組隊 only invites")
+        eq(select(2, Adv.leader(id, "done")), "not-formed", "完成 still needs 成團")
+        -- R-17.3: the leader sees B in the party, inside the window: 成團 by itself (2 of 4 -> 3 needed: C too).
+        apply(ns, C, id, t + 2, "h")
+        local oldGUID = UnitGUID
+        UnitGUID = function(u) if u == "party1" then return "Player-" .. B elseif u == "party2" then return "Player-" .. C end return oldGUID(u) end
+        local _, nf = Adv.checkAuto()
+        UnitGUID = oldGUID
+        eq(nf, 1, "the leader wrote fp")
+        v = Adv.get(id)
+        eq(v.state, "formed", "成團 by the party"); eq(v.formedBy, "party", "by the party"); ok(v.formedAt, "formedAt")
         ok(Adv.leader(id, "done"), "完成")
         v = Adv.get(id)
         eq(v.state, "done", "成行"); ok(v.closed, "closed")
@@ -474,7 +484,7 @@ return function(T)
         local id = threeSlots(ns)
         apply(ns, B, id, t + 1, "t", "2")
         v = Adv.get(id)
-        eq(table.concat(U.buttonsFor(v), ","), "edit,finalize,remove", "not finalized: 定案")
+        eq(table.concat(U.buttonsFor(v), ","), "edit,finalize", "not finalized: 定案 (GF-UI-A §2.4: 移除 in the right-click menu)")
         U.press(v, "finalize", UIParent)
         ok(ch.rows[2].selected and not ch.rows[1].selected, "the slot with the most signups is suggested")
         ok(plain(ch.rows[2].count._text):find("1", 1, true), "its role count")
@@ -482,12 +492,20 @@ return function(T)
         wow.click(ch.rows[2]); wow.click(ch.go)
         v = Adv.get(id)
         eq(v.final, 2, "finalized 2")
-        eq(table.concat(U.buttonsFor(v), ","), "edit,form,remove", "then 組隊")
+        eq(table.concat(U.buttonsFor(v), ","), "edit,form", "then 組隊")
         C_PartyInfo = { InviteUnit = function() end }
         U.press(v, "form")
         C_PartyInfo = nil
         v = Adv.get(id)
-        eq(table.concat(U.buttonsFor(v), ","), "done,remove", "成團: 完成")
+        eq(v.state, "final", "GF-002-I R-17.3: 組隊 only invites")
+        -- Full (one dps seat fewer, then C and D for slot 2): 成團 by itself.
+        local keep = {}
+        for _, sl in ipairs(v.slots) do keep[#keep + 1] = { id = sl.id, s = sl.s, d = sl.d } end
+        Adv.editTicket(id, { dungeon = "smg", roles = { t = 1, h = 1, d = 2 }, leaderRole = "d", slots = keep })
+        apply(ns, C, id, t + 2, "h", "2"); apply(ns, D, id, t + 3, "d", "2")
+        v = Adv.get(id)
+        eq(v.state, "formed", "full: 成團")
+        eq(table.concat(U.buttonsFor(v), ","), "form,done", "成團: 組隊 (invites) and 完成")
         -- 完成 glows inside the destination.
         ns.Framework.open("adventure")
         IsInInstance = function() return true end
@@ -498,7 +516,7 @@ return function(T)
         for _, r in ipairs(U.rowFrames()) do
             if r:IsShown() and r.view and r.view.id == id then
                 for _, b in ipairs(r.buttons) do if b:IsShown() and b.action == "done" then glow = b.glowing and b.sel:IsShown() end end
-                ok(plain(r.detail:GetText()):find("成團", 1, true), "成團 on line 2")
+                eq(plain(r.badge.text._text), "成團", "GF-002-I R-17.11: 成團 on the state badge (line 2)")
             end
         end
         ok(glow, "完成 glows")
@@ -541,7 +559,7 @@ return function(T)
         wow.click(U.calendarButton)
         local f = U.calendar()
         ok(f:IsShown(), "opened")
-        eq(f.prev:IsShown(), false, "the first page: no back")
+        ok(f.prev:IsShown() and f.prev.disabled, "the first page: back greyed out (GF-UI-A §2.8: not hidden)")
         local cell = f.cells[2] -- day 1
         local shownIcons, glowMine, glowSigned = 0, false, false
         for _, ic in ipairs(cell.icons) do
@@ -559,7 +577,7 @@ return function(T)
         eq(rows, 2, "its tickets listed")
         -- Pages: 0-6, 7-13, 14.
         wow.click(f.next); wow.click(f.next)
-        eq(f.page, 2, "the third page"); eq(f.next:IsShown(), false, "no further than 14 days")
+        eq(f.page, 2, "the third page"); ok(f.next:IsShown() and f.next.disabled, "no further than 14 days (greyed out)")
         local c14 = f.cells[1]
         local fin = false
         for _, ic in ipairs(c14.icons) do if ic:IsShown() and ic.final then fin = ic.shine:IsShown() end end
@@ -611,7 +629,7 @@ return function(T)
         wow.advance(60)
         party({ B }); inside(189)
         Adv.onEnterWorld()
-        eq(Adv.get(id).state, "open", "only 2 accepted in the party: not yet")
+        eq(Adv.get(id).state, "final", "only 2 accepted in the party: not yet (已定案)")
         party({ B, C, D }) -- D is not accepted: does not count
         Adv.checkAuto()
         local v = Adv.get(id)
@@ -759,13 +777,15 @@ return function(T)
         ok(plain(wf.quests:GetText()):find("測試任務：草原之心 16、測試任務：綠洲 22 +1", 1, true), "names on the button: " .. plain(wf.quests:GetText()))
         U.saveWorker()
         local w = ns.Adventure.myWorker()
-        eq(plain(U.workerDest(w)), "測試任務：草原之心 16、測試任務：綠洲 22 +1", "the row: names, not 任務 3")
+        -- GF-002-I (R-17.17): the first quest and +N, with the quest icon (and ❗: in my log too).
+        ok(plain(U.workerDest(w)):find("測試任務：草原之心 16 +2", 1, true), "the row: names, not 任務 3: " .. plain(U.workerDest(w)))
+        ok(U.workerDest(w):find("AvailableQuestIcon", 1, true), "❗: a quest I have too")
         U.openWorker()
         U.pickWorkerQuests(wf.quests)
         wow.click(qp.all)
         ok(plain(wf.quests:GetText()):find("日誌全部 3", 1, true), "日誌全部 3")
         U.saveWorker()
-        eq(plain(U.workerDest(ns.Adventure.myWorker())), "日誌全部 3", "shared with the count")
+        eq(plain(U.workerDest(ns.Adventure.myWorker())):gsub("^%s+", ""), "日誌全部 3", "shared with the count (and the quest icon, R-17.17)")
         C_QuestLog = nil
     end)
 end
