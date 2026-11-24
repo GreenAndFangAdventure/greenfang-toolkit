@@ -2169,6 +2169,7 @@ function UI.questPicker(owner, opts)
             -- GF-UI-A §1.5 / ★2: the list-row selection (gold title highlight + a 3 px bar), not flat yellow.
             r.pick = ns.Widgets.rowSelect(r)
             if r.SetHighlightTexture then r:SetHighlightTexture("Interface\\Buttons\\UI-Listbox-Highlight2", "ADD") end
+            ns.Theme.guardHover(r)
             r:SetScript("OnClick", function(self) qpicker.opts.onToggle(self.questId, self.info); qpicker.draw() end)
             qpicker.rows[k] = r
             return r
@@ -2185,6 +2186,7 @@ function UI.questPicker(owner, opts)
             r.count = r:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
             r.count:SetPoint("LEFT", r, "LEFT", UI.QP_COL_W - 80, 0)
             if r.SetHighlightTexture then r:SetHighlightTexture("Interface\\Buttons\\UI-Listbox-Highlight2", "ADD") end
+            ns.Theme.guardHover(r)
             r:SetScript("OnClick", function(self)
                 qpicker.opts.onZone(self.zone)
                 qpicker.page = 1
@@ -2904,6 +2906,7 @@ function UI.openCalendar()
             cell.frame = ns.Widgets.goldFrame(cell, 2)
             cell.pick = ns.Widgets.rowSelect(cell)
             if cell.SetHighlightTexture then cell:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD") end
+            ns.Theme.guardHover(cell) -- GF-UI-D2: a day outside the 14 days stays dark
             cell:SetScript("OnClick", function(self)
                 if not self.enabled then return end
                 f.day = self.dayOff

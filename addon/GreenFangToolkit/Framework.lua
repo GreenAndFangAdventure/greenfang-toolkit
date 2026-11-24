@@ -551,6 +551,7 @@ function ns.choiceButton(parent, w, x, y, options, onChoose, allText, label)
                 item:SetPoint("TOPLEFT", menu, "TOPLEFT", 4, -4 - (i - 1) * 28)
                 pcall(item.SetNormalFontObject, item, ns.LABEL_FONT)
                 item:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+                ns.Theme.guardHover(item)
                 menu.items[i] = item
             end
             item:SetText(o.text)
@@ -618,6 +619,7 @@ function ns.showMenu(owner, items)
             b:SetPoint("TOPLEFT", popup, "TOPLEFT", 4, -4 - (i - 1) * 28)
             pcall(b.SetNormalFontObject, b, ns.LABEL_FONT)
             b:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+            ns.Theme.guardHover(b) -- GF-UI-D2: the gold header line stays dark
             popup.items[i] = b
         end
         b:SetSize(w - 8, 28)
@@ -709,6 +711,7 @@ function ns.multiChoiceButton(parent, w, x, y, options, onChange, summary)
         it:SetSize(WIDTH - 8, ROW)
         it:SetPoint("TOPLEFT", menu, "TOPLEFT", 4, -4 - (i - 1) * ROW)
         it:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+        ns.Theme.guardHover(it)
         it.check = it:CreateTexture(nil, "ARTWORK")
         it.check:SetSize(20, 20)
         it.check:SetPoint("LEFT", it, "LEFT", 2, 0)

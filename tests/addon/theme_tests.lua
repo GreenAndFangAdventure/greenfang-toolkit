@@ -194,4 +194,107 @@ return function(T)
         GetCoinTextureString = nil
         eq(ns.OrdersUI.money(12345), "1g 23s 45c", "plain letters without coin art")
     end)
+
+    ---------------------------------------------------------------------------
+    -- GF-UI-D2 (0.15.1, owner: 「不能互動的圖示就不要再可以亮」「訂單的取消，取消後還會亮」)
+    ---------------------------------------------------------------------------
+
+    -- Mouse over b: its OnEnter runs (as in the client); true when its hover art shows.
+    local function hover(b)
+        local fn = b:GetScript("OnEnter")
+        if fn then fn(b) end
+        local lit = b.gfHoverOn == true
+        -- The hover art follows: faded out (alpha 0) when it may not light.
+        for _, t in ipairs({ b.gfHover, b.gfHl, (b.gfHoverEdges or {})[1] }) do
+            if t then eq(t._alpha, lit and 1 or 0, "hover art alpha") end
+        end
+        if b:GetScript("OnLeave") then b:GetScript("OnLeave")(b) end
+        return lit
+    end
+
+    test("GF-UI-D2 only what can be pressed lights up: disabled, tooltip-only and click-less controls stay dark", function()
+        local ns = login()
+        local Th, W = ns.Theme, ns.Widgets
+        local b = ns.OrdersUI.textButton(UIParent, "測試", function() end)
+        ok(hover(b), "an enabled button lights up")
+        b:Disable(); ok(not hover(b), "Disable: dark")
+        b:Enable(); ok(hover(b), "Enable: lit again")
+        b:SetEnabled(false); ok(not hover(b), "SetEnabled(false): dark")
+        eq(b.gfEdges[1]._color[4], 0.55, "and its line dimmed")
+        b:SetEnabled(true)
+        W.setEnabled(b, false); ok(not hover(b), "Widgets.setEnabled: dark")
+        W.setEnabled(b, true); ok(hover(b), "and back")
+        -- A handler set later still checks first.
+        b:SetScript("OnEnter", function() end)
+        b:Disable(); ok(not hover(b), "a later OnEnter handler: still dark")
+        -- Nothing to click: no light.
+        ok(not hover(Th.button(UIParent, "無", 60)), "a button without OnClick")
+        -- Icons: a tooltip-only one never lights; a clickable one does.
+        local icon = ns.OrdersUI.iconButton(UIParent, 28, "deal", "說明")
+        ok(not hover(icon), "an icon with only a tooltip")
+        icon:SetScript("OnClick", function() end)
+        ok(hover(icon), "the same icon once it can be pressed")
+        Th.infoOnly(icon); ok(not hover(icon), "marked tooltip-only")
+        -- The X and a check box light up (they can be pressed).
+        local f = Th.window("GFThemeHoverWindow", UIParent, 200, 120)
+        ok(hover(f.CloseButton), "the X")
+        local c = ns.checkBox(UIParent, "測試", 0, 0, function() end)
+        ok(hover(c), "a check box")
+        c:Disable(); ok(not hover(c), "a disabled check box")
+        -- The adventure state badge and the right-click menu's header line.
+        local badge = W.statusBadge(UIParent)
+        ok(not Th.hoverable(badge), "the state badge only shows its checklist")
+        local menu = ns.showMenu(UIParent, { { text = "會階 3", header = true }, { text = "密語", fn = function() end } })
+        ok(not hover(menu.items[1]), "the menu header line stays dark")
+        ok(hover(menu.items[2]), "a menu item lights")
+        ns.closeMenus()
+    end)
+
+    test("GF-UI-D2 a cancelled order: 取消 lights while it can be undone, then nothing on the row lights", function()
+        local ns = login()
+        local O, U, Th = ns.Orders, ns.OrdersUI, ns.Theme
+        O.setTestMode(true)
+        local me = ns.Share.selfAuthor()
+        local d = U.openOrder({ recipe = RECIPE, skill = SKILL,
+            crafters = { { name = "測試甲-測試伺服器", guid = ns.Data.player().guid, online = true, self = true } } })
+        eq(d.crafter, me, "the test order to myself")
+        local id = U.submit(d)
+        ns.Framework.open("orders")
+        local function row()
+            for _, r in ipairs(U.rowFrames()) do if r:IsShown() and r.view and r.view.id == id then return r end end
+        end
+        local r = row()
+        local cancel = r.buttons[2]
+        eq(cancel.label._text, "取消", "取消")
+        ok(hover(cancel), "取消 lights (it can be pressed)")
+        wow.click(cancel)
+        r = row()
+        eq(r.buttons[2].tip, "復原", "for 5 s it is 復原")
+        ok(hover(r.buttons[2]), "復原 lights (it can be pressed)")
+        wow.advance(5.5)
+        eq(O.get(id).state, "cancel", "cancelled")
+        r = row()
+        ok(r, "the row is still listed")
+        for _, b in ipairs(r.buttons) do ok(not b:IsShown(), "no action button on a closed order") end
+        eq(r.state.label._text, "取消", "the state says 取消")
+        ok(not hover(r.state), "the 取消 state icon does not light")
+        ok(not Th.hoverable(r.item), "nor the item icon (tooltip only)")
+        for _, o in ipairs(wow.allObjects()) do
+            local p, inside = o, false
+            while p do if p == r then inside = true end p = p._parent end
+            if inside and o._kind == "Button" and o._shown then ok(not Th.hoverable(o), "nothing on the row lights: " .. tostring(o.tip)) end
+        end
+        -- Undone in time: back to 取消, lit.
+        local d2 = U.openOrder({ recipe = RECIPE, skill = SKILL,
+            crafters = { { name = "測試甲-測試伺服器", guid = ns.Data.player().guid, online = true, self = true } } })
+        local id2 = U.submit(d2)
+        id = id2
+        r = row()
+        wow.click(r.buttons[2]); r = row()
+        wow.click(r.buttons[2]); r = row() -- 復原
+        wow.advance(5.5)
+        eq(O.get(id2).state, "waiting", "undone: still waiting")
+        eq(r.buttons[2].tip, "取消", "取消 again")
+        ok(hover(r.buttons[2]), "and it lights")
+    end)
 end

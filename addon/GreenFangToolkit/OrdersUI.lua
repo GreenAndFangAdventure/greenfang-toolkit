@@ -182,7 +182,12 @@ local function iconButton(parent, size, key, tip, onClick, label)
         b.shine:SetAlpha(0.45)
     end
     b.shine:Hide()
-    if b.SetHighlightTexture then b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD") end
+    -- GF-UI-D2: the hover square is the button's own HIGHLIGHT-layer texture, so the
+    -- theme can keep it dark when the icon cannot be pressed (Theme.guardHover).
+    b.gfHover = b:CreateTexture(nil, "HIGHLIGHT")
+    b.gfHover:SetAllPoints(b)
+    Icons.set(b.gfHover, "Interface\\Buttons\\ButtonHilight-Square")
+    if b.gfHover.SetBlendMode then b.gfHover:SetBlendMode("ADD") end
     if b.RegisterForClicks then b:RegisterForClicks("LeftButtonUp", "RightButtonUp") end
     b.tip = tip
     b:SetScript("OnEnter", function(self)
@@ -193,6 +198,8 @@ local function iconButton(parent, size, key, tip, onClick, label)
     end)
     b:SetScript("OnLeave", function() GameTooltip:Hide() end)
     if onClick then b:SetScript("OnClick", onClick) end
+    -- GF-UI-D2: lights up only when it can be pressed (no light on a state or an item icon).
+    ns.Theme.guardHover(b)
     if label then setLabel(b, label) end
     b:HookScript("OnShow", function(self) if self.label and self.label:GetText() ~= "" then self.label:Show() end end)
     b:HookScript("OnHide", function(self) if self.label then self.label:Hide() end end)
@@ -356,7 +363,7 @@ local function newRow(i)
     row.item = iconButton(row, 32, "unknown", nil)
     row.item:SetPoint("LEFT", row, "LEFT", 24, 0)
     row.item:SetScript("OnEnter", function(self) itemTooltip(self, self:GetParent().view and self:GetParent().view.item) end)
-    row.item.infoOnly = true -- GF-002-D: shows the item on hover, nothing to click
+    ns.Theme.infoOnly(row.item) -- GF-002-D: shows the item on hover, nothing to click; GF-UI-D2: no light
     row.qty = row:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
     row.qty:SetPoint("LEFT", row, "LEFT", 62, 0); row.qty:SetWidth(84); row.qty:SetJustifyH("LEFT"); row.qty:SetWordWrap(false)
     row.cls = row:CreateTexture(nil, "ARTWORK"); row.cls:SetSize(22, 22); row.cls:SetPoint("LEFT", row, "LEFT", 150, 0)
@@ -368,13 +375,14 @@ local function newRow(i)
         local m = iconButton(row, ns.ROW_ICON, "unknown", nil)
         m:SetPoint("LEFT", row, "LEFT", 312 + (k - 1) * 30, 0)
         m:SetScript("OnEnter", function(self) itemTooltip(self, self.itemID) end)
-        m.infoOnly = true
+        ns.Theme.infoOnly(m)
         row.mats[k] = m
     end
     row.coin = row:CreateTexture(nil, "ARTWORK"); row.coin:SetSize(20, 20); row.coin:SetPoint("LEFT", row, "LEFT", 466, 0)
     row.fee = row:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
     row.fee:SetPoint("LEFT", row, "LEFT", 490, 0); row.fee:SetWidth(108); row.fee:SetJustifyH("LEFT"); row.fee:SetWordWrap(false)
     row.state = iconButton(row, ns.ROW_ICON, "waiting", nil)
+    ns.Theme.infoOnly(row.state) -- GF-UI-D2: the state (取消, 成交...) only shows a tooltip: no light
     row.state:SetPoint("LEFT", row, "LEFT", 604, 0)
     row.buttons = {}
     -- GF-002-E: the buttons follow each other by their measured names.
@@ -829,6 +837,7 @@ function UI.arrowButton(parent, which, fallbackText)
         if b.SetPushedTexture then b:SetPushedTexture(up .. "Down") end
         if b.SetDisabledTexture then b:SetDisabledTexture(up .. "Disabled") end
         if b.SetHighlightTexture then b:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD") end
+        ns.Theme.guardHover(b) -- GF-UI-D2: a disabled arrow stays dark
         b.art = up .. "Up"
         return b
     end
