@@ -171,8 +171,7 @@ function SB.refresh()
 end
 
 local function button(parent, text, w, x, y, fn)
-    local b = ns.createFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    b:SetSize(w, 26)
+    local b = ns.Theme.button(parent, nil, w, ns.BUTTON_H) -- GF-UI-D: the theme's button
     b:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
     b:SetText(text)
     b:SetScript("OnClick", fn)
@@ -181,7 +180,7 @@ end
 
 local function build(p)
     panel = p
-    progressLine = p:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    progressLine = p:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT)
     progressLine:SetPoint("TOPLEFT", p, "TOPLEFT", 22, -38)
     progressLine:SetWidth(950)
     progressLine:SetJustifyH("LEFT")
@@ -196,7 +195,7 @@ local function build(p)
     scrollChild = CreateFrame("Frame", nil, scroll)
     scrollChild:SetSize(930, 400)
     scroll:SetScrollChild(scrollChild)
-    bodyText = scrollChild:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    bodyText = scrollChild:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
     bodyText:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 4, -4)
     bodyText:SetWidth(920)
     bodyText:SetJustifyH("LEFT")

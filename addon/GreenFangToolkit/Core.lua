@@ -182,14 +182,11 @@ function ns.coalesce(key, delay, fn)
     end)
 end
 
--- CreateFrame with a Blizzard template; if the template is missing on this
--- client, build a plain frame instead of failing to load.
 -- An opaque dark background and a thin border drawn by the toolkit itself
--- (GF-001-D20). The client's BasicFrameTemplateWithInset can come out see-
--- through, so 同步與診斷 was unreadable over the roster. Also keeps the
--- template's close button inside the frame. Safe to call twice.
-ns.OPAQUE_COLOR = { 0.05, 0.07, 0.06, 0.97 }
-ns.BORDER_COLOR = { 0.32, 0.52, 0.42, 1 }
+-- (GF-001-D20: never see-through). GF-UI-D: the near-black and the 1 px grey
+-- line of the theme (Theme.lua).
+ns.OPAQUE_COLOR = { 0.055, 0.055, 0.065, 0.97 }
+ns.BORDER_COLOR = { 0.27, 0.27, 0.29, 1 }
 
 -- GF-UI-B (GF-UI-A §1.8): the toolkit's colours, in one place. Pages use
 -- these names instead of their own numbers.
@@ -202,7 +199,7 @@ ns.COLOR = {
     formed = { 0.3, 0.9, 0.85 },      -- 成團
     warn = { 1, 0.55, 0.15 },         -- 未成行, 待驗收 ?, test orders
     bad = { 1, 0.25, 0.25 },          -- errors, too high a level
-    brand = { 0.13, 0.37, 0.30 },     -- only the column header bar and the module list
+    brand = { 0.13, 0.37, 0.30 },     -- the guild green (GF-UI-D: no longer a bar colour)
     frame = ns.OPAQUE_COLOR,          -- window background
     stripe = { 1, 1, 1, 0.04 },       -- every second list row
 }
@@ -256,6 +253,8 @@ function ns.rowSelect(row)
 end
 function ns.makeOpaque(f, inset)
     if not f or f.gfOpaque then return f end
+    -- GF-UI-D: the theme's panel (loaded right after this file).
+    if ns.Theme then return ns.Theme.panel(f) end
     inset = inset or 2
     local bg = f:CreateTexture(nil, "BACKGROUND", nil, -8)
     bg:SetPoint("TOPLEFT", f, "TOPLEFT", inset, -inset)
@@ -492,19 +491,18 @@ function ns.escape()
 end
 function ns.escCatcher() return escCatcher end
 
+-- GF-UI-D: the theme's window (dark panel, gold title, the X), no framed template.
 function ns.popupWindow(name, w, h)
-    local f = ns.createFrame("Frame", name, UIParent, "BasicFrameTemplateWithInset")
-    f:SetSize(w, h)
+    local f = ns.Theme.window(name, UIParent, w, h)
     f:SetFrameStrata("FULLSCREEN_DIALOG")
     if f.SetToplevel then f:SetToplevel(true) end
-    ns.makeOpaque(f)
     if f.HookScript then f:HookScript("OnShow", function(self) if self.Raise then self:Raise() end end) end
-    -- Title in the larger font (owner: 「字清楚一點」).
-    if f.TitleText and f.TitleText.SetFontObject then f.TitleText:SetFontObject(ns.TITLE_FONT) end
     ns.escRegister(f, ns.ESC_LEVEL.panel)
     return f
 end
 
+-- CreateFrame with a Blizzard template (scroll frames, the secure button, the
+-- cooldown); a plain frame when the template is missing on this client.
 function ns.createFrame(kind, name, parent, template)
     if template then
         local ok, frame = pcall(CreateFrame, kind, name, parent, template)
@@ -514,19 +512,6 @@ function ns.createFrame(kind, name, parent, template)
     frame.gfNoTemplate = template
     if kind == "Button" and frame.SetNormalFontObject then
         pcall(frame.SetNormalFontObject, frame, "GameFontNormal")
-    elseif template == "BasicFrameTemplateWithInset" then
-        -- Minimal stand-in: dark background, title and a close button.
-        local bg = frame:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints()
-        bg:SetColorTexture(0.05, 0.07, 0.06, 0.92)
-        frame.TitleText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        frame.TitleText:SetPoint("TOP", frame, "TOP", 0, -6)
-        local close = CreateFrame("Button", nil, frame)
-        close:SetSize(24, 24)
-        close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -4, -2)
-        pcall(close.SetNormalFontObject, close, "GameFontNormal")
-        close:SetText("X")
-        close:SetScript("OnClick", function() frame:Hide() end)
     end
     return frame
 end

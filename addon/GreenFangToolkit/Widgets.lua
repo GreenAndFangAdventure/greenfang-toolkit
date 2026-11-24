@@ -301,23 +301,12 @@ end
 W.CLOSE_SIZE = 28
 function W.closeButton(f, onClose)
     if f.gfClose then return f.gfClose end
-    local b = ns.createFrame("Button", nil, f, "UIPanelCloseButton")
-    b:SetSize(W.CLOSE_SIZE, W.CLOSE_SIZE)
-    b:ClearAllPoints()
-    b:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -2)
-    if b.gfNoTemplate then
-        -- No template on this client: the game's close art by hand.
-        b.tex = b:CreateTexture(nil, "ARTWORK"); b.tex:SetAllPoints()
-        ns.Icons.set(b.tex, W.CLOSE_ART)
-    end
-    b.tip = "關閉"
+    -- GF-UI-D: the theme's X (the letter in the game font, gold under the mouse).
+    local b = ns.Theme.closeButton(f, onClose)
     b.infoOnly = false
-    b.fieldNamed = "關閉" -- an X needs no written name (the game's own)
-    b:SetScript("OnClick", function() if onClose then onClose() else f:Hide() end end)
     f.gfClose = b
     return b
 end
-W.CLOSE_ART = "Interface\Buttons\UI-Panel-MinimizeButton-Up"
 
 ---------------------------------------------------------------------------
 -- GF-002-J: a small confirmation (刪除, 清除): a short noun phrase, 確定 / 取消, the X.

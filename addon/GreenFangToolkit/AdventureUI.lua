@@ -1781,7 +1781,7 @@ function UI.openTicket(v, mode)
             f.tagList[#f.tagList + 1] = b
         end
         field(f, "備註", FX, y[6] - 8)
-        f.note = ns.createFrame("EditBox", nil, f, "InputBoxTemplate"); f.note:SetSize(480, 30)
+        f.note = ns.Theme.editBox(f); f.note:SetSize(480, 30)
         if f.note.SetFontObject then f.note:SetFontObject(ns.LABEL_FONT) end
         f.note:SetAutoFocus(false)
         if f.note.SetMaxLetters then f.note:SetMaxLetters(A().NOTE_MAX) end

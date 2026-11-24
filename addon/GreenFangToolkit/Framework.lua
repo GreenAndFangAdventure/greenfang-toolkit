@@ -118,11 +118,10 @@ end
 
 local function createWindow()
     if window then return window end
-    local f = ns.createFrame("Frame", F.WINDOW_NAME, UIParent, "BasicFrameTemplateWithInset")
-    f:SetSize(F.NAV_WIDTH + F.PANEL_WIDTH + 10, F.PANEL_HEIGHT)
+    -- GF-UI-D: the theme's window (dark panel, 1 px line, gold title, the X).
+    local f = ns.Theme.window(F.WINDOW_NAME, UIParent, F.NAV_WIDTH + F.PANEL_WIDTH + 10, F.PANEL_HEIGHT)
     f:SetPoint("CENTER")
     f:SetFrameStrata("DIALOG")
-    ns.makeOpaque(f) -- GF-001-D20: never see-through
     f:SetMovable(true)
     f:EnableMouse(true)
     f:RegisterForDrag("LeftButton")
@@ -133,10 +132,9 @@ local function createWindow()
     local nav = CreateFrame("Frame", nil, f)
     nav:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -32)
     nav:SetSize(F.NAV_WIDTH - 14, F.PANEL_HEIGHT - 44)
-    local bg = nav:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    local brand = ns.COLOR.brand
-    bg:SetColorTexture(brand[1], brand[2], brand[3], 0.25)
+    -- GF-UI-D: the module list is a faint panel with a line on its right.
+    nav.bg = ns.Theme.fill(nav, ns.Theme.C.panel, "BACKGROUND")
+    nav.line = ns.Theme.vline(nav, 0, 0, 0, nil, true)
     f.nav = nav
     f:Hide()
     window = f
@@ -185,17 +183,16 @@ local function rebuildNav()
     for i, def in ipairs(list) do
         local b = navButtons[i]
         if not b then
-            b = ns.createFrame("Button", nil, window.nav, "UIPanelButtonTemplate")
-            -- GF-UI-B: 30 px, the toolkit's 16 px font (GF-UI-A §1.3).
-            b:SetSize(F.NAV_WIDTH - 24, ns.BUTTON_H)
-            if b.SetNormalFontObject then pcall(b.SetNormalFontObject, b, ns.FIELD_FONT) end
-            if b.SetDisabledFontObject then pcall(b.SetDisabledFontObject, b, ns.TITLE_FONT) end
+            -- GF-UI-B: 30 px, the toolkit's 16 px font (GF-UI-A §1.3). GF-UI-D: an
+            -- outlined theme button; the open module is the chosen one (gold).
+            b = ns.Theme.button(window.nav, nil, F.NAV_WIDTH - 24, ns.BUTTON_H)
             b:SetPoint("TOPLEFT", window.nav, "TOPLEFT", 5, -6 - (i - 1) * (ns.BUTTON_H + 6))
             navButtons[i] = b
         end
         b:SetText(F.shortTitle(def))
         b:SetScript("OnClick", function() F.select(def.id) end)
         if b.SetEnabled then b:SetEnabled(def.id ~= currentId) end
+        ns.Theme.setSelected(b, def.id == currentId)
         b.moduleId = def.id
         b:Show()
     end
@@ -505,9 +502,7 @@ F.closeMenu = closeMenu
 -- only called when the list opens (it may walk the whole roster); the
 -- button text comes from that list, or label(value) when given.
 function ns.choiceButton(parent, w, x, y, options, onChoose, allText, label)
-    local b = ns.createFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    b:SetSize(w, ns.BUTTON_H)
-    if b.SetNormalFontObject then pcall(b.SetNormalFontObject, b, ns.FIELD_FONT) end
+    local b = ns.Theme.button(parent, nil, w, ns.BUTTON_H) -- GF-UI-D: outlined, the arrow on the right
     b:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
     b.options, b.value = options, nil
     local menu = CreateFrame("Frame", nil, b)
@@ -576,8 +571,7 @@ end
 
 -- A check box with a label on its right; onChange(checked).
 function ns.checkBox(parent, text, x, y, onChange)
-    local c = ns.createFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
-    c:SetSize(28, 28)
+    local c = ns.Theme.checkBox(parent, 28) -- GF-UI-D: the theme's box and the game's check mark
     c:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
     c.label = ns.freeText(parent:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
     c.label:SetPoint("LEFT", c, "RIGHT", 0, 0)
@@ -665,9 +659,7 @@ end
 F.CHECK_TEXTURE = "Interface\\Buttons\\UI-CheckBox-Check"
 
 function ns.multiChoiceButton(parent, w, x, y, options, onChange, summary)
-    local b = ns.createFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    b:SetSize(w, ns.BUTTON_H)
-    if b.SetNormalFontObject then pcall(b.SetNormalFontObject, b, ns.FIELD_FONT) end
+    local b = ns.Theme.button(parent, nil, w, ns.BUTTON_H) -- GF-UI-D: outlined, the arrow on the right
     b:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
     b.options, b.selected = options, nil
     local menu = CreateFrame("Frame", nil, b)
