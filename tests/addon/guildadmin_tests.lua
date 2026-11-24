@@ -47,8 +47,8 @@ return function(T)
         eq(ns.UI.gameGuildButton._shown, true, "開啟遊戲公會介面")
         eq(ns.UI.officerVisible, false, "no 幹部註記 column")
         local row = rowFor(ns, C)
-        eq(row.cells[9]:GetText(), "公開備註", "the guild note is shown")
-        eq(row.cells[10]._shown, false, "officer note cell hidden")
+        eq(row.cell.note:GetText(), "公開備註", "the guild note is shown")
+        eq(row.cell.officerNote._shown, false, "officer note cell hidden")
         -- The guild info window: read only.
         local f = ns.UI.openGuildInfo()
         eq(f.editMotd._shown, false, "no edit for the message of the day")
@@ -71,7 +71,7 @@ return function(T)
         eq(barKeys(ns), "whisper,who,publicNote,officerNote", "myself: no group, no rank change, no remove")
         eq(ns.UI.inviteButton._shown, true, "邀請入會")
         eq(ns.UI.officerVisible, true, "幹部註記 column")
-        eq(rowFor(ns, C).cells[10]:GetText(), "幹部備註", "officer note shown")
+        eq(rowFor(ns, C).cell.officerNote:GetText(), "幹部備註", "officer note shown")
         local items = ns.UI.memberMenuItems(memberOf(ns, D))
         eq(#items, 7, "right-click: the same 7 actions")
     end)
@@ -110,7 +110,7 @@ return function(T)
         wow.acceptPopup("新的公會註記")
         eq(calls(), "publicNote:3:新的公會註記", "GuildRosterSetPublicNote(index, text)")
         ns.GuildAdmin.invalidate(); ns.UI.refresh()
-        eq(rowFor(ns, C).cells[9]:GetText(), "新的公會註記", "shown")
+        eq(rowFor(ns, C).cell.note:GetText(), "新的公會註記", "shown")
         wow.state.guildCalls = {}
         press("officerNote")
         wow.acceptPopup("新的幹部註記")
@@ -165,7 +165,7 @@ return function(T)
         roster[3].officerNote = SECRET
         roster[3].note = "公開測試字串"
         local ns = login({ guildPerms = ALL, myRankIndex = 1, roster = roster })
-        eq(rowFor(ns, C).cells[10]:GetText(), SECRET, "shown in game to an officer")
+        eq(rowFor(ns, C).cell.officerNote:GetText(), SECRET, "shown in game to an officer")
         wow.advance(120)
         local saved = wow.logout()
         local text = wow.serializeSV("GreenFangToolkitDB", saved.GreenFangToolkitDB)
@@ -175,18 +175,19 @@ return function(T)
         for _, m in ipairs(wow.state.sent) do ok(not m.msg:find(SECRET, 1, true), "never sent") end
     end)
 
-    test("GF-001-Q the page: the top buttons and the member bar do not overlap", function()
+    test("GF-001-Q the page: the guild buttons (bottom row, GF-UI-B) and the member bar do not overlap", function()
         local ns = login({ guildPerms = ALL, myRankIndex = 1 })
         local list = { ns.UI.inviteButton, ns.UI.infoButton, ns.UI.gameGuildButton }
         local prevRight
         for _, b in ipairs(list) do
             local x = b._points[1][4]
-            ok(x >= 22 + ns.UI.REPORT_WIDTH + 8, "right of the report line: " .. tostring(x) .. " " .. tostring(b._points[1][1]))
+            eq(b._points[1][1], "BOTTOMLEFT", "on the bottom row")
+            ok(x >= 20, "inside the page on the left")
             if prevRight then ok(x >= prevRight, "apart") end
             prevRight = x + b.gfWidth
             ok(b._h >= 30, "30 px buttons")
         end
-        ok(prevRight <= ns.UI.ROW_WIDTH + 20 + 1, "inside the page")
+        ok(prevRight <= ns.UI.diagLeft, "left of 診斷")
         selectRow(ns, D)
         local last
         for _, b in ipairs(ns.UI.actionBar.buttons) do

@@ -135,18 +135,34 @@ local function createWindow()
     nav:SetSize(F.NAV_WIDTH - 14, F.PANEL_HEIGHT - 44)
     local bg = nav:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
-    bg:SetColorTexture(0.13, 0.37, 0.30, 0.25)
+    local brand = ns.COLOR.brand
+    bg:SetColorTexture(brand[1], brand[2], brand[3], 0.25)
     f.nav = nav
     f:Hide()
     window = f
     return f
 end
 
-local function setTitle(def)
-    if window and window.TitleText then
-        window.TitleText:SetText("綠皮冒險工具箱｜" .. (def and def.title or ""))
-    end
+-- GF-UI-B (GF-UI-A §2.1 item 3, §2.2 item 3): two-character names in the
+-- module list; the window title keeps the full name, or what the module
+-- puts there (def.windowTitle(), e.g. the roster's guild name).
+F.SHORT_TITLE = { roster = "名冊", recipes = "配方", orders = "訂單", adventure = "冒險",
+    sleepingbag = "睡袋", character = "角色" }
+function F.shortTitle(def)
+    return def and (F.SHORT_TITLE[def.id] or def.short or def.title) or ""
 end
+function F.windowTitle(def)
+    local text = def and def.title or ""
+    if def and type(def.windowTitle) == "function" then
+        local ok, t = pcall(def.windowTitle)
+        if ok and type(t) == "string" and t ~= "" then text = t end
+    end
+    return "綠皮冒險工具箱｜" .. text
+end
+local function setTitle(def)
+    if window and window.TitleText then window.TitleText:SetText(F.windowTitle(def)) end
+end
+F.refreshTitle = function() if currentId then setTitle(byId[currentId]) end end
 
 local function panelFor(def)
     if panels[def.id] then return panels[def.id] end
@@ -170,11 +186,14 @@ local function rebuildNav()
         local b = navButtons[i]
         if not b then
             b = ns.createFrame("Button", nil, window.nav, "UIPanelButtonTemplate")
-            b:SetSize(F.NAV_WIDTH - 24, 26)
-            b:SetPoint("TOPLEFT", window.nav, "TOPLEFT", 5, -6 - (i - 1) * 30)
+            -- GF-UI-B: 30 px, the toolkit's 16 px font (GF-UI-A §1.3).
+            b:SetSize(F.NAV_WIDTH - 24, ns.BUTTON_H)
+            if b.SetNormalFontObject then pcall(b.SetNormalFontObject, b, ns.FIELD_FONT) end
+            if b.SetDisabledFontObject then pcall(b.SetDisabledFontObject, b, ns.TITLE_FONT) end
+            b:SetPoint("TOPLEFT", window.nav, "TOPLEFT", 5, -6 - (i - 1) * (ns.BUTTON_H + 6))
             navButtons[i] = b
         end
-        b:SetText(def.title)
+        b:SetText(F.shortTitle(def))
         b:SetScript("OnClick", function() F.select(def.id) end)
         if b.SetEnabled then b:SetEnabled(def.id ~= currentId) end
         b.moduleId = def.id
@@ -380,6 +399,27 @@ end
 
 local openMenu
 
+-- GF-UI-B (GF-UI-A §1.4 item 4, §1.6): a drop-down button has the game's
+-- drop-down arrow on its right (a texture, never a text arrow) and its
+-- text on the left.
+F.DROP_ARROW = 24
+function ns.dropArrow(b)
+    if b.arrow then return b.arrow end
+    b.arrow = b:CreateTexture(nil, "ARTWORK")
+    b.arrow:SetSize(F.DROP_ARROW, F.DROP_ARROW)
+    b.arrow:SetPoint("RIGHT", b, "RIGHT", -4, 0)
+    ns.GameIcons.set(b.arrow, "dropdown")
+    local fs = b.GetFontString and b:GetFontString()
+    if fs and fs.ClearAllPoints then
+        fs:ClearAllPoints()
+        fs:SetPoint("LEFT", b, "LEFT", 10, 0)
+        fs:SetPoint("RIGHT", b, "RIGHT", -(F.DROP_ARROW + 6), 0)
+        if fs.SetJustifyH then fs:SetJustifyH("LEFT") end
+        if fs.SetWordWrap then fs:SetWordWrap(false) end
+    end
+    return b.arrow
+end
+
 local function closeMenu()
     if openMenu then openMenu:Hide() end
     openMenu = nil
@@ -422,13 +462,14 @@ function ns.choiceButton(parent, w, x, y, options, onChoose, allText, label)
         end
         return list[1].text
     end
+    ns.dropArrow(b)
     function b.choose(value)
         b.value = value
-        b:SetText(b.textFor(value) .. " ▼")
+        b:SetText(b.textFor(value))
         closeMenu()
         onChoose(value)
     end
-    function b.refreshText() b:SetText(b.textFor(b.value) .. " ▼") end
+    function b.refreshText() b:SetText(b.textFor(b.value)) end
     b:SetScript("OnClick", function()
         if menu:IsShown() then closeMenu(); return end
         closeMenu()
@@ -567,7 +608,8 @@ function ns.multiChoiceButton(parent, w, x, y, options, onChange, summary)
         for _, o in ipairs(b.options()) do if b.isOn(o.value) then n = n + 1 end end
         return n
     end
-    function b.refreshText() b:SetText(summary(b) .. " ▼") end
+    ns.dropArrow(b)
+    function b.refreshText() b:SetText(summary(b)) end
     local function changed()
         -- Everything ticked is the same as "everything" (nil), so options
         -- added later (a new profession) are included.
@@ -622,7 +664,8 @@ function ns.multiChoiceButton(parent, w, x, y, options, onChange, summary)
             local hasIcon = e.icon and ns.Icons.set(it.icon, e.icon)
             if hasIcon then it.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93); it.icon:Show() else it.icon:Hide() end
             it.label:SetPoint("LEFT", it, "LEFT", hasIcon and 54 or (e.on ~= nil and 26 or 6), 0)
-            if e.on and ns.Icons.set(it.check, F.CHECK_TEXTURE) then it.check:Show() else it.check:Hide() end
+            -- GF-UI-B (GF-UI-A §1.6): ticked and empty boxes are both drawn.
+            if e.on ~= nil then ns.GameIcons.set(it.check, e.on and "check_on" or "check_off") else it.check:Hide() end
             it.isOption = e.on ~= nil
             it.checked = e.on == true
             it:SetScript("OnClick", e.fn) -- the list stays open: tick several

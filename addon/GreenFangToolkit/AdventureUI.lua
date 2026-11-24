@@ -50,11 +50,13 @@ UI.GAME = { t = "role_t", h = "role_h", d = "role_d", any = "person", now = "now
     final = "final", calendar = "calendar", -- GF-002-H: 定案 (a sealed scroll), 行事曆 (an agenda)
     -- GF-002-E: icons that match their meaning (MANUAL §3z).
     adjust = "adjust", direct = "direct", consent = "consent",
+    -- GF-002-I: 邀請 (a group prayer; the letter stays for orders), 退回, 規則.
+    invite = "invite", back = "back", rules = "rules", elite = "elite",
     tag_quest = "tag_quest", tag_farm = "tag_farm", tag_slow = "tag_slow", tag_fast = "tag_fast", tag_voice = "tag_voice" }
 local function tex(key, size)
     local g = UI.GAME[key]
-    if g then return ns.GameIcons.markup(g, size) end
-    return "|T" .. (UI.ICON[key] or key) .. ":" .. tostring(size or 14) .. "|t"
+    if g then return ns.GameIcons.markup(g, size or 18) end -- GF-002-I: inline icons at least 16 px
+    return "|T" .. (UI.ICON[key] or key) .. ":" .. tostring(size or 18) .. "|t"
 end
 UI.tex = tex
 local function setIcon(t, key)
@@ -182,7 +184,8 @@ function UI.roleText(v)
     return table.concat(parts, " ")
 end
 
-UI.STATE_NAME = { done = "成行", unfinished = "未成行", ended = "結束", cancel = "取消", formed = "成團" }
+-- GF-002-I (R-17.1): the names come from Adventure.STATE_NAME (one place).
+UI.STATE_NAME = setmetatable({}, { __index = function(_, k) return A().STATE_NAME[k] end })
 UI.TAG_NAME = { quest = "解任務", farm = "連刷", slow = "慢慢打", fast = "速刷", voice = "語音" }
 function UI.tagText(tags)
     local out = {}
@@ -304,11 +307,11 @@ end
 -- leader; line 2 the tags with their names, the note, and the buttons.
 ---------------------------------------------------------------------------
 
-local ROW_HEIGHT = 62
+local ROW_HEIGHT = 64 -- GF-UI-A §1.3: two-line rows 64 (a multiple of 4)
 UI.ROW_HEIGHT = ROW_HEIGHT
 UI.ROW_WIDTH = 1030
-UI.LINE1, UI.LINE2 = 13, -14 -- y offsets of the two lines from the row's middle
-local panel, scroll, content, summaryLine
+UI.LINE1, UI.LINE2 = 14, -14 -- y offsets of the two lines from the row's middle
+local panel, scroll, content
 local rowWidgets, shownRows = {}, {}
 local popup, draft   -- the ticket window and its draft
 local wpopup, wdraft -- the worker window and its draft
@@ -329,12 +332,35 @@ function UI.pageRows()
         out[#out + 1] = { header = tex("worker", 20) .. " 職工單" }
         for _, r in ipairs(matched) do r.isWorker = true; out[#out + 1] = r end
     end
+    -- GF-002-I (R-17.17): every other open worker ticket too (with its quests), after the matching ones.
+    local others = UI.otherWorkers(matched)
+    if #others > 0 then
+        out[#out + 1] = { header = tex("worker", 20) .. " 全部職工" }
+        for _, r in ipairs(others) do out[#out + 1] = r end
+    end
     -- GF-002-G: groups in the game's group finder for my dungeons (the last search).
     local lfg = UI.lfgRows()
     if #lfg > 0 then
-        out[#out + 1] = { header = ns.GameIcons.markup("lfg", 20) .. " 尋求組隊（遊戲內建）" }
+        out[#out + 1] = { header = ns.GameIcons.markup("lfg", 20) .. " 尋求組隊" }
         for _, r in ipairs(lfg) do out[#out + 1] = { lfg = r } end
     end
+    return out
+end
+
+-- GF-002-I (R-17.17): the open worker tickets of others not already listed as
+-- matching mine; online first, then by name order.
+function UI.otherWorkers(matched)
+    local listed = {}
+    for _, r in ipairs(matched or {}) do listed[r.worker] = true end
+    local my = S().selfAuthor()
+    local out = {}
+    for a, w in pairs(A().workers()) do
+        if a ~= my and not listed[a] then out[#out + 1] = { otherWorker = w, worker = a } end
+    end
+    table.sort(out, function(x, y)
+        if x.otherWorker.online ~= y.otherWorker.online then return x.otherWorker.online end
+        return x.worker < y.worker
+    end)
     return out
 end
 
@@ -342,6 +368,7 @@ end
 function UI.myDungeons()
     local set, any = {}, false
     local w = A().myWorker()
+    if w and w.closed then w = nil end
     for _, d in ipairs(w and w.dungeons or {}) do set[d] = true; any = true end
     local my = S().selfAuthor()
     for _, v in pairs(A().all()) do
@@ -363,14 +390,16 @@ function UI.buttonsFor(v)
     local out = {}
     if v.leader == my then
         if A().local_().reopen[v.id] then return { "reopen", "dismiss" } end
-        if v.closed then return out end
-        -- GF-002-H (R-16.8, R-16.15): 定案 first (several slots), then 組隊, then 完成 once 成團.
+        -- GF-002-I (R-17.5, R-17.7): 成行 steps back; the other ends reopen.
+        if v.state == "done" then return { "back" } end
+        if v.closed then return { "reopen" } end
+        -- GF-002-H (R-16.8, R-16.15): 定案 first (several slots), then 組隊 (it only invites,
+        -- R-17.3), then 完成 once 成團. GF-UI-A §2.4: 移除 and 退回 are in the right-click menu.
         if not v.formed then out[#out + 1] = "edit" end -- GF-002-G (成團: the right-click menu still has it)
         if #v.pending > 0 then out[#out + 1] = "approve" end
         if not v.final and #(v.slots or {}) > 1 then out[#out + 1] = "finalize"
-        elseif not v.departed then out[#out + 1] = "form" end
+        else out[#out + 1] = "form" end
         if v.formed then out[#out + 1] = "done" end
-        out[#out + 1] = "remove"
         return out
     end
     if v.closed then return out end
@@ -396,6 +425,7 @@ UI.BUTTON = {
     reopen = { icon = "reopen", tip = "重開" }, dismiss = { icon = "no", tip = "不要" },
     invite = { icon = "invite", tip = "邀請" }, edit = { icon = "edit", tip = "編輯" },
     finalize = { icon = "final", tip = "定案" }, slots = { icon = "today", tip = "時段" }, -- GF-002-H
+    back = { icon = "back", tip = "退回" }, -- GF-002-I (R-17.7)
 }
 UI.ICON.edit = "Interface\\Icons\\INV_Feather_05"
 
@@ -450,6 +480,11 @@ function UI.press(v, button, owner)
     elseif button == "form" then r = Adv.form(v.id)
     elseif button == "done" then r = Adv.leader(v.id, "done")
     elseif button == "remove" then r = Adv.leader(v.id, "cancel", "manual")
+    elseif button == "back" then r = Adv.leader(v.id, "back")
+    elseif button == "reopen" and not Adv.local_().reopen[v.id] then
+        -- GF-002-I (R-17.5): the same contents, a new time: the ticket window opens on it.
+        UI.openTicket(v, "reopen")
+        return "reopen"
     elseif button == "reopen" then r = Adv.reopen(v.id)
     elseif button == "dismiss" then Adv.dismissReopen(v.id); r = true
     end
@@ -477,7 +512,20 @@ end
 function UI.leaderMenu(v)
     local items = {}
     local Adv = A()
-    items[#items + 1] = { text = "|T" .. UI.ICON.edit .. ":16|t 編輯", fn = function() UI.openTicket(v) end }
+    -- GF-002-I: closed tickets: 退回 (成行) or 重開; open ones also step back and 移除 here.
+    if v.closed then
+        if v.state == "done" then
+            items[#items + 1] = { text = tex("back") .. " 退回", fn = function() UI.press(v, "back") end }
+        else
+            items[#items + 1] = { text = tex("reopen") .. " 重開", fn = function() UI.press(v, "reopen") end }
+        end
+        return items
+    end
+    items[#items + 1] = { text = "|T" .. UI.ICON.edit .. ":18|t 編輯", fn = function() UI.openTicket(v) end }
+    if v.state == "formed" or (v.state == "final" and #(v.slots or {}) > 1) then
+        items[#items + 1] = { text = tex("back") .. " 退回", fn = function() UI.press(v, "back") end }
+    end
+    items[#items + 1] = { text = tex("no") .. " 移除", fn = function() UI.press(v, "remove") end }
     for _, m in ipairs(v.pending) do
         local mm = Adv.member(m.a)
         items[#items + 1] = { text = tex("yes") .. " " .. (mm and ns.shortName(mm.name) or "?"), fn = function() Adv.leader(v.id, "approve", m.a); UI.refresh() end }
@@ -504,9 +552,11 @@ local function setButtonIcon(b, key)
     return Icons.set(b.tex, UI.ICON[key] or key)
 end
 
--- Row columns. Line 1: art, name, time, seats, leader. Line 2: details, buttons.
+-- Row columns. Line 1: art, name, time, seats, leader. Line 2: details, the state
+-- badge (GF-002-I, R-17.11: x = 640 on every row), buttons (GF-UI-A §2.4: from 740).
 UI.COL = { dest = 22, name = 76, time = 290, seats = 530, cls = 756, who = 782, whoW = 160,
-    detail = 76, detailW = 600, buttons = 690 }
+    detail = 76, detailW = 552, badge = 640, buttons = 740 }
+UI.BUTTON_GAP = 8
 UI.DEST_ICON = 44
 
 local function newRow(i)
@@ -514,7 +564,8 @@ local function newRow(i)
     local row = CreateFrame("Frame", nil, content)
     row:SetSize(UI.ROW_WIDTH, ROW_HEIGHT)
     row.bg = row:CreateTexture(nil, "BACKGROUND"); row.bg:SetAllPoints()
-    row.att = row:CreateTexture(nil, "ARTWORK"); row.att:SetSize(18, 18); row.att:SetPoint("LEFT", row, "LEFT", 2, UI.LINE1)
+    -- GF-UI-A §2.4 item 6: ❗ 20 px, between the two lines, on the art's middle line.
+    row.att = row:CreateTexture(nil, "ARTWORK"); row.att:SetSize(20, 20); row.att:SetPoint("LEFT", row, "LEFT", 2, 0)
     row.dest = row:CreateTexture(nil, "ARTWORK"); row.dest:SetSize(UI.DEST_ICON, UI.DEST_ICON)
     row.dest:SetPoint("LEFT", row, "LEFT", C.dest + 4, 0)
     local function text(x, w, y, font)
@@ -536,8 +587,12 @@ local function newRow(i)
         row.slots[k] = s
     end
     row.cls = row:CreateTexture(nil, "ARTWORK"); row.cls:SetSize(22, 22); row.cls:SetPoint("LEFT", row, "LEFT", C.cls, UI.LINE1)
-    row.off = row:CreateTexture(nil, "OVERLAY"); row.off:SetSize(12, 12); row.off:SetPoint("BOTTOMRIGHT", row.cls, "BOTTOMRIGHT", 3, -3)
+    row.off = row:CreateTexture(nil, "OVERLAY"); row.off:SetSize(16, 16); row.off:SetPoint("BOTTOMRIGHT", row.cls, "BOTTOMRIGHT", 4, -4)
     row.who = text(C.who, C.whoW, UI.LINE1)
+    -- GF-002-I (R-17.11): the state badge; the mouse over it shows the ✓✗ checklist.
+    row.badge = ns.Widgets.statusBadge(row)
+    row.badge:SetPoint("LEFT", row, "LEFT", C.badge, UI.LINE2)
+    row.badge:Hide()
     row.buttons = {}
     UI.ROW_BUTTON_X = C.buttons
     for k = 1, 4 do
@@ -550,7 +605,7 @@ local function newRow(i)
     if row.RegisterForClicks then row:RegisterForClicks("LeftButtonUp", "RightButtonUp") end
     row:SetScript("OnMouseUp", function(self, mouse)
         local v = self.view
-        if v and v.leader == S().selfAuthor() and not v.closed and mouse == "RightButton" then
+        if v and v.leader == S().selfAuthor() and mouse == "RightButton" then
             ns.showMenu(self, UI.leaderMenu(v))
         end
     end)
@@ -576,30 +631,62 @@ local function fillWho(row, a, name)
     row.who:SetTextColor(c[1], c[2], c[3])
 end
 
+-- A worker's dungeons / quests as ordered lists: my own (Adv.myWorker: lists) or
+-- anyone's (Adv.workers: sets with dungeonList / questList).
+local function dungeonIds(w) return w.dungeonList or (w.dungeons and w.dungeons[1] ~= nil and w.dungeons) or {} end
+local function questIds(w)
+    if w.questList then return w.questList end
+    local q = w.quests or {}
+    if q[1] ~= nil or next(q) == nil then return q end
+    local out = {}
+    for id in pairs(q) do out[#out + 1] = id end
+    table.sort(out, function(x, y) return tostring(x) < tostring(y) end)
+    return out
+end
+UI.dungeonIds, UI.questIds = dungeonIds, questIds
+
 -- "死礦、影牙、黑暗淵 +8"
 function UI.workerDest(w)
+    local list = dungeonIds(w)
     local names = {}
-    for i, d in ipairs(w.dungeons or {}) do if i <= 3 then names[#names + 1] = ns.AdventureData.short(d) end end
+    for i, d in ipairs(list) do if i <= 3 then names[#names + 1] = ns.AdventureData.short(d) end end
     local text = table.concat(names, "、")
-    if #(w.dungeons or {}) > 3 then text = text .. " +" .. (#w.dungeons - 3) end
-    if text == "" then text = UI.workerQuests(w, 2) end
+    if #list > 3 then text = text .. " +" .. (#list - 3) end
+    if text == "" then text = UI.workerQuestLine(w) end
     return text
 end
 -- GF-002-H (R-16.29): the chosen quests by name (+N), or 日誌全部 N.
 function UI.workerQuests(w, max)
     if w.allQuests then return "日誌全部" .. (w.questCount and (" " .. w.questCount) or "") end
-    if #(w.quests or {}) == 0 then return "" end
-    return UI.questsText(w.quests, w.questNames, nil, max or 2)
+    local list = questIds(w)
+    if #list == 0 then return "" end
+    return UI.questsText(list, w.questNames, nil, max or 2)
+end
+-- GF-002-I (R-17.17): the quest icon, the first quest's name and +N (or 日誌全部 N);
+-- ❗ first when a quest of it is in my log too.
+function UI.workerShares(w)
+    if w.allQuests then return false end
+    local log = A().questLog() or {}
+    for _, q in ipairs(questIds(w)) do if log[tonumber(q) or q] then return true end end
+    return false
+end
+function UI.workerQuestLine(w)
+    local q = UI.workerQuests(w, 1)
+    if q == "" then return "" end
+    return (UI.workerShares(w) and (tex("attention", 18) .. " ") or "") .. tex("quest", 18) .. " " .. q
 end
 function UI.workerDetail(w)
     local parts = {}
-    if #(w.dungeons or {}) > 3 then
+    local list = dungeonIds(w)
+    if #list > 3 then
         local rest = {}
-        for i = 4, #w.dungeons do rest[#rest + 1] = ns.AdventureData.short(w.dungeons[i]) end
+        for i = 4, #list do rest[#rest + 1] = ns.AdventureData.short(list[i]) end
         parts[#parts + 1] = table.concat(rest, "、")
     end
-    local q = UI.workerQuests(w, 2)
-    if q ~= "" and #(w.dungeons or {}) > 0 then parts[#parts + 1] = tex("quest", 18) .. " " .. q end
+    if #list > 0 then
+        local q = UI.workerQuestLine(w)
+        if q ~= "" then parts[#parts + 1] = q end
+    end
     return table.concat(parts, "   ")
 end
 -- A worker's slots: the first two, then "+N" (GF-002-H: up to 5).
@@ -624,27 +711,79 @@ function UI.needText(need)
     return #parts > 0 and ("缺 " .. table.concat(parts, "  ")) or ""
 end
 
+-- GF-002-I (R-17.11): how the checklist writes times and the button to press.
+function UI.whyFormat(it)
+    if it.span then return UI.spanText(it.span[1], it.span[2]) end
+    if it.at then return UI.startText(it.at) end
+    return nil
+end
+function UI.whyAction(key)
+    local spec = UI.BUTTON[key]
+    if not spec then return nil end
+    return tex(spec.icon, 16) .. " " .. spec.tip
+end
+UI.WHY_OPTS = { format = function(it) return UI.whyFormat(it) end, action = function(k) return UI.whyAction(k) end }
+function UI.why(v) return A().whyState(v) end
+-- The checklist lines (tests and the 完成 button): Widgets.checklistLines with this page's formats.
+function UI.whyLines(why) return ns.Widgets.checklistLines(why, UI.WHY_OPTS) end
+
 local function setButtons(row, list)
     for k, b in ipairs(row.buttons) do
         local spec = list[k]
         if spec then
             setButtonIcon(b, spec.icon); b.tip = spec.tip; b.action = spec.action
             ns.OrdersUI.setLabel(b, spec.tip) -- GF-002-D: the name next to the icon
-            -- GF-002-H (R-16.16): 完成 glows inside the destination (nothing automatic).
+            -- GF-002-H (R-16.16): 完成 glows inside the destination.
             b.glowing = spec.glow == true
             if spec.glow then b.sel:Show(); b.shine:Show() else b.sel:Hide(); b.shine:Hide() end
+            -- GF-UI-A §1.7: 完成 shows the same ✓✗ checklist as the badge.
+            b.why = spec.why
+            b:SetScript("OnEnter", function(self)
+                if self.why then ns.Widgets.checklistTooltip(self, self.why, UI.WHY_OPTS); return end
+                if not self.tip then return end
+                GameTooltip:SetOwner(self, "ANCHOR_TOP")
+                GameTooltip:AddLine(self.tip)
+                GameTooltip:Show()
+            end)
             b:SetScript("OnClick", spec.fn)
             b:Show()
-        else b:Hide(); b.action = nil end
+        else b:Hide(); b.action = nil; b.why = nil end
     end
     UI.flowButtons(row)
 end
 
+-- GF-002-I: a row greyed out (過期, 已結案 ...): grey names, grey art.
+local function grey(row, on)
+    if row.dest.SetDesaturated then row.dest:SetDesaturated(on) end
+    row.dest:SetAlpha(on and 0.6 or 1)
+    if on then
+        row.name:SetTextColor(0.5, 0.5, 0.5)
+        row.time:SetTextColor(0.5, 0.5, 0.5)
+    else
+        row.time:SetTextColor(1, 1, 1)
+    end
+end
+
+-- A worker ticket's row (mine, matching one of my tickets, or anyone's): R-17.17.
+local function fillWorker(row, w, author)
+    local ds = dungeonIds(w)
+    if ds[1] then ns.GameIcons.set(row.dest, ns.GameIcons.dungeonKey(ds[1])) else ns.GameIcons.set(row.dest, "quest") end
+    row.name:SetText(UI.workerDest(w))
+    row.time:SetText(UI.slotsText(w.slots))
+    row.roles:SetText(UI.rolesName(w.main, w.alt))
+    row.detail:SetText(UI.workerDetail(w))
+    fillWho(row, author)
+    row.badge.set(A().whyWorker(w), UI.WHY_OPTS)
+    grey(row, w.closed == true)
+end
+
 local function fillRow(row, data, i)
-    row.bg:SetColorTexture(0.2, 0.15, 0.15, i % 2 == 0 and 0.35 or 0.09)
+    -- GF-UI-A §1.8: one zebra for every page (Core's ns.stripe, GF-UI-B).
+    if ns.stripe then ns.stripe(row.bg, i) else row.bg:SetColorTexture(1, 1, 1, i % 2 == 0 and 0.04 or 0) end
     local parts = { row.att, row.dest, row.name, row.time, row.roles, row.cls, row.who, row.detail }
-    row.view, row.mine, row.lfg = nil, nil, nil
+    row.view, row.mine, row.lfg, row.worker, row.why = nil, nil, nil, nil, nil
     for _, s in ipairs(row.slots) do s:Hide() end
+    row.badge:Hide()
     if data.header then
         for _, w in ipairs(parts) do w:Hide() end
         row.off:Hide()
@@ -655,24 +794,27 @@ local function fillRow(row, data, i)
     row.head:Hide()
     for _, w in ipairs(parts) do w:Show() end
     row.name:SetTextColor(1, 0.82, 0)
+    grey(row, false)
     row.detail:SetText("")
     if data.attention then setIcon(row.att, "attention") else row.att:Hide() end
     if data.myWorker then
         -- My own worker ticket (GF-002-F): visible, editable, removable.
+        -- GF-002-I (R-17.10): once over: grey, 已結案, 重開 (same contents, new slots).
         local w = data.myWorker
         row.mine = w
-        if w.dungeons[1] then ns.GameIcons.set(row.dest, ns.GameIcons.dungeonKey(w.dungeons[1]))
-        else ns.GameIcons.set(row.dest, "quest") end
-        row.name:SetText(UI.workerDest(w))
-        row.time:SetText(UI.slotsText(w.slots))
-        row.roles:SetText(UI.rolesName(w.main, w.alt))
-        row.detail:SetText(UI.workerDetail(w))
-        fillWho(row, S().selfAuthor())
+        fillWorker(row, w, S().selfAuthor())
         row.off:Hide()
-        setButtons(row, {
-            { icon = "edit", tip = "編輯", action = "edit", fn = function() UI.openWorker() end },
-            { icon = "no", tip = "移除", action = "unregister", fn = function() A().removeWorker(); UI.refresh() end },
-        })
+        if w.closed then
+            setButtons(row, {
+                { icon = "reopen", tip = "重開", action = "reopen-worker", fn = function() UI.openWorker("reopen") end },
+                { icon = "no", tip = "移除", action = "unregister", fn = function() A().removeWorker(); UI.refresh() end },
+            })
+        else
+            setButtons(row, {
+                { icon = "edit", tip = "編輯", action = "edit", fn = function() UI.openWorker() end },
+                { icon = "no", tip = "移除", action = "unregister", fn = function() A().removeWorker(); UI.refresh() end },
+            })
+        end
         return
     end
     if data.lfg then
@@ -701,31 +843,44 @@ local function fillRow(row, data, i)
         setButtons(row, list)
         return
     end
-    if data.isWorker then
-        -- A worker matching one of my tickets: invite (R-6.4).
-        local w, v = data.w, data.ticket
-        UI.setDest(row.dest, v)
-        row.name:SetText(UI.destText(v))
-        row.time:SetText(UI.slotsText(w.slots))
-        row.roles:SetText(UI.rolesName(w.main, w.alt))
-        fillWho(row, data.worker)
+    if data.isWorker or data.otherWorker then
+        -- A worker matching one of my tickets: invite (R-6.4); or anyone's (R-17.17).
+        local w = data.w or data.otherWorker
+        row.worker = data.worker
+        fillWorker(row, w, data.worker)
+        if data.isWorker then
+            -- Line 1 names the ticket it matches; the worker's quests stay on line 2 (R-17.17).
+            local v = data.ticket
+            UI.setDest(row.dest, v)
+            row.name:SetText(UI.destText(v))
+            if #dungeonIds(w) == 0 then row.detail:SetText(UI.workerQuestLine(w)) end
+        end
         if w.online then setIcon(row.off, "online") else setIcon(row.off, "offline") end
-        setButtons(row, { { icon = "invite", tip = "邀請", action = "invite",
-            fn = function(self) UI.invite(v, data.worker, w, self) end } })
+        if data.isWorker then
+            local v = data.ticket
+            setButtons(row, { { icon = "invite", tip = "邀請", action = "invite",
+                fn = function(self) UI.invite(v, data.worker, w, self) end } })
+        else setButtons(row, {}) end
         return
     end
     local v = data.view
     row.view = v
     UI.setDest(row.dest, v)
     row.name:SetText(UI.destText(v))
-    if v.closed then row.name:SetTextColor(0.5, 0.5, 0.5) end
     row.time:SetText(UI.timeText(v))
-    if v.closed then
-        -- GF-002-H (R-16.15 - R-16.17): 成行 / 未成行 (成團未成行) / 結束 / 取消.
-        row.roles:SetText(tex(v.state == "done" and "yes" or "no") .. " " .. (UI.STATE_NAME[v.state] or "取消"))
+    local why = UI.why(v)
+    row.why = why
+    row.badge.set(why, UI.WHY_OPTS)
+    -- GF-002-I (R-17.5): ended rows are grey (過期 / 未成行 / 取消); 成行 keeps its colors.
+    grey(row, v.closed and v.state ~= "done")
+    row.roles:SetText("")
+    local seats = UI.slotList(v)
+    if v.closed or #seats > UI.MAX_SLOTS then
+        -- Closed: the state is the badge's (R-17.11). R-17.16: 10 / 20 / 40 people get
+        -- the numbers per role instead of an icon per seat.
+        row.roles:SetText(UI.roleText(v))
     else
-        row.roles:SetText("")
-        for k, sl in ipairs(UI.slotList(v)) do
+        for k, sl in ipairs(seats) do
             local s = row.slots[k]
             if not s then break end
             ns.GameIcons.set(s, UI.GAME[sl.role])
@@ -734,9 +889,7 @@ local function fillRow(row, data, i)
             s.filled = sl.filled
         end
     end
-    local detail = UI.detailText(v)
-    if v.formed then detail = tex("group", 18) .. " 成團" .. (detail ~= "" and ("   " .. detail) or "") end
-    row.detail:SetText(detail)
+    row.detail:SetText(UI.detailText(v))
     fillWho(row, v.leader)
     -- R-4.7: the leader is offline (委託者離線中).
     if v.leaderOffline then setIcon(row.off, "offline") else row.off:Hide() end
@@ -744,7 +897,7 @@ local function fillRow(row, data, i)
     for _, name in ipairs(UI.buttonsFor(v)) do
         local spec = UI.BUTTON[name]
         list[#list + 1] = { icon = spec.icon, tip = spec.tip, action = name, fn = function(self) UI.press(v, name, self) end,
-            glow = name == "done" and A().inDestination(v) }
+            glow = name == "done" and A().inDestination(v), why = name == "done" and why or nil }
     end
     setButtons(row, list)
 end
@@ -753,7 +906,7 @@ end
 function UI.flowButtons(row)
     local shown = {}
     for _, b in ipairs(row.buttons) do if b:IsShown() then shown[#shown + 1] = b end end
-    ns.OrdersUI.flow(row, shown, UI.ROW_BUTTON_X, UI.LINE2, 10, "LEFT")
+    ns.OrdersUI.flow(row, shown, UI.ROW_BUTTON_X, UI.LINE2, UI.BUTTON_GAP, "LEFT")
 end
 
 function UI.layoutRows()
@@ -778,6 +931,7 @@ function UI.layoutRows()
     end
 end
 function UI.rowFrames() return rowWidgets end
+function UI.scrollFrame() return scroll end
 function UI.shownRows() return shownRows end
 
 -- R-11.3 / GF-002-C item 9: dungeon art, the number of people, the missing roles.
@@ -798,7 +952,6 @@ function UI.refresh()
     shownRows = UI.pageRows()
     content:SetHeight(math.max(1, #shownRows * ROW_HEIGHT))
     UI.layoutRows()
-    summaryLine:SetText(UI.summaryText())
     UI.emptyLine:SetText(#shownRows == 0 and "沒有冒險單" or "") -- GF-002-D
     if #A().pendingInvites() > 0 then UI.nextInvite:Show() else UI.nextInvite:Hide() end
     if ns.NativeLFG and ns.NativeLFG.canSearch() then UI.lfgButton:Show() else UI.lfgButton:Hide() end
@@ -813,15 +966,18 @@ local function build(p)
     UI.workerButton:SetPoint("LEFT", UI.newButton, "RIGHT", 12, 0)
     UI.workerButton:SetScript("OnClick", function() UI.openWorker() end)
     -- GF-002-G: search the game's group finder (a click: the game allows it then).
-    UI.lfgButton = ns.OrdersUI.textButton(p, ns.GameIcons.markup("lfg", 20) .. " 搜尋尋求組隊", function()
+    -- GF-UI-A §2.4 item 4: 「尋求組隊」 (the art already says search).
+    UI.lfgButton = ns.OrdersUI.textButton(p, ns.GameIcons.markup("lfg", 20) .. " 尋求組隊", function()
         ns.NativeLFG.search()
     end)
     -- GF-002-H (R-16.12): the adventure calendar.
     UI.calendarButton = ns.OrdersUI.textButton(p, tex("calendar", 20) .. " 行事曆", function() UI.openCalendar() end)
     UI.calendarButton:SetPoint("LEFT", UI.workerButton, "RIGHT", 12, 0)
     UI.lfgButton:SetPoint("LEFT", UI.calendarButton, "RIGHT", 12, 0)
-    summaryLine = ns.freeText(p:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
-    summaryLine:SetPoint("LEFT", UI.lfgButton, "RIGHT", 24, 0)
+    -- GF-UI-A §2.4 item 4: the unnamed summary (dungeon, people, missing roles) is gone;
+    -- the same is on 我的職工單. GF-002-I (R-17.13): 規則 at the right end.
+    UI.rulesButton = ns.OrdersUI.textButton(p, tex("rules", 20) .. " 規則", function(self) UI.openRules(self) end)
+    UI.rulesButton:SetPoint("TOPRIGHT", p, "TOPRIGHT", -24, -40)
     scroll = ns.createFrame("ScrollFrame", nil, p, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", 20, -84)
     scroll:SetPoint("BOTTOMRIGHT", -40, 52)
@@ -829,7 +985,7 @@ local function build(p)
     content:SetSize(UI.ROW_WIDTH, 1)
     scroll:SetScrollChild(content)
     scroll:HookScript("OnVerticalScroll", function() UI.layoutRows() end)
-    UI.nextInvite = iconButton(p, ns.ICON, "invite", "邀請下一位", function() A().inviteNext(); UI.refresh() end, "邀請下一位")
+    UI.nextInvite = iconButton(p, ns.ICON, "invite", "下一位", function() A().inviteNext(); UI.refresh() end, "下一位")
     UI.nextInvite:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -310, 10)
     UI.nextInvite:Hide() -- only while names wait for a click (R-7.2 fallback)
     UI.emptyLine = p:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT)
@@ -1188,8 +1344,27 @@ function UI.ticketData(d)
     return o
 end
 
-UI.SUBMIT_ERROR = { ["no-destination"] = "請先選目的地", ["bad-time"] = "時間不對", ["too-far"] = "日期太遠",
-    ["too-many"] = "冒險單太多了", closed = "這張單已經結束" }
+-- GF-UI-A §2.5 item 2 / §3 item 16: no sentences: the field that is missing turns red with a ✗;
+-- the two without a field get a mark and a number ("✗ 20/20", "✗ 結束").
+UI.SUBMIT_FIELD = { ["no-destination"] = "目的地", ["bad-time"] = "時段", ["too-far"] = "時段" }
+UI.SUBMIT_ERROR = { ["too-many"] = A().MAX_TICKETS .. "/" .. A().MAX_TICKETS, closed = "結束" }
+function UI.markField(f, name)
+    for fname, fs in pairs(f.fieldStrings or {}) do
+        if fname == name then fs:SetTextColor(1, 0.3, 0.3) else fs:SetTextColor(1, 0.82, 0) end
+    end
+    if not f.fieldMark then
+        f.fieldMark = f:CreateTexture(nil, "OVERLAY")
+        f.fieldMark:SetSize(16, 16)
+    end
+    local fs = name and f.fieldStrings and f.fieldStrings[name]
+    if fs then
+        ns.GameIcons.set(f.fieldMark, "no")
+        f.fieldMark:ClearAllPoints()
+        f.fieldMark:SetPoint("RIGHT", fs, "LEFT", -2, 0)
+        f.fieldMark:Show()
+    else f.fieldMark:Hide() end
+    f.badField = name
+end
 function UI.submitTicket(d)
     d = d or draft
     if not d then return nil end
@@ -1208,8 +1383,13 @@ function UI.submitTicket(d)
         local ok = ns.NativeLFG.list(d.dungeon, d.note)
         lfgNote = ok and "lfg-ok" or "lfg-failed"
     end
+    -- GF-002-I (R-17.5): 重開 put the new one up: the ended ticket leaves my list.
+    if id and d.reopenOf then A().forget(d.reopenOf); d.reopenOf = nil end
     if id and popup then popup:Hide() end
-    if not id and popup then popup.result:SetText(tex("no") .. " " .. (UI.SUBMIT_ERROR[why] or "沒有開成")) end
+    if not id and popup then
+        UI.markField(popup, UI.SUBMIT_FIELD[why])
+        popup.result:SetText(UI.SUBMIT_FIELD[why] and "" or (tex("no") .. " " .. (UI.SUBMIT_ERROR[why] or "")))
+    end
     UI.refresh()
     return id, why, lfgNote
 end
@@ -1239,7 +1419,7 @@ local function drawDest(f)
     f.pickQuest.disabled = not hasLog
     f.pickQuest.tex:SetAlpha(hasLog and 1 or 0.4)
     if f.pickQuest.label then f.pickQuest.label:SetAlpha(hasLog and 1 or 0.4) end
-    f.pickQuest.tip = not hasLog and "任務日誌讀不到" or nil
+    f.pickQuest.tip = not hasLog and (tex("no", 16) .. " 任務日誌") or nil
     if chosen then
         f.pickDungeon:Hide(); f.pickQuest:Hide()
         f.dest:Show(); f.destQuest:Show()
@@ -1283,6 +1463,8 @@ local function drawTicket()
     if not (popup and draft) then return end
     local f = popup
     if f.TitleText then f.TitleText:SetText(draft.editId and "編輯冒險單" or "冒險單") end
+    if f.badField == "目的地" and (draft.dungeon or #draft.quests > 0) then UI.markField(f, nil)
+    elseif f.badField and f.fieldStrings then UI.markField(f, f.badField) end
     f.go:SetText(tex("yes", 20) .. (draft.editId and " 儲存" or " 開單"))
     drawDest(f)
     -- 時段: one chip per slot (click: its picker), then ＋時段 (R-16.3).
@@ -1307,15 +1489,33 @@ local function drawTicket()
 end
 UI.drawTicket = drawTicket
 
+-- GF-002-I (R-17.16): the group size of the destination (5, 10, 20, 40) caps the roles.
 function UI.changeCount(role, n)
     if role == "any" then draft.size = math.max(2, math.min(5, draft.size + n))
-    else draft.roles[role] = math.max(0, math.min(5, draft.roles[role] + n)) end
+    else
+        local cap = draft.dungeon and ns.AdventureData.size(draft.dungeon) or 5
+        local total = 0
+        for _, r in ipairs(A().ROLES) do total = total + (draft.roles[r] or 0) end
+        if n > 0 and total >= cap then drawTicket(); return end
+        draft.roles[role] = math.max(0, math.min(cap, draft.roles[role] + n))
+    end
     drawTicket()
+end
+-- A new destination: its default roles when its group size differs (R-17.16).
+function UI.setDraftDungeon(d, id)
+    local before = d.dungeon and ns.AdventureData.size(d.dungeon) or 5
+    d.dungeon = id
+    if id and ns.AdventureData.size(id) ~= before then d.roles = ns.AdventureData.defaultRoles(id) end
 end
 
 -- opts: a view to edit (my own open ticket), or nil for a new one.
-function UI.openTicket(v)
+-- GF-002-I (R-17.5): mode "reopen": the same contents as v, a new time (現在 to start).
+function UI.openTicket(v, mode)
     draft = v and UI.draftFrom(v) or UI.newDraft()
+    if v and mode == "reopen" then
+        draft.editId, draft.reopenOf = nil, v.id
+        draft.slots = { { now = true } }
+    end
     if not popup then
         local f = ns.popupWindow(UI.TICKET_NAME, 820, 470)
         f:SetPoint("CENTER", 0, 40)
@@ -1382,7 +1582,9 @@ function UI.openTicket(v)
         f.note:SetScript("OnTextChanged", function(self) if draft then draft.note = A().cleanNote(self:GetText()) end end)
         f.note:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
         -- GF-002-G: also list in the game's group finder (現在 + a dungeon only).
-        f.lfgCheck = ns.checkBox(f, ns.GameIcons.markup("lfg", 18) .. " 同時在尋求組隊上架", FX, y[7], function(on) draft.lfg = on end)
+        -- GF-UI-A §2.5 item 1: 「上架」 with the group finder's art (no sentence).
+        f.lfgCheck = ns.checkBox(f, ns.GameIcons.markup("lfg", 18) .. " 上架", FX, y[7], function(on) draft.lfg = on end)
+        f.lfgCheck.tip = "尋求組隊"
         f.result = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)); f.result:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", FX, 24)
         if f.result.SetTextColor then f.result:SetTextColor(1, 0.4, 0.4) end
         f.go = O.textButton(f, tex("yes", 20) .. " 開單", function() UI.submitTicket() end, 120)
@@ -1392,6 +1594,7 @@ function UI.openTicket(v)
     end
     popup.note:SetText(draft.note or "")
     popup.result:SetText("")
+    UI.markField(popup, nil)
     popup:Show()
     drawTicket()
     return draft
@@ -1406,12 +1609,23 @@ function UI.draft() return draft end
 
 UI.GRID_NAME = "GreenFangToolkit_DungeonGrid"
 UI.GRID_COLUMNS, UI.GRID_CELL_W, UI.GRID_CELL_H = 8, 100, 124
+-- GF-002-I (R-17.15): 地城 / 團本 tabs (團本 only once raid data exists), 適合我 / 全部,
+-- sorted by my level; the cells scroll (3 rows show at a time).
+UI.GRID_ROWS, UI.GRID_TOP = 3, 96
 local grid
+
+-- The destinations the grid shows now (tests): the tab, the filter, my level.
+function UI.gridList(tab, filter, level)
+    return ns.AdventureData.sorted(tab or "dungeon", level, filter == "fit" and type(level) == "number")
+end
 
 function UI.dungeonGrid(owner, onClick, isOn, onQuest, returnTo, showLfg)
     if ns.Framework.closeMenu then ns.Framework.closeMenu() end
     local qp = UI.questPickerFrame and UI.questPickerFrame()
     if qp and qp:IsShown() then qp:Hide() end
+    local Data = ns.AdventureData
+    local C, W, H, ICON = UI.GRID_COLUMNS, UI.GRID_CELL_W, UI.GRID_CELL_H, ns.DUNGEON_ICON
+    local O = ns.OrdersUI
     if not grid then
         grid = CreateFrame("Frame", UI.GRID_NAME, UIParent)
         grid:SetFrameStrata("TOOLTIP") -- above the click-outside blocker
@@ -1421,12 +1635,26 @@ function UI.dungeonGrid(owner, onClick, isOn, onQuest, returnTo, showLfg)
         ns.escRegister(grid, ns.ESC_LEVEL.grid)
         grid.title = ns.freeText(grid:CreateFontString(nil, "ARTWORK", ns.TITLE_FONT))
         grid.title:SetPoint("TOPLEFT", grid, "TOPLEFT", 20, -14)
-        grid.buttons = {}
-        local C, W, H, ICON = UI.GRID_COLUMNS, UI.GRID_CELL_W, UI.GRID_CELL_H, ns.DUNGEON_ICON
-        local TOP = 48
-        local function place(b, i)
-            b:SetPoint("TOPLEFT", grid, "TOPLEFT", 16 + ((i - 1) % C) * W + (W - ICON) / 2, -TOP - math.floor((i - 1) / C) * H)
+        -- Tabs and the filter (text buttons, 2-3 characters; the chosen one is locked bright).
+        grid.tabs = {}
+        for _, cat in ipairs(Data.CATEGORIES) do
+            local b = O.textButton(grid, Data.CATEGORY_NAME[cat], function() grid.tab = cat; grid.scroll:SetVerticalScroll(0); grid.draw() end)
+            b.category = cat
+            grid.tabs[#grid.tabs + 1] = b
         end
+        grid.filters = {}
+        for _, it in ipairs({ { "fit", "適合我" }, { "all", "全部" } }) do
+            local b = O.textButton(grid, it[2], function() grid.filter = it[1]; grid.scroll:SetVerticalScroll(0); grid.draw() end)
+            b.filter = it[1]
+            grid.filters[#grid.filters + 1] = b
+        end
+        grid.scroll = ns.createFrame("ScrollFrame", nil, grid, "UIPanelScrollFrameTemplate")
+        grid.scroll:SetPoint("TOPLEFT", grid, "TOPLEFT", 16, -UI.GRID_TOP)
+        grid.scroll:SetSize(C * W, UI.GRID_ROWS * H)
+        grid.content = CreateFrame("Frame", nil, grid.scroll)
+        grid.content:SetSize(C * W, H)
+        grid.scroll:SetScrollChild(grid.content)
+        grid.buttons = {}
         local function texts(b, name)
             b.label = ns.freeText(b:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
             b.label:SetPoint("TOP", b, "BOTTOM", 0, -4)
@@ -1437,24 +1665,30 @@ function UI.dungeonGrid(owner, onClick, isOn, onQuest, returnTo, showLfg)
             b.lfgCount:SetPoint("TOP", b.level, "BOTTOM", 0, -2)
             b.lfgCount:SetTextColor(0.45, 0.85, 1)
         end
-        for i, d in ipairs(ns.AdventureData.DUNGEONS) do
-            local b = iconButton(grid, ICON, "dungeon", nil)
-            place(b, i)
-            texts(b, d.short or d.name)
-            b.level:SetText(UI.levelText(d.id))
-            b.dungeon = d.id
-            grid.buttons[i] = b
+        -- One button per destination, kept in data order (grid.buttons[i] = DUNGEONS[i]).
+        function grid.ensure()
+            for i, d in ipairs(Data.DUNGEONS) do
+                local b = grid.buttons[i]
+                if not b then
+                    b = iconButton(grid.content, ICON, "dungeon", nil)
+                    texts(b, "")
+                    grid.buttons[i] = b
+                end
+                b.dungeon = d.id
+                b.category = d.category
+                b.label:SetText(d.short or d.name)
+                b.level:SetText(UI.levelText(d.id))
+            end
+            for i = #Data.DUNGEONS + 1, #grid.buttons do grid.buttons[i]:Hide(); grid.buttons[i].dungeon = nil end
         end
-        local n = #ns.AdventureData.DUNGEONS
         grid.quest = iconButton(grid, ICON, "quest", nil)
         texts(grid.quest, "任務")
         grid.quest.level:SetText("")
         ns.GameIcons.set(grid.quest.tex, "quest")
-        place(grid.quest, n + 1)
-        local rows = math.ceil((n + 1) / C)
-        grid.done = ns.OrdersUI.textButton(grid, tex("yes", 20) .. " 完成", function() grid:Hide() end, 110)
+        grid.quest:SetPoint("TOPLEFT", grid, "TOPLEFT", 16 + (W - ICON) / 2, -UI.GRID_TOP - UI.GRID_ROWS * H - 8)
+        grid.done = O.textButton(grid, tex("yes", 20) .. " 完成", function() grid:Hide() end, 110)
         grid.done:SetPoint("BOTTOMRIGHT", grid, "BOTTOMRIGHT", -20, 14)
-        grid:SetSize(32 + C * W, TOP + rows * H + 56)
+        grid:SetSize(32 + C * W + 24, UI.GRID_TOP + UI.GRID_ROWS * H + 60)
         grid:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
         grid:HookScript("OnHide", function(self)
             local back = self.returnTo
@@ -1464,9 +1698,67 @@ function UI.dungeonGrid(owner, onClick, isOn, onQuest, returnTo, showLfg)
                 if back == popup then drawTicket() elseif back == wpopup then UI.drawWorker() end
             end
         end)
+        function grid.mark(b)
+            local o = grid.opts
+            if o.isOn then O.setSelected(b, o.isOn(b.dungeon))
+            else
+                b.sel:Hide(); b.shine:Hide(); b.selected = nil
+                if b.tex.SetVertexColor then b.tex:SetVertexColor(1, 1, 1) end
+            end
+            if o.isOn and o.isOn(b.dungeon) then ns.GameIcons.set(b.badge, "yes") else b.badge:Hide() end
+            b.label:SetTextColor(1, 1, 1)
+        end
+        function grid.draw()
+            local o = grid.opts
+            grid.ensure()
+            -- Tabs: 團本 only with raid data (R-17.15); a tab without data falls back to 地城.
+            if not Data.has(grid.tab) then grid.tab = "dungeon" end
+            local shownTabs = {}
+            for _, b in ipairs(grid.tabs) do
+                if Data.has(b.category) then b:Show(); shownTabs[#shownTabs + 1] = b else b:Hide() end
+                b.selected = b.category == grid.tab
+                if b.LockHighlight then if b.selected then b:LockHighlight() else b:UnlockHighlight() end end
+            end
+            local x = O.flow(grid, shownTabs, 20, -50, 8)
+            O.flow(grid, grid.filters, x + 24, -50, 8)
+            for _, b in ipairs(grid.filters) do
+                b.selected = b.filter == grid.filter
+                if b.LockHighlight then if b.selected then b:LockHighlight() else b:UnlockHighlight() end end
+            end
+            local level = A().myLevel()
+            local list = UI.gridList(grid.tab, grid.filter, level)
+            local at = {}
+            for k, d in ipairs(list) do at[d.id] = k end
+            local counts = (o.showLfg and ns.NativeLFG and ns.NativeLFG.results) and ns.NativeLFG.counts() or {}
+            for _, b in ipairs(grid.buttons) do
+                local k = b.dungeon and at[b.dungeon]
+                if b.dungeon then
+                    local r, g, bl = ns.GameIcons.levelColor(b.dungeon, level)
+                    b.level:SetTextColor(r, g, bl)
+                    b.levelColor = { r, g, bl }
+                end
+                if k then
+                    b:ClearAllPoints()
+                    b:SetPoint("TOPLEFT", grid.content, "TOPLEFT", ((k - 1) % C) * W + (W - ICON) / 2, -8 - math.floor((k - 1) / C) * H)
+                    ns.GameIcons.set(b.tex, ns.GameIcons.dungeonKey(b.dungeon))
+                    b.tip = nil -- the name and levels are written out; no tooltip over the grid
+                    b.lfgCount:SetText(counts[b.dungeon] and ("現在 " .. counts[b.dungeon] .. " 隊") or "")
+                    grid.mark(b)
+                    b:SetScript("OnClick", function(self)
+                        grid.opts.onClick(self.dungeon)
+                        if grid.opts.isOn then grid.mark(self) else grid:Hide() end
+                    end)
+                    b:Show()
+                else b:Hide() end
+            end
+            grid.shown = list
+            grid.content:SetHeight(math.max(1, math.ceil(#list / C)) * H + 8)
+        end
+        grid.tab, grid.filter = "dungeon", "fit"
         grid:Hide()
     end
-    grid.title:SetText(isOn and "選擇地城（可以選好幾個）" or "選擇目的地")
+    grid.opts = { onClick = onClick, isOn = isOn, showLfg = showLfg }
+    grid.title:SetText(isOn and "選擇地城" or "選擇目的地")
     if isOn then grid.done:Show() else grid.done:Hide() end
     if onQuest then
         grid.quest:SetScript("OnClick", function(self) grid:Hide(); onQuest(self) end)
@@ -1474,30 +1766,9 @@ function UI.dungeonGrid(owner, onClick, isOn, onQuest, returnTo, showLfg)
     else
         grid.quest:Hide()
     end
-    local level = A().myLevel()
-    local counts = (showLfg and ns.NativeLFG and ns.NativeLFG.results) and ns.NativeLFG.counts() or {}
-    local function mark(b)
-        if isOn then ns.OrdersUI.setSelected(b, isOn(b.dungeon))
-        else
-            b.sel:Hide(); b.shine:Hide(); b.selected = nil
-            if b.tex.SetVertexColor then b.tex:SetVertexColor(1, 1, 1) end
-        end
-        if isOn and isOn(b.dungeon) then ns.GameIcons.set(b.badge, "yes") else b.badge:Hide() end
-        b.label:SetTextColor(1, 1, 1)
-    end
-    for _, b in ipairs(grid.buttons) do
-        ns.GameIcons.set(b.tex, ns.GameIcons.dungeonKey(b.dungeon))
-        local r, g, bl = ns.GameIcons.levelColor(b.dungeon, level)
-        b.level:SetTextColor(r, g, bl)
-        b.levelColor = { r, g, bl }
-        b.tip = nil -- the name and levels are written out; no tooltip over the grid
-        b.lfgCount:SetText(counts[b.dungeon] and ("現在 " .. counts[b.dungeon] .. " 隊") or "")
-        mark(b)
-        b:SetScript("OnClick", function(self)
-            onClick(self.dungeon)
-            if isOn then mark(self) else grid:Hide() end
-        end)
-    end
+    if type(A().myLevel()) ~= "number" then grid.filter = "all" end
+    grid.scroll:SetVerticalScroll(0)
+    grid.draw()
     -- The window it was opened from steps aside (nothing is covered).
     grid.returnTo = returnTo
     grid:Show()
@@ -1523,13 +1794,13 @@ UI.titled = titled
 function UI.pickDestination(owner)
     local hasQuests = A().questLog() ~= nil
     -- GF-002-H (R-16.26): quests have their own button; the grid is dungeons only.
-    return UI.dungeonGrid(owner, function(id) draft.dungeon = id; draft.quests = {}; draft.questDungeon = nil; drawTicket() end, nil,
+    return UI.dungeonGrid(owner, function(id) UI.setDraftDungeon(draft, id); draft.quests = {}; draft.questDungeon = nil; drawTicket() end, nil,
         nil, popup, UI.hasNow(draft))
 end
 
 function UI.pickQuests(owner)
     -- R-16.27: up to 5; a quest of a dungeon brings that dungeon along.
-    return UI.questPicker(owner, { title = "選擇任務（最多 5 個）", max = A().MAX_QUESTS,
+    return UI.questPicker(owner, { title = "選擇任務", max = A().MAX_QUESTS,
         isOn = function(id) for _, x in ipairs(draft.quests) do if x == id then return true end end return false end,
         onToggle = function(id, info)
             for i, x in ipairs(draft.quests) do
@@ -1622,8 +1893,8 @@ function UI.questPicker(owner, opts)
             r.name:SetPoint("LEFT", r, "LEFT", 34, 0); r.name:SetWidth(UI.QP_COL_W - 120); r.name:SetJustifyH("LEFT"); r.name:SetWordWrap(false)
             r.level = r:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
             r.level:SetPoint("LEFT", r, "LEFT", UI.QP_COL_W - 80, 0)
-            r.sel = r:CreateTexture(nil, "BACKGROUND"); r.sel:SetAllPoints()
-            r.sel:SetColorTexture(1, 0.82, 0.2, 0.22)
+            -- GF-UI-A §1.5 / ★2: the list-row selection (gold title highlight + a 3 px bar), not flat yellow.
+            r.pick = ns.Widgets.rowSelect(r)
             if r.SetHighlightTexture then r:SetHighlightTexture("Interface\\Buttons\\UI-Listbox-Highlight2", "ADD") end
             r:SetScript("OnClick", function(self) qpicker.opts.onToggle(self.questId, self.info); qpicker.draw() end)
             qpicker.rows[k] = r
@@ -1676,14 +1947,14 @@ function UI.questPicker(owner, opts)
                     r.wanted = wanted[q.id] == true
                     local on = o.isOn(q.id)
                     r.selected = on
-                    if on then r.sel:Show() else r.sel:Hide() end
+                    r.pick.set(on)
                     if o.all and o.all.on() then r:SetAlpha(0.5) else r:SetAlpha(1) end
                     place(r, UI.QP_ROW); r:Show()
                 end
             end
             for k = nh + 1, #qpicker.heads do qpicker.heads[k]:Hide() end
             for k = nr + 1, #qpicker.rows do qpicker.rows[k]:Hide() end
-            qpicker.empty:SetText(nr == 0 and "任務日誌是空的" or "")
+            qpicker.empty:SetText(nr == 0 and "沒有任務" or "")
             local width = 32 + (col + 1) * UI.QP_COL_W
             qpicker.done:ClearAllPoints()
             qpicker.done:SetPoint("BOTTOMRIGHT", qpicker, "BOTTOMRIGHT", -16, 12)
@@ -1751,12 +2022,15 @@ end
 
 UI.WORKER_NAME = "GreenFangToolkit_WorkerPopup"
 
-function UI.newWorkerDraft()
+function UI.newWorkerDraft(mode)
     local mine = A().myWorker()
     if mine then
         local slots = {}
         for _, sl in ipairs(mine.slots or {}) do slots[#slots + 1] = UI.draftSlot(sl) end
         mine.slots = #slots > 0 and slots or { { now = true } }
+        -- GF-002-I (R-17.10): 重開 = the same contents, new slots.
+        if mine.closed or mode == "reopen" then mine.slots = { { now = true } }; mine.reopen = true end
+        mine.closed, mine.closedAt = nil, nil
         return mine
     end
     local _, token = ns.call(UnitClass, "player")
@@ -1766,8 +2040,10 @@ end
 
 function UI.drawWorkerTitle()
     if not wpopup then return end
-    local registered = A().myWorker() ~= nil
-    if wpopup.TitleText then wpopup.TitleText:SetText(registered and "職工單（已登記）" or "職工單") end
+    local w = A().myWorker()
+    local registered = w ~= nil and not w.closed
+    -- GF-UI-A §2.6 item 1: no brackets in the title; the button says 更新 once registered.
+    if wpopup.TitleText then wpopup.TitleText:SetText("職工單") end
     wpopup.save:SetText(tex("yes", 20) .. (registered and " 更新" or " 登記"))
     if registered then wpopup.remove:Show() else wpopup.remove:Hide() end
 end
@@ -1817,7 +2093,10 @@ function UI.drawWorker()
         fs:ClearAllPoints(); fs:SetPoint("TOPLEFT", f, "TOPLEFT", O.FIELD_X, yy - 8)
         if ctl then ctl:ClearAllPoints(); ctl:SetPoint("TOPLEFT", f, "TOPLEFT", X, yy) end
     end
-    place(f.questField, f.quests, y); y = y - O.ROW_STEP
+    place(f.questField, f.quests, y)
+    -- GF-002-I (R-17.19): 自動 (group / elite quests I accept join this ticket), after 選擇任務.
+    O.setSelected(f.autoAdd, A().autoAddOn())
+    y = y - O.ROW_STEP
     place(f.mainField, nil, y); O.flow(f, f.mainList, X, y, 40); y = y - O.ROW_STEP
     place(f.altField, nil, y); O.flow(f, f.altList, X, y, 40); y = y - O.ROW_STEP
     -- GF-002-H: 時段 chips (1-5), each with its picker; the window grows with them.
@@ -1836,13 +2115,15 @@ function UI.drawWorker()
     f.quests:SetText(qText)
     f.quests.gfWidth = ns.labelWidth(qText) + 28
     f.quests:SetSize(f.quests.gfWidth, ns.BUTTON_H)
+    f.autoAdd:ClearAllPoints()
+    f.autoAdd:SetPoint("LEFT", f.quests, "RIGHT", 16, 0)
     UI.drawWorkerTitle()
 end
 local drawWorker = function() UI.drawWorker() end
 
 UI.WORKER_FIELDS = { "地城", "任務", "職責", "副職責", "時段" }
-function UI.openWorker()
-    wdraft = UI.newWorkerDraft()
+function UI.openWorker(mode)
+    wdraft = UI.newWorkerDraft(mode)
     if not wpopup then
         local f = ns.popupWindow(UI.WORKER_NAME, 740, 420)
         f:SetPoint("CENTER", 0, 40)
@@ -1858,6 +2139,7 @@ function UI.openWorker()
         f.addDungeon = O.textButton(f, "＋地城", function(self) UI.pickWorkerDungeons(self) end)
         f.questField = field(f, "任務", FX, 0)
         f.quests = O.textButton(f, "選擇任務", function(self) UI.pickWorkerQuests(self) end)
+        f.autoAdd = iconButton(f, ns.ICON, "elite", "團體／精英任務", function() UI.toggleAutoAdd() end, "自動")
         f.mainField = field(f, "職責", FX, 0)
         f.altField = field(f, "副職責", FX, 0)
         f.mainRoles, f.altRoles, f.mainList, f.altList = {}, {}, {}, {}
@@ -1877,7 +2159,7 @@ function UI.openWorker()
         f.slotField = field(f, "時段", FX, 0)
         f.slotChips = {}
         f.addSlot = O.textButton(f, "＋時段", function(self) UI.addSlot(wdraft.slots, drawWorker, self) end)
-        f.remove = iconButton(f, ns.ICON, "no", "移除", function() A().removeWorker(); f:Hide(); UI.refresh() end, "移除職工單")
+        f.remove = iconButton(f, ns.ICON, "no", "移除", function() A().removeWorker(); f:Hide(); UI.refresh() end, "移除")
         f.remove:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", FX, 18)
         f.save = O.textButton(f, tex("yes", 20) .. " 登記", function() UI.saveWorker() end, 120)
         f.save:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -24, 18)
@@ -1900,6 +2182,13 @@ function UI.saveWorker(d)
     if wpopup then wpopup:Hide() end
     UI.refresh()
     return ok
+end
+
+-- GF-002-I (R-17.19): the toggle is kept per character at once (not with 登記).
+function UI.toggleAutoAdd()
+    A().setAutoAdd(not A().autoAddOn())
+    if wpopup and wpopup.autoAdd then ns.OrdersUI.setSelected(wpopup.autoAdd, A().autoAddOn()) end
+    return A().autoAddOn()
 end
 
 function UI.toggleWorkerDungeon(id)
@@ -2087,7 +2376,7 @@ local function frameIcon(cell, k)
     ic:SetSize(32, 32)
     ic.tex = ic:CreateTexture(nil, "ARTWORK"); ic.tex:SetAllPoints()
     ic.glow = ic:CreateTexture(nil, "OVERLAY")
-    ic.glow:SetSize(56, 56); ic.glow:SetPoint("CENTER", ic, "CENTER", 0, 0)
+    ic.glow:SetSize(48, 48); ic.glow:SetPoint("CENTER", ic, "CENTER", 0, 0) -- GF-UI-A §2.8 item 4: 56 crowded the next icon
     if not Icons.set(ic.glow, ns.OrdersUI.GLOW) then ic.glow:SetColorTexture(1, 0.85, 0.4, 0.35) end
     if ic.glow.SetBlendMode then ic.glow:SetBlendMode("ADD") end
     ic.glow:Hide()
@@ -2138,12 +2427,19 @@ function UI.drawCalendar()
             elseif cell.icons[k] then cell.icons[k]:Hide() end
         end
         cell.more:SetText(#items > UI.CAL_ICONS and ("+" .. (#items - UI.CAL_ICONS)) or "")
-        cell.bg:SetColorTexture(0.2, 0.15, 0.15, (off == f.day) and 0.7 or (inRange and 0.35 or 0.1))
+        -- GF-UI-A §2.8 item 1: today = a 2 px gold frame; the chosen day = the bright
+        -- row highlight and the gold frame (both: one frame and the highlight).
+        local st = ns.COLOR and ns.COLOR.stripe or { 1, 1, 1, 0.04 }
+        cell.bg:SetColorTexture(st[1], st[2], st[3], inRange and st[4] or st[4] / 2)
+        cell.today, cell.chosen = off == 0, off == f.day
+        cell.frame.set(cell.today or cell.chosen)
+        cell.pick.set(cell.chosen)
         if cell.SetAlpha then cell:SetAlpha(inRange and 1 or 0.4) end
         cell.enabled = inRange
     end
-    if f.page > 0 then f.prev:Show() else f.prev:Hide() end
-    if f.page < UI.CAL_PAGES - 1 then f.next:Show() else f.next:Hide() end
+    -- GF-UI-A §2.8 item 5: the arrows are greyed out, not hidden (the week does not jump).
+    ns.Widgets.setEnabled(f.prev, f.page > 0)
+    ns.Widgets.setEnabled(f.next, f.page < UI.CAL_PAGES - 1)
     -- The chosen day's tickets.
     local items = UI.calendarItems(f.day or 0)
     f.dayLabel:SetText(UI.dayText(UI.dayStart(f.day or 0) + 43200))
@@ -2155,12 +2451,18 @@ function UI.drawCalendar()
             row.name:SetText(UI.destText(item.view))
             row.time:SetText(UI.slotText(item.slot))
             row.seats:SetText(UI.roleText(item.view))
-            row.state:SetText((item.view.formed and (tex("group", 18) .. " 成團  ") or "")
-                .. (item.mine and "|cffffd100我開的|r" or item.signed and "|cff66ff77我報名|r" or ""))
+            -- GF-UI-A §2.8 item 3: the state badge; mine / signed as the same frame as above.
+            row.badge.set(UI.why(item.view), UI.WHY_OPTS)
+            local c = item.mine and UI.CAL_MINE or item.signed and UI.CAL_SIGNED or nil
+            if c then
+                if row.glow.SetVertexColor then row.glow:SetVertexColor(c[1], c[2], c[3]) end
+                row.glow:Show()
+            else row.glow:Hide() end
+            row.kind = item.mine and "mine" or item.signed and "signed" or "other"
             row:Show()
         else row:Hide(); row.item = nil end
     end
-    f.empty:SetText(#items == 0 and "這天沒有冒險單" or "")
+    f.empty:SetText(#items == 0 and "沒有冒險單" or "")
 end
 
 function UI.openCalendar()
@@ -2213,6 +2515,8 @@ function UI.openCalendar()
             cell.more = ns.freeText(cell:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
             cell.more:SetPoint("BOTTOMRIGHT", cell, "BOTTOMRIGHT", -8, 8)
             cell.icons = {}
+            cell.frame = ns.Widgets.goldFrame(cell, 2)
+            cell.pick = ns.Widgets.rowSelect(cell)
             if cell.SetHighlightTexture then cell:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD") end
             cell:SetScript("OnClick", function(self)
                 if not self.enabled then return end
@@ -2238,7 +2542,13 @@ function UI.openCalendar()
             row.name = text(40, 250)
             row.time = text(300, 250)
             row.seats = text(560, 190)
-            row.state = text(760, 180)
+            row.badge = ns.Widgets.statusBadge(row)
+            row.badge:SetPoint("LEFT", row, "LEFT", 760, 0)
+            row.glow = row:CreateTexture(nil, "OVERLAY")
+            row.glow:SetSize(42, 42); row.glow:SetPoint("CENTER", row.dest, "CENTER", 0, 0)
+            if not Icons.set(row.glow, ns.OrdersUI.GLOW) then row.glow:SetColorTexture(1, 0.85, 0.4, 0.35) end
+            if row.glow.SetBlendMode then row.glow:SetBlendMode("ADD") end
+            row.glow:Hide()
             row:Hide()
             f.list[k] = row
         end
@@ -2253,6 +2563,57 @@ function UI.openCalendar()
     return calendar
 end
 function UI.calendar() return calendar end
+
+---------------------------------------------------------------------------
+-- GF-002-I (R-17.13): the 規則 card: only icons, arrows, 2-4 character nouns
+-- and numbers. The numbers come from Adventure (autoNeeded, the 24 hours).
+---------------------------------------------------------------------------
+
+UI.RULES_NAME = "GreenFangToolkit_AdventureRules"
+UI.RULE_SIZES = { 3, 4, 5, 10, 20, 40 }
+local rules
+
+function UI.rulesRows()
+    local Adv = A()
+    local need5 = Adv.autoNeeded({ size = 5 })
+    local arrow = { arrow = true }
+    local hours = math.floor(Adv.UNFINISHED_AFTER / 3600) .. "h"
+    local sizes = { { icon = "group" } }
+    for _, n in ipairs(UI.RULE_SIZES) do
+        sizes[#sizes + 1] = { text = tostring(n) }
+        sizes[#sizes + 1] = arrow
+        sizes[#sizes + 1] = { text = tostring(Adv.autoNeeded({ size = n })), color = "gold" }
+        sizes[#sizes + 1] = { gap = 10 }
+    end
+    return {
+        { { icon = "state_open", text = "招募中" }, arrow, { icon = "final", text = "定案" }, arrow, { icon = "state_final", text = "已定案", color = "gold" } },
+        { { icon = "state_final", text = "已定案" }, arrow, { icon = "person", text = "滿員" }, { text = "或", color = "muted" },
+            { icon = "group", text = "隊伍 " .. need5 .. "/5" }, { icon = "today", text = "時段內" }, arrow,
+            { icon = "state_formed", text = "成團", color = "formed" } },
+        { { icon = "state_formed", text = "成團" }, arrow, { icon = "today", text = "時段內" }, { icon = "group", text = "隊伍 " .. need5 .. "/5" },
+            { icon = "key", text = "目的地" }, { text = "或", color = "muted" }, { icon = "quest", text = "交任務" }, arrow,
+            { icon = "state_done", text = "成行", color = "good" } },
+        { { icon = "state_open", text = "招募中" }, { icon = "state_final", text = "已定案" }, arrow, { icon = "today", text = "時段過" }, arrow,
+            { icon = "state_ended", text = "過期", color = "disabled" } },
+        { { icon = "state_formed", text = "成團" }, arrow, { icon = "today", text = hours }, arrow,
+            { icon = "state_unfinished", text = "未成行", color = "warn" } },
+        { { icon = "back", text = "退回" }, { icon = "state_done" }, arrow, { icon = "state_formed" }, arrow, { icon = "state_final" }, arrow,
+            { icon = "state_open" }, { gap = 24 }, { icon = "reopen", text = "重開" } },
+        sizes,
+    }
+end
+
+function UI.openRules(owner)
+    if ns.Framework.closeMenu then ns.Framework.closeMenu() end
+    if not rules then rules = ns.Widgets.flowCard(UI.RULES_NAME, "規則") end
+    ns.Widgets.drawFlow(rules, UI.rulesRows())
+    rules:ClearAllPoints()
+    if owner then rules:SetPoint("TOPRIGHT", owner, "BOTTOMRIGHT", 0, -4) else rules:SetPoint("CENTER", UIParent, "CENTER", 0, 40) end
+    if rules.SetClampedToScreen then rules:SetClampedToScreen(true) end
+    rules:Show()
+    return rules
+end
+function UI.rules() return rules end
 
 ---------------------------------------------------------------------------
 -- Minimap: a second number for adventures (R-8.2), its own color and corner

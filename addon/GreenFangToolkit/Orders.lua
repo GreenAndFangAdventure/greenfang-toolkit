@@ -451,9 +451,10 @@ function Orders.view(w, jobs, cust, web)
     return v
 end
 
--- Every order known: { [id] = view }. Cached until the ledger changes.
+-- Every order known: { [id] = view }. Cached until the ledger (or the test
+-- orders) change.
 function Orders.all()
-    if cache.version == led.version and cache.views then return cache.views end
+    if cache.version == led.version and cache.testVersion == Orders.testVersion and cache.views then return cache.views end
     local jobsBy = {}
     for _, a in ipairs(led:authors()) do
         for _, j in ipairs(listOf(a, "J")) do
@@ -481,7 +482,9 @@ function Orders.all()
             end
         end
     end
-    cache.version, cache.views = led.version, views
+    -- GF-UI-B: test orders (local only, never in the ledger).
+    Orders.addTestViews(views)
+    cache.version, cache.testVersion, cache.views = led.version, Orders.testVersion, views
     return views
 end
 
@@ -572,9 +575,11 @@ end
 
 -- R-5.2: o = { recipe, item, skill, qty, crafter (author or "*"), mats = { [itemID] = n },
 -- fee (copper), feeQuoted (nil/0/n), quote }. Returns the id or nil, reason.
+-- GF-UI-B: an order to myself is a test order (only in the test mode).
 function Orders.place(o)
     local me = S().selfAuthor()
     if not me then return nil, "no-author" end
+    if o.crafter == me then return Orders.placeTest(o) end
     local list = myList("W")
     -- Review 7-6: declined or dropped orders are not "open".
     local open = 0
@@ -601,6 +606,7 @@ end
 -- Customer actions: "cancel" (x), "deal" (d, how), "return" (r), "unsure" (p),
 -- "got" (n more received), "paid", "lock" (crafter).
 function Orders.customer(id, action, arg)
+    if Orders.isTestId(id) then return Orders.testCustomer(id, action, arg) end
     local list = myList("W")
     local e = findIn(list, id)
     if not e then
@@ -627,6 +633,7 @@ end
 -- Crafter actions on order v (a view): "accept", "decline", "release",
 -- "delivered" (how), "mailed", "gave" (n), "close" (R-6.5), "paid".
 function Orders.crafter(v, action, arg)
+    if v.test or Orders.isTestId(v.id) then return Orders.testCrafter(v, action, arg) end
     -- Review 3-4 / R-6.6: nothing changes after the order closed.
     local current = Orders.get(v.id)
     if current and (current.state == "deal" or current.state == "cancel") then return false, "closed" end
@@ -660,6 +667,13 @@ function Orders.buttons(v, me)
     local out = {}
     local function add(b) out[#out + 1] = b end
     if v.state == "deal" or v.state == "cancel" then return out end
+    -- GF-UI-B: a test order (to myself): both sides' buttons in one row.
+    if v.test then
+        if v.state == "waiting" then add("accept"); add("cancel")
+        elseif v.state == "making" then add("deliver"); add("cancel")
+        elseif v.state == "checking" then add("deal"); add("return"); add("cancel") end
+        return out
+    end
     local isCustomer, isCrafter = v.customer == me, v.crafter == me
     if v.state == "waiting" then
         if isCustomer then add("cancel")
@@ -700,6 +714,7 @@ end
 function Orders.maintain()
     local me = S().selfAuthor()
     if not me then return end
+    Orders.cleanTest()
     local t = now()
     local views = Orders.all()
     -- Customer: lock guild orders to the earliest crafter.
@@ -764,6 +779,7 @@ function Orders.local_()
 end
 
 function Orders.toHistory(v)
+    if v.test then return end -- GF-UI-B: test orders leave no history
     local o = Orders.local_()
     local key = ns.Data.player().guid or "?"
     o.history[key] = o.history[key] or {}
@@ -1027,7 +1043,8 @@ function Orders.craftingFor(a)
     local orders, count, entries = {}, 0, {}
     local wrec, jrec = led:get(a, "W"), led:get(a, "J")
     for _, e in ipairs(wrec and Orders.decodeList(wrec.v) or {}) do
-        if validId(e.id) then
+        -- GF-UI-B: a test order is never in the ledger; never uploaded either way.
+        if validId(e.id) and not Orders.isTestId(e.id) then
             local closed = e.st == "d" or e.st == "x"
             entries[#entries + 1] = { id = e.id, w = e, closed = closed, at = closed and (e.sa or 0) or (e.cr or 0) }
         end
@@ -1035,7 +1052,7 @@ function Orders.craftingFor(a)
     local views = Orders.all()
     for _, e in ipairs(jrec and Orders.decodeList(jrec.v) or {}) do
         -- Review 5-4: a job whose order is not known any more is not uploaded.
-        if validId(e.id) and views[e.id] then
+        if validId(e.id) and views[e.id] and not views[e.id].test then
             local v = views[e.id]
             local closed = v ~= nil and (v.state == "deal" or v.state == "cancel")
             entries[#entries + 1] = { id = e.id, j = e, view = v, closed = closed,
@@ -1107,6 +1124,145 @@ function Orders.onCustom(kind, fields, _, channel)
         return "ok"
     end
     return "unknown-type"
+end
+
+---------------------------------------------------------------------------
+-- GF-UI-B: the order test mode (owner: one player tests the whole flow and
+-- every screen alone). 同步與診斷 → 測試 turns it on. While it is on, an
+-- order to myself can be placed; the same row then has both sides' buttons
+-- (接單, 已交付, 成交 / 退回, 取消). Test orders live only in
+-- GreenFangToolkitDB.orders.test on this computer: they are never written
+-- to the GFTKO ledger, so they are never sent over guild addon messages and
+-- never uploaded (character.self / member.share read the ledger only).
+-- Turning the mode off deletes them. Ids start with "t".
+---------------------------------------------------------------------------
+
+Orders.testVersion = 0
+local function testStore()
+    local o = Orders.local_()
+    if type(o.test) ~= "table" then o.test = {} end
+    local t = o.test
+    if type(t.W) ~= "table" then t.W = {} end
+    if type(t.J) ~= "table" then t.J = {} end
+    return t
+end
+local function testChanged()
+    Orders.testVersion = Orders.testVersion + 1
+    cache.version = -1
+    if Orders.onChanged then Orders.onChanged() end
+end
+
+function Orders.isTestId(id) return type(id) == "string" and id:sub(1, 1) == "t" end
+function Orders.testOn()
+    local db = ns.db
+    return type(db) == "table" and type(db.orders) == "table" and db.orders.testMode == true
+end
+function Orders.testCount()
+    local db = ns.db
+    local t = type(db) == "table" and type(db.orders) == "table" and db.orders.test
+    return type(t) == "table" and type(t.W) == "table" and #t.W or 0
+end
+
+-- Off: every test order (and its reminders and unsure marks) is deleted.
+function Orders.setTestMode(on)
+    local o = Orders.local_()
+    o.testMode = on and true or nil
+    if not on then
+        o.test = nil
+        for key in pairs(o.seen) do if Orders.isTestId(key) then o.seen[key] = nil end end
+        for id in pairs(o.unsure) do if Orders.isTestId(id) then o.unsure[id] = nil end end
+    end
+    testChanged()
+    return Orders.testOn()
+end
+
+-- Test orders left from a session that ended with the mode off are dropped at login.
+function Orders.cleanTest()
+    local db = ns.db
+    if type(db) == "table" and type(db.orders) == "table" and db.orders.testMode ~= true and db.orders.test ~= nil then
+        db.orders.test = nil
+        testChanged()
+    end
+end
+
+local testSeq = 0
+function Orders.placeTest(o)
+    if not Orders.testOn() then return nil, "self" end
+    if not o.recipe then return nil, "no-recipe" end
+    local t = now()
+    local store = testStore()
+    local ids = {}
+    for _, e in ipairs(store.W) do ids[e.id] = true end
+    local id
+    repeat
+        testSeq = testSeq + 1
+        id = "t" .. b36(S().serverNow()) .. "." .. b36(testSeq)
+    until not ids[id]
+    store.W[#store.W + 1] = {
+        id = id, src = "g", ver = Orders.ORDER_VERSION, cr = t, rc = o.recipe, it = o.item,
+        sk = o.skill, q = math.max(1, math.floor(o.qty or 1)), cf = S().selfAuthor(),
+        m = Orders.encodeMats(o.mats), fe = math.max(0, math.floor(o.fee or 0)), fq = o.feeQuoted,
+        qt = o.quote, st = "o", sa = t,
+    }
+    testChanged()
+    return id
+end
+
+function Orders.testCustomer(id, action, arg)
+    if not Orders.testOn() then return false, "unknown" end
+    local e = findIn(testStore().W, id)
+    if not e then return false, "unknown" end
+    if e.st == "x" or e.st == "d" then return false, "closed" end
+    local t = now()
+    if action == "cancel" then e.st, e.sa = "x", t
+    elseif action == "deal" then e.st, e.sa, e.ch = "d", t, arg or "manual"
+    elseif action == "return" then e.st, e.sa, e.rt = "r", t, t
+    elseif action == "unsure" then e.st, e.sa = "p", t
+    elseif action == "got" then e.gt = (e.gt or 0) + (arg or 0)
+    elseif action == "paid" then e.pd = "1"
+    else return false, "action" end
+    testChanged()
+    return true
+end
+
+function Orders.testCrafter(v, action, arg)
+    if not Orders.testOn() then return false, "unknown" end
+    local current = Orders.get(v.id)
+    if not current then return false, "unknown" end
+    if current.state == "deal" or current.state == "cancel" then return false, "closed" end
+    local list = testStore().J
+    local e = findIn(list, v.id)
+    local t = now()
+    if not e then
+        e = { id = v.id, cu = v.customer }
+        list[#list + 1] = e
+    end
+    if action == "accept" then e.st, e.ac, e.sa = "a", t, t
+    elseif action == "decline" then e.st, e.sa = "n", t
+    elseif action == "release" then e.st, e.sa = "b", t
+    elseif action == "delivered" then e.st, e.sa, e.dt, e.ch = "d", t, t, arg or "manual"
+    elseif action == "mailed" then e.st, e.sa, e.dt, e.ch = "m", t, t, "mail"
+    elseif action == "gave" then e.gv = math.max(0, (e.gv or 0) + (arg or 0)); if e.st == nil then e.st, e.ac, e.sa = "a", t, t end
+    elseif action == "undeliver" then e.st, e.sa = "a", t; e.dt = nil
+    elseif action == "paid" then e.pd = "1"
+    else return false, "action" end
+    testChanged()
+    return true
+end
+
+-- The test orders as views (marked test = true), into views.
+function Orders.addTestViews(views)
+    if not Orders.testOn() then return end
+    local me = S().selfAuthor()
+    if not me then return end
+    local store = testStore()
+    local jobs = {}
+    for _, j in ipairs(store.J) do jobs[j.id] = { [me] = j } end
+    for _, w in ipairs(store.W) do
+        local v = Orders.view(w, jobs[w.id], me)
+        v.test = true
+        views[w.id] = v
+    end
 end
 
 function Orders.resetSession()

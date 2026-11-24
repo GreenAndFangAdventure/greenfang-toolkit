@@ -131,7 +131,7 @@ test("fresh install creates schema v2 defaults", function()
     local db = GreenFangToolkitDB
     eq(db.schema, "gf.toolkit", "schema")
     eq(db.schemaVersion, 2, "schemaVersion")
-    eq(db.addonVersion, "0.13.0", "addonVersion")
+    eq(db.addonVersion, "0.14.0", "addonVersion")
     eq(db.sync.enabled, true, "sync.enabled default")
     eq(db.sync.noticeShown, false, "noticeShown before login")
     eq(#db.sync.outbox, 0, "outbox empty")
@@ -157,7 +157,7 @@ test("TOC declares the agreed names and loads every file", function()
     ok(toc:find("## Interface: 16001", 1, true), "Interface")
     ok(toc:find("## Title: 綠皮冒險工具箱", 1, true), "Title")
     ok(toc:find("## Author: 綠皮與獠牙冒險事務所", 1, true), "Author")
-    ok(toc:find("## Version: 0.13.0", 1, true), "Version")
+    ok(toc:find("## Version: 0.14.0", 1, true), "Version")
     ok(toc:find("## SavedVariables: GreenFangToolkitDB\r?\n"), "SavedVariables")
     local listed = {}
     for line in toc:gmatch("[^\r\n]+") do
@@ -429,7 +429,7 @@ test("unknown fields in an existing v2 table are preserved", function()
         sync = { enabled = false, noticeShown = true, outbox = {} },
     } })
     eq(GreenFangToolkitDB.futureModule.keep, true, "unknown field kept")
-    eq(GreenFangToolkitDB.addonVersion, "0.13.0", "addonVersion updated")
+    eq(GreenFangToolkitDB.addonVersion, "0.14.0", "addonVersion updated")
     eq(GreenFangToolkitDB.sync.enabled, true, "old off ignored (D-015)")
 end)
 
@@ -479,7 +479,7 @@ test("TSV/JSON export keep the v0.3.1 format", function()
     local s = ns.Roster.current()
     local json = ns.Export.jsonParts(s)
     eq(#json, 1, "one part")
-    ok(json[1]:find('^{"schema":"gfguildroster.report","schemaVersion":1,"addonVersion":"0.13.0"'), "json header")
+    ok(json[1]:find('^{"schema":"gfguildroster.report","schemaVersion":1,"addonVersion":"0.14.0"'), "json header")
     ok(json[1]:find('"part":1,"partCount":1', 1, true), "parts")
     ok(json[1]:find('"onlineAtCapture":true', 1, true), "member online in manual export")
     ok(not json[1]:find('"guid":', 1, true), "no guid in v1 export")
@@ -534,7 +534,8 @@ test("framework: roster is the first module; no settings page", function()
     eq(ns.Framework.get("settings"), nil, "no settings page (D-015)")
     SlashCmdList.GREENFANGTOOLKIT("")
     eq(ns.Framework.current(), "roster", "opens roster by default")
-    eq(_G.GreenFangToolkit_MainWindow.TitleText:GetText(), "綠皮冒險工具箱｜公會名冊", "title")
+    -- GF-UI-B: the guild name in the title (it left the page).
+    eq(_G.GreenFangToolkit_MainWindow.TitleText:GetText(), "綠皮冒險工具箱｜綠皮與獠牙冒險事務所", "title")
     ok(ns.Framework.panel("roster"):IsShown(), "roster panel shown")
 end)
 
@@ -762,7 +763,9 @@ test("sync status: the roster's small 「同步與診斷」 button and the windo
     SlashCmdList.GREENFANGTOOLKIT("roster")
     local ind = ns.UI.syncIndicator
     ok(ind, "button on the roster page")
-    eq(ind:GetText(), "同步與診斷", "label")
+    -- GF-UI-B: a gear and 「診斷」, 30 px.
+    ok(ind:GetText():find("診斷", 1, true), "label")
+    eq(ind._h, 30, "30 px")
     ind:GetScript("OnEnter")(ind)
     eq(GameTooltip._lines[1].text, "同步與診斷", "tooltip title")
     ind:GetScript("OnLeave")(ind)
@@ -1248,7 +1251,10 @@ test("roster window: another guild shows a message, no roster, controls disabled
     eq(ns.Roster.current(), nil, "no snapshot")
     local UI = rosterPage(ns)
     eq(UI.unavailableText(), "這個角色不在綠皮與獠牙冒險事務所，無法使用公會名冊。", "message")
-    ok(pageHas("這個角色不在綠皮與獠牙冒險事務所"), "message on the page")
+    -- GF-UI-B: an icon and 「非本會」 in the middle, no sentence.
+    eq(UI.emptyKey, "other", "other guild shown")
+    ok(pageHas("非本會"), "short name on the page")
+    ok(not pageHas("這個角色不在綠皮與獠牙冒險事務所"), "no sentence on the page")
     ok(not pageHas("測試乙-測試伺服器"), "no member rows")
     local on, off = controlsEnabled(UI)
     eq(on, 0, "none enabled"); eq(off, 3, "all disabled")
@@ -1938,7 +1944,7 @@ test("D18 roster: icon + skill points, primary then secondary, － without data"
     eq(rowTexts(peer), "Trade_Mining:300|Trade_BlackSmithing:280|Trade_Fishing:150|INV_Misc_Food_15:90|Spell_Holy_SealOfSacrifice:75",
         "peer: every profession fits as icon + points")
     eq(peer.profSlots[3].label._color[1], 0.72, "secondary points in the secondary colour")
-    eq(peer._h, 23, "row height unchanged")
+    eq(peer._h, 36, "GF-UI-B: 36 px rows")
     eq(rowTexts(rowFor(ns, "測試丙-測試伺服器")), "Trade_Tailoring|Trade_Engraving", "names only: icons without points")
     eq(rowTexts(rowFor(ns, "測試丁-測試伺服器")), "－", "no data: a faint dash")
     eq(rowFor(ns, "測試丁-測試伺服器").profSlots[1].label._color[1], 0.42, "the dash is faint")
@@ -1972,7 +1978,8 @@ test("D18 roster: a reused row measures its new text in full (the 0.9.2 「剝�
     ns.UI.fillRow(row, members["測試丙-測試伺服器"])
     eq(rowTexts(row), "裁縫|附魔", "no icon in the client: the name instead")
     ns.UI.fillRow(row, members[PEER])
-    eq(rowTexts(row), "採礦 300|鍛造 280|釣魚 150|烹飪 90|急救 75", "no icon: name and points")
+    -- GF-UI-B: 16 px text: four fit, 急救 is left to the tooltip.
+    eq(rowTexts(row), "採礦 300|鍛造 280|釣魚 150|烹飪 90", "no icon: name and points")
     for k, s in ipairs(row.profSlots) do
         ok(not s.label:IsTruncated(), "slot " .. k .. " not cut: " .. s.label:GetText())
     end
@@ -1988,7 +1995,7 @@ test("D18 roster: secondary professions only while they fit; hidden primaries ar
     local member
     for _, m in ipairs(ns.Roster.current().members) do if m.name == PEER then member = m end end
     local width = peer.profW
-    peer.profW = 100 -- 2 icons with 3 digits fit (34 + 8 + 34), a third does not
+    peer.profW = 120 -- GF-UI-B: 2 icons with 3 digits fit (54 + 8 + 54), a third does not
     ns.UI.fillRow(peer, member)
     eq(rowTexts(peer), "Trade_Mining:300|Trade_BlackSmithing:280", "secondaries left to the tooltip, not counted")
     sendFrom(ns, PEER, peerData({ professions = {
@@ -2026,6 +2033,9 @@ test("D8 roster: own row only gets secure buttons; none for others; hidden when 
     local ns = wow.login(ADDON_DIR)
     sendFrom(ns, PEER, peerData())
     ns.Framework.open("roster")
+    -- GF-UI-B: 36 px rows; a list frame of the mock's 140 px holds only 3 of them.
+    wow.state.minimapSize = 400
+    ns.UI.refresh(true)
     local own = rowFor(ns, "測試甲-測試伺服器")
     local shown = ns.Professions.shown("roster")
     -- D18: all five fit as icons; 釣魚 has no window, so four buttons.
@@ -2597,7 +2607,7 @@ test("D10 recipe page: tabs per profession, rows, filter by member, empty text",
         for _, t in ipairs(wow.allTexts()) do list[#list + 1] = t end
         return table.concat(list, "\n")
     end
-    ok(has(texts(), "還沒有人分享配方"), "empty text")
+    ok(has(texts(), "沒有配方"), "empty text (GF-UI-B: no sentence)")
     local t = wow.state.now - 600
     shareFrom(ns, PEER, (rMsg(ns, A_PEER, 164, t, { 2660, 2661 })))
     shareFrom(ns, PEER, (rMsg(ns, A_THIRD, 197, t, { 3115 })))
@@ -2668,7 +2678,7 @@ test("D10 diag window: sections, sharing stats, export moved here, /gftk sync st
     ok(has(all, "GF Sync 只是補充來源"), "site note")
     ok(has(all, "記錄 ") and has(all, "這次登入：送出"), "sharing statistics")
     ok(has(all, "掃描時間："), "roster scan")
-    ok(has(all, "工具箱 0.13.0"), "version")
+    ok(has(all, "工具箱 0.14.0"), "version")
     wow.click(ns.Diag.exportJSONButton)
     ok(_G.GreenFangToolkit_ExportWindow and _G.GreenFangToolkit_ExportWindow:IsShown(), "export from the window")
     GreenFangToolkitDB.settings.minimapAngle = 10
@@ -3441,11 +3451,12 @@ test("D14 roster list: only rows in view have frames; scrolling refills them", f
     for _, r in ipairs(rows) do if r:IsShown() then shown = shown + 1 end end
     eq(shown, count, "the view is full")
     local scroll = ns.UI.scrollFrame()
-    scroll:SetVerticalScroll(149 * 23)
+    local H = ns.PAGE_ROW -- GF-UI-B: 36 (was 23)
+    scroll:SetVerticalScroll(149 * H)
     local top
     for _, r in ipairs(rows) do if r:IsShown() and (not top or r.index < top.index) then top = r end end
     eq(top.index, 150, "first row in view is member 150 of the list")
-    eq(top._points[1][5], -149 * 23, "placed where that member is")
+    eq(top._points[1][5], -149 * H, "placed where that member is")
     ok(top.memberName and top.cells[1]:GetText() == top.memberName, "filled with that member")
     eq(#ns.UI.rows(), #rows, "no new frames while scrolling")
     scroll:SetVerticalScroll(0)
@@ -3767,23 +3778,24 @@ local function tipText()
     return table.concat(t, "\n")
 end
 
-test("D19 roster icons: 20 px, full colour for names only, row height kept", function()
+test("D19 roster icons: 28 px (GF-UI-B), full colour for names only, 36 px rows", function()
     wow.reset({ player = crafter() })
     local ns = wow.login(ADDON_DIR)
     ns.Framework.open("roster")
     local named = rowFor(ns, "測試丙-測試伺服器")
     local s = named.profSlots[1]
-    eq(s.icon._w, 20, "icon 20 px wide")
-    eq(s.icon._h, 20, "icon 20 px high")
+    eq(s.icon._w, 28, "icon 28 px wide")
+    eq(s.icon._h, 28, "icon 28 px high")
     eq(s.icon._alpha, 1, "names only: full colour")
     eq(named.profSlots[2].icon._alpha, 1, "second icon full colour too")
-    eq(named._h, 23, "row height unchanged")
+    eq(named._h, 36, "36 px rows")
 end)
 
 test("D19 roster tooltips: one profession over its icon, short member tooltip elsewhere", function()
     local ns = shareLogin({ player = crafter() })
     sendFrom(ns, PEER, peerData())
     shareFrom(ns, PEER, (rMsg(ns, A_PEER, 164, wow.state.now - 7200, { 2660, 2661 })))
+    wow.state.minimapSize = 400 -- GF-UI-B: room for the own row (36 px rows)
     ns.Framework.open("roster")
     local peer = rowFor(ns, PEER)
     local smith = peer.profSlots[2]
@@ -3811,15 +3823,13 @@ test("D19 roster tooltips: one profession over its icon, short member tooltip el
     ok(tip:find(" / 75", 1, true), "own button: rank / max")
 end)
 
-test("D19 roster: click on an icon filters by that profession; again clears it", function()
+test("D19 roster: the 專業 filter keeps members of that profession (GF-UI-B: the icon opens recipes)", function()
     local ns = shareLogin({ player = crafter() })
     sendFrom(ns, PEER, peerData())
     ns.Framework.open("roster")
     local peer = rowFor(ns, PEER)
-    local fishing = peer.profSlots[3]
-    local real = ns.UI.cursorX
-    ns.UI.cursorX = function() return fishing.x0 + 2 end
-    peer._scripts.OnMouseUp(peer, "LeftButton")
+    -- GF-UI-B (owner): filtering is on the filter bar only; a click on an icon opens that member's recipes.
+    ns.UI.skillChoice.choose(356)
     eq(ns.UI.filters.skill, 356, "fishing filter")
     ok(ns.UI.skillChoice:GetText():find("釣魚", 1, true), "the profession button shows it")
     ok(ns.Framework.isModuleShown("roster"), "stays on the roster")
@@ -3827,10 +3837,8 @@ test("D19 roster: click on an icon filters by that profession; again clears it",
     for _, row in ipairs(ns.UI.rows()) do if row:IsShown() then names[#names + 1] = row.memberName end end
     table.sort(names)
     eq(table.concat(names, ","), "測試乙-測試伺服器,測試甲-測試伺服器", "only members who fish")
-    peer = rowFor(ns, PEER)
-    peer._scripts.OnMouseUp(peer, "LeftButton")
-    eq(ns.UI.filters.skill, nil, "same icon again: cleared")
-    ns.UI.cursorX = real
+    ns.UI.skillChoice.choose(nil)
+    eq(ns.UI.filters.skill, nil, "全部專業: cleared")
 end)
 
 test("D19 roster filters: profession (incl. secondary), class, online, minimum level, clear", function()
@@ -3885,7 +3893,8 @@ test("D19 roster page text: footer is just the count, header time without second
     local ns = wow.login(ADDON_DIR)
     ns.Framework.open("roster")
     local texts = table.concat(wow.allTexts(), "\n")
-    ok(texts:find("顯示 4 / 4 位", 1, true), "count")
+    -- GF-UI-B: the count is 「4/4」 on the tool bar; the scan time only in 同步與診斷.
+    eq(ns.UI.countText:GetText(), "4/4", "count")
     ok(not texts:find("點欄位標題排序", 1, true), "no sort hint")
     ok(not texts:find("點成員看他的配方", 1, true), "no recipe hint")
     local s = ns.Roster.current()
@@ -3893,8 +3902,8 @@ test("D19 roster page text: footer is just the count, header time without second
     eq(ns.UI.shortTime(s), "2026-11-20 21:05", "no seconds")
     ns.UI.refresh(false)
     texts = table.concat(wow.allTexts(), "\n")
-    ok(texts:find("2026-11-20 21:05 更新", 1, true), "header uses it")
-    ok(not texts:find("21:05:33", 1, true), "seconds gone")
+    ok(not texts:find("2026-11-20 21:05", 1, true), "no scan time on the page")
+    ok(ns.Diag.rosterText():find("2026-11-20 21:05", 1, true), "it is in 同步與診斷")
 end)
 
 test("D19 player text: no hints or technical lines on the pages", function()
@@ -4235,22 +4244,23 @@ end
 test("D22 recipe 專業: all by default, tick several, 全選 / 全不選, button summary, count", function()
     local ns = multiPage()
     local b = ns.Recipes.skillChoice
-    eq(b:GetText(), "全部專業 ▼", "all ticked at first")
+    eq(b:GetText(), "全部專業", "all ticked at first (GF-UI-B: the arrow is a texture)")
+    ok(b.arrow and b.arrow._texture, "arrow texture")
     eq(recipeIDs(ns), "818,2538,2540,2657,2659,3275", "every profession in one list")
     ok(table.concat(wow.allTexts(), "\n"):find("6 個配方", 1, true), "count")
     b.toggle(186)
-    eq(b:GetText(), "2 個專業 ▼", "two left")
+    eq(b:GetText(), "2 個專業", "two left")
     eq(recipeIDs(ns), "818,2538,2540,3275", "smelting unticked: gone")
     b.toggle(129)
-    eq(b:GetText(), "烹飪 ▼", "one left: its name")
+    eq(b:GetText(), "烹飪", "one left: its name")
     eq(recipeIDs(ns), "818,2538,2540", "cooking only")
     ok(table.concat(wow.allTexts(), "\n"):find("3 個配方", 1, true), "count follows")
     b.selectNone()
-    eq(b:GetText(), "沒有選專業 ▼", "none")
+    eq(b:GetText(), "未選", "none")
     eq(recipeIDs(ns), "", "nothing listed")
-    ok(table.concat(wow.allTexts(), "\n"):find("沒有選專業。", 1, true), "says so")
+    ok(table.concat(wow.allTexts(), "\n"):find("未選專業", 1, true), "says so (no sentence)")
     b.toggle(129); b.toggle(185); b.toggle(186)
-    eq(b:GetText(), "全部專業 ▼", "all ticked again = 全部專業")
+    eq(b:GetText(), "全部專業", "all ticked again = 全部專業")
     eq(b.selected, nil, "stored as everything (a new profession is included)")
     b.selectNone(); b.selectAll()
     eq(recipeIDs(ns), "818,2538,2540,2657,2659,3275", "全選")
@@ -4275,15 +4285,18 @@ test("D22 recipe 專業 list: check boxes with icons, 全選 and 全不選 first
     end
     eq(table.concat(items, "|"), "全選|全不選|採礦[x]+icon|急救[x]+icon|烹飪[x]+icon", "entries (primary first)")
     eq(b.menu.items[4].icon._texture, "Interface\\Icons\\Spell_Holy_SealOfSacrifice", "first aid icon")
-    eq(b.menu.items[3].check._texture, "Interface\\Buttons\\UI-CheckBox-Check", "check mark")
+    -- GF-UI-B: the drop-down check sheet; ticked and empty boxes are both drawn.
+    eq(b.menu.items[3].check._texture, "Interface\\Common\\UI-DropDownRadioChecks", "check mark")
+    eq(b.menu.items[3].check._texCoord[1], 0, "ticked box")
     wow.click(b.menu.items[5]) -- 烹飪
     ok(b.menu:IsShown(), "still open: tick several")
-    ok(not b.menu.items[5].check:IsShown(), "unticked")
-    eq(b:GetText(), "2 個專業 ▼", "button follows")
+    ok(b.menu.items[5].check:IsShown() and b.menu.items[5].check._texCoord[1] == 0.5, "unticked: the empty box")
+    eq(b.menu.items[5].checked, false, "unticked")
+    eq(b:GetText(), "2 個專業", "button follows")
     wow.click(b.menu.items[2]) -- 全不選
-    eq(b:GetText(), "沒有選專業 ▼", "全不選")
+    eq(b:GetText(), "未選", "全不選")
     wow.click(b.menu.items[1]) -- 全選
-    eq(b:GetText(), "全部專業 ▼", "全選")
+    eq(b:GetText(), "全部專業", "全選")
     wow.click(b)
     ok(not b.menu:IsShown(), "button again: closed")
 end)
@@ -4291,15 +4304,15 @@ end)
 test("D22 recipe 會做的人: 我 and 別人 as two check boxes", function()
     local ns = multiPage()
     local w = ns.Recipes.whoChoice
-    eq(w:GetText(), "所有人 ▼", "both at first")
+    eq(w:GetText(), "所有人", "both at first")
     w.toggle("others")
-    eq(w:GetText(), "只看我的 ▼", "only me")
+    eq(w:GetText(), "我的", "only me")
     eq(recipeIDs(ns), "818,2538,2540", "my recipes")
     w.toggle("me"); w.toggle("others")
-    eq(w:GetText(), "只看別人的 ▼", "only others")
+    eq(w:GetText(), "別人的", "only others")
     eq(recipeIDs(ns), "2538,2657,2659,3275", "the others' recipes")
     w.toggle("others")
-    eq(w:GetText(), "沒有選 ▼", "neither")
+    eq(w:GetText(), "未選", "neither")
     eq(recipeIDs(ns), "", "nothing")
     w.selectAll()
     eq(recipeIDs(ns), "818,2538,2540,2657,2659,3275", "everyone")
@@ -4613,6 +4626,12 @@ assert(loadfile(ROOT .. "/tests/addon/adventure_ux_tests.lua"))()({ test = test,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 -- GF-002-H: slots, 定案, 成團 / 成行, the completion log, the calendar (tests/addon/adventure_slots_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/adventure_slots_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-UI-B: batch 1 of the UI review, the roster click, the order test mode (tests/addon/uib_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/uib_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-002-I: §17 simpler states, step back, worker tickets close, the badge and its checklist, data-driven destinations (tests/addon/adventure_simplify_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/adventure_simplify_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------

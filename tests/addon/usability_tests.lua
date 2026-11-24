@@ -199,7 +199,7 @@ return function(T)
         ns.Adventure.pendingInvites = function() return { "x" } end
         ns.AdventureUI.refresh()
         eq(ns.AdventureUI.nextInvite._shown, true, "shown while names wait")
-        eq(ns.AdventureUI.nextInvite.label._text, "邀請下一位", "with its name")
+        eq(ns.AdventureUI.nextInvite.label._text, "下一位", "with its name (GF-UI-A §2.4: 2-4 characters)")
         ns.Adventure.pendingInvites = real
         ns.AdventureUI.refresh()
         eq(ns.AdventureUI.nextInvite._shown, false, "hidden again")
