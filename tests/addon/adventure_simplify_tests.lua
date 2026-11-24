@@ -254,7 +254,7 @@ return function(T)
         Adv.maintain()
         eq(mineT(ns, id).st .. ":" .. mineT(ns, id).rs, "x:time", "closed by time")
         ns.Framework.open("adventure")
-        U.refresh()
+        U.setTab("ended") -- GF-002-J (R-17.23): ended tickets are on 已結束
         local row
         for _, r in ipairs(U.rowFrames()) do if r:IsShown() and r.view and r.view.id == id then row = r end end
         ok(row, "still listed")
@@ -379,9 +379,9 @@ return function(T)
         eq(wd.ac .. ":" .. tostring(wd.wr), "wd:x", "withdrawn, reason expired")
         local att = Adv.attention(Adv.get("abbb.1"), B, ns.Share.serverNow())
         eq(att and att.code, "worker-gone", "the leader is told")
-        -- My row: grey, 已結案, 重開.
+        -- My row: grey, 已結案, 重開 (GF-002-J: on 已結束).
         ns.Framework.open("adventure")
-        U.refresh()
+        U.setTab("ended")
         local row
         for _, r in ipairs(U.rowFrames()) do if r:IsShown() and r.mine then row = r end end
         eq(plain(row.badge.text._text), "已結案", "the badge"); eq(row.buttons[1].action, "reopen-worker", "重開")
@@ -490,7 +490,7 @@ return function(T)
         -- No two parts overlap; all inside.
         local parts = {}
         for _, o in ipairs(wow.allObjects()) do
-            if o._parent == f and o._shown and o._points and o._points[1] and o._points[1][2] == f then
+            if o._parent == f and o._shown and o._points and o._points[1] and o._points[1][2] == f and o._points[1][1] == "TOPLEFT" then
                 local p = o._points[1]
                 local w, h = o._w or 0, o._h or 0
                 if o._kind == "FontString" then w, h = wow.textWidth(o._text, o._font), 16 end
@@ -708,6 +708,7 @@ return function(T)
         U.openTicket()
         U.pickQuests(_G[U.TICKET_NAME].pickQuest)
         local qp = U.questPickerFrame()
+        for _, z in ipairs(qp.zoneRows) do if z:IsShown() and z.zone == "貧瘠之地" then wow.click(z) end end -- GF-002-J (R-17.20): the zone first
         local r = qp.rows[1]
         wow.click(r)
         ok(r.pick.on and r.pick.hl._texture:find("UI-QuestLogTitleHighlight", 1, true) and r.pick.bar._shown, "row selection")

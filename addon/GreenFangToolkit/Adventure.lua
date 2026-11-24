@@ -311,6 +311,46 @@ function Adv.decodeQuestNames(s)
     return out
 end
 
+-- GF-002-J (R-17.20 / R-17.21): zone names on tickets (zn) and worker tickets (zs, qz):
+-- in-game only, never uploaded; ";" joins a list (zone names never carry one).
+function Adv.cleanZone(z)
+    z = Adv.cleanNote(z):gsub(";", " ")
+    return z ~= "" and z or nil
+end
+function Adv.encodeZones(list)
+    local out, seen = {}, {}
+    for _, z in ipairs(list or {}) do
+        z = Adv.cleanZone(z)
+        if z and not seen[z] then seen[z] = true; out[#out + 1] = z end
+    end
+    return #out > 0 and table.concat(out, ";") or nil
+end
+function Adv.decodeZones(s)
+    local out = {}
+    for z in str(s):gmatch("[^;]+") do out[#out + 1] = z end
+    return out
+end
+-- The zones of these quests in my log (R-17.21: what a worker ticket's quests are about).
+function Adv.questZones(qs, log)
+    local out, seen = {}, {}
+    for _, q in ipairs(qs or {}) do
+        local info = log and log[tonumber(q) or q]
+        local z = info and Adv.cleanZone(info.zone)
+        if z and not seen[z] then seen[z] = true; out[#out + 1] = z end
+    end
+    return out
+end
+-- The group / elite quests among these (R-17.22: they rank first): "216.217".
+function Adv.encodeGroupQuests(qs, log)
+    local out = {}
+    for _, q in ipairs(qs or {}) do
+        local id = tonumber(q)
+        local info = log and id and log[id]
+        if info and Adv.isGroupQuest(id, info) then out[#out + 1] = tostring(id) end
+    end
+    return #out > 0 and table.concat(out, ".") or nil
+end
+
 -- R-10.2: one short line: no control characters or line breaks, at most 40 characters.
 function Adv.cleanNote(s)
     -- Explicit byte tests (as Share.lua): control bytes 0-31 and 127 become spaces.
@@ -415,8 +455,11 @@ function Adv.view(t, leader, actions, opts)
         note = t.nt, mode = t.md or "a", state = "open", members = {}, waitlist = {}, pending = {}, invited = {},
         kicked = {}, level = t.lv, leaderRole = t.lr, edited = t.ed, slots = slots, slotById = byId, workerGone = {},
         questNames = Adv.decodeQuestNames(t.qn),
+        -- GF-002-J (R-17.20, R-17.22): the zone of a quest ticket; its group / elite quests.
+        zone = (t.zn and t.zn ~= "") and t.zn or nil, groupQuests = {},
         -- GF-002-G: roles / size as the leader set them (the editor starts from these).
         roles = t.ds ~= "" and { t = t.rt or 1, h = t.rh or 1, d = t.rd or 3 } or nil, size = t.sz }
+    for _, q in ipairs(splitDots(t.qe)) do v.groupQuests[tonumber(q) or q] = true end
     local cap = Adv.capacity(t)
     v.capacity = {}
     for k, n in pairs(cap) do v.capacity[k] = n end
@@ -739,9 +782,13 @@ function Adv.workers()
             for _, d in ipairs(splitDots(e.ds)) do ds[d] = true; dl[#dl + 1] = d end
             for _, q in ipairs(splitDots(e.qs)) do qs[tonumber(q) or q] = true; ql[#ql + 1] = tonumber(q) or q end
             -- GF-002-I (R-17.17): dungeonList / questList keep the order for the rows.
+            -- GF-002-J (R-17.21): whole zones (zs) and the zones of the chosen quests (qz).
+            local zl, zones, whole = Adv.decodeZones(e.zs), {}, {}
+            for _, z in ipairs(zl) do zones[z] = true; whole[z] = true end
+            for _, z in ipairs(Adv.decodeZones(e.qz)) do zones[z] = true end
             out[a] = { entry = e, slots = Adv.workerSlots(e), dungeons = ds, questNames = Adv.decodeQuestNames(e.qn), questCount = e.qc, quests = qs, allQuests = e.qa == "1",
                 main = e.rm, alt = e.ra ~= "" and e.ra or nil, online = Adv.isOnline(a), dungeonList = dl, questList = ql,
-                expires = e.ex }
+                expires = e.ex, zoneList = zl, zones = zones, wholeZones = whole }
         end
     end
     return out
@@ -788,18 +835,37 @@ end
 
 -- R-6.1: destination, role, level, time. w = a worker (Adv.workers()[a]); level = the worker's level.
 -- questLog: the worker's own quest set when they chose "all of my log" (nil for others: unknown, no match).
-function Adv.matches(v, w, level, questLog)
-    if v.closed or v.departed then return false, "closed" end
-    -- Destination.
-    local dest = false
-    if v.dungeon and w.dungeons[v.dungeon] then dest = true end
-    if not dest then
-        for _, q in ipairs(v.quests) do
-            local id = tonumber(q) or q
-            if w.quests[id] or (w.allQuests and questLog and questLog[id]) then dest = true; break end
+-- GF-002-J (R-17.21): does the worker share this quest? Picked, all of the log, or a
+-- whole zone of it (questLog: the worker's own log; nil for others).
+function Adv.shares(w, id, questLog)
+    if w.quests[id] then return true end
+    local info = questLog and questLog[id]
+    if not info then return false end
+    if w.allQuests then return true end
+    local z = Adv.cleanZone(info.zone)
+    return z ~= nil and w.wholeZones ~= nil and w.wholeZones[z] == true
+end
+
+-- R-17.22: how well a worker fits a ticket: 3 a shared group / elite quest, 2 a shared
+-- quest, 1 the same zone (or the dungeon), 0 nothing.
+function Adv.matchScore(v, w, questLog)
+    local score = 0
+    if v.dungeon and w.dungeons[v.dungeon] then score = 1 end
+    if v.zone and w.zones and w.zones[v.zone] then score = 1 end
+    for _, q in ipairs(v.quests) do
+        local id = tonumber(q) or q
+        if Adv.shares(w, id, questLog) then
+            score = math.max(score, (v.groupQuests and v.groupQuests[id]) and 3 or 2)
         end
     end
-    if not dest then return false, "dest" end
+    return score
+end
+
+function Adv.matches(v, w, level, questLog)
+    if v.closed or v.departed then return false, "closed" end
+    -- Destination. GF-002-J (R-17.22): the same zone matches too.
+    local score = Adv.matchScore(v, w, questLog)
+    if score == 0 then return false, "dest" end
     -- Role.
     if v.seats.any then
         if v.seats.any <= 0 then return false, "full" end
@@ -814,8 +880,7 @@ function Adv.matches(v, w, level, questLog)
         local anyFits, anyChecked = false, false
         for _, q in ipairs(v.quests) do
             local id = tonumber(q) or q
-            local shared = w.quests[id] or (w.allQuests and questLog and questLog[id])
-            if shared then
+            if Adv.shares(w, id, questLog) then
                 local ql = v.questLevels[id]
                 if ql == nil or ql == "s" or level >= ql - Adv.QUEST_SLACK then anyFits = true end
                 anyChecked = true
@@ -824,7 +889,7 @@ function Adv.matches(v, w, level, questLog)
         if anyChecked and not anyFits then return false, "level" end
     end
     if not Adv.timeOverlap(v, w.slots) then return false, "time" end
-    return true
+    return true, nil, score
 end
 
 ---------------------------------------------------------------------------
@@ -928,7 +993,7 @@ function Adv.open(o)
     local open = 0
     for _, e in ipairs(mine) do if e.st ~= "x" and e.st ~= "c" then open = open + 1 end end
     if open >= Adv.MAX_TICKETS then return nil, "too-many" end
-    if not o.dungeon and not (o.quests and #o.quests > 0) then return nil, "no-destination" end
+    if not o.dungeon and not (o.quests and #o.quests > 0) and not Adv.cleanZone(o.zone) then return nil, "no-destination" end
     local t = now()
     local slots, why = Adv.cleanSlots(o, t)
     if not slots then return nil, why end
@@ -939,6 +1004,7 @@ function Adv.open(o)
     local e = {
         id = Adv.newId(), src = "g", ver = Adv.VERSION, cr = t, ds = o.dungeon or "", qs = table.concat(qs, "."),
         ql = Adv.encodeQuestLevels(qs, Adv.questLog()), qn = Adv.encodeQuestNames(qs, Adv.questLog()),
+        zn = (not o.dungeon) and Adv.cleanZone(o.zone) or nil, qe = Adv.encodeGroupQuests(qs, Adv.questLog()),
         tm = tm, s = s, e = fin, ts = Adv.encodeTimes(slots),
         rt = o.roles and o.roles.t, rh = o.roles and o.roles.h, rd = o.roles and o.roles.d,
         sz = (not o.dungeon) and (o.size or 5) or nil, tg = o.tags or 0, nt = Adv.cleanNote(o.note),
@@ -1047,7 +1113,7 @@ function Adv.editTicket(id, o)
     local e = findIn(mine, id)
     if not e then return false, "unknown" end
     if e.st == "x" or e.st == "c" then return false, "closed" end
-    if not o.dungeon and not (o.quests and #o.quests > 0) then return false, "no-destination" end
+    if not o.dungeon and not (o.quests and #o.quests > 0) and not Adv.cleanZone(o.zone) then return false, "no-destination" end
     local t = now()
     local slots, why = Adv.cleanSlots(o, t, entrySlots(e))
     if not slots then return false, why end
@@ -1056,6 +1122,8 @@ function Adv.editTicket(id, o)
     e.ds, e.qs = o.dungeon or "", table.concat(qs, ".")
     e.ql = Adv.encodeQuestLevels(qs, Adv.questLog()) or e.ql
     e.qn = Adv.encodeQuestNames(qs, Adv.questLog()) or (#qs > 0 and e.qn or nil)
+    e.zn = (not o.dungeon) and Adv.cleanZone(o.zone) or nil
+    e.qe = Adv.encodeGroupQuests(qs, Adv.questLog()) or (#qs > 0 and e.qe or nil)
     local keep = false
     for _, sl in ipairs(slots) do if sl.id == e.fx then keep = true end end
     if not keep then e.fx, e.fa = nil, nil end
@@ -1138,6 +1206,8 @@ function Adv.setWorker(o)
     local e = { id = "w", cr = t, ds = table.concat(o.dungeons or {}, "."), qs = table.concat(qs, "."),
         qa = o.allQuests and "1" or nil, rm = o.main or "d", ra = o.alt or "", sl = Adv.encodeSlots(legacy),
         qn = Adv.encodeQuestNames(qs, Adv.questLog()), qc = o.allQuests and Adv.questCount() or nil,
+        -- GF-002-J (R-17.21): whole zones, and the zones of the chosen quests (in-game only).
+        zs = Adv.encodeZones(o.zones), qz = Adv.encodeZones(Adv.questZones(qs, Adv.questLog())),
         sv = Adv.encodeTimes(slots), ex = t + (o.hours or 24) * 3600, st = "o", sa = t }
     return save("W", { e })
 end
@@ -1198,6 +1268,7 @@ function Adv.myWorker()
     for _, q in ipairs(splitDots(e.qs)) do qs[#qs + 1] = tonumber(q) or q end
     return { dungeons = ds, quests = qs, allQuests = e.qa == "1", main = e.rm, alt = e.ra ~= "" and e.ra or nil,
         slots = Adv.workerSlots(e), expires = e.ex, questNames = Adv.decodeQuestNames(e.qn), questCount = e.qc,
+        zones = Adv.decodeZones(e.zs), -- GF-002-J (R-17.21): whole zones
         -- GF-002-I (R-17.10): 已結案, kept 1 day for 重開 (nobody else sees it).
         closed = e.st == "x" or nil, closedAt = e.st == "x" and e.sa or nil }
 end
@@ -1361,6 +1432,54 @@ function Adv.forget(id)
     return save("T", mine)
 end
 
+-- GF-002-J (owner 0.14.0): delete one of my tickets. Ended ones (and open ones nobody
+-- joined) leave my record at once; an open ticket with people on it is cancelled
+-- first (they see it cancelled for a day) and hidden from my page. Its log record goes too.
+function Adv.deleteTicket(id)
+    local mine = listOf(me(), "T")
+    local e, i = findIn(mine, id)
+    if not e then return false, "unknown" end
+    local v = Adv.get(id)
+    local people = v and (#v.members + #v.waitlist + #v.pending + #v.invited) > 0
+    Adv.removeLog(id)
+    Adv.local_().reopen[id] = nil
+    if v and not v.closed and people then
+        e.st, e.sa, e.rs = "x", now(), "manual"
+        Adv.local_().deleted[id] = now()
+        return save("T", mine)
+    end
+    table.remove(mine, i)
+    return save("T", mine)
+end
+
+-- GF-002-J (owner: test records): clear every ended ticket of mine (expired, unfinished,
+-- cancelled, done), my signups on ended tickets, my closed worker ticket and my whole
+-- completion log. They are gone from my next upload. Returns tickets, log records removed.
+function Adv.clearEnded()
+    local my = me()
+    if not my then return 0, 0 end
+    local views = Adv.all()
+    local mine, kept, n = listOf(my, "T"), {}, 0
+    for _, e in ipairs(mine) do
+        local v = views[e.id]
+        if e.st == "x" or e.st == "c" or (v and v.closed) then n = n + 1; Adv.local_().reopen[e.id] = nil
+        else kept[#kept + 1] = e end
+    end
+    if n > 0 then save("T", kept) end
+    local acts, keptA = listOf(my, "A"), {}
+    for _, e in ipairs(acts) do
+        local v = views[e.id]
+        if v and not v.closed then keptA[#keptA + 1] = e end
+    end
+    if #keptA ~= #acts then save("A", keptA) end
+    local w = listOf(my, "W")[1]
+    if w and w.st == "x" then save("W", {}) end
+    local logN = #Adv.myLog()
+    Adv.local_().log[my] = {}
+    for id in pairs(Adv.local_().deleted) do Adv.local_().deleted[id] = nil end
+    return n, logN
+end
+
 -- Another computer of mine wrote an older copy: merge by id (later sa / at wins).
 function Adv.mergeSelf(g, v)
     if g ~= "T" and g ~= "A" then return false end
@@ -1388,7 +1507,7 @@ function Adv.local_()
     local db = ns.db
     if type(db.adventure) ~= "table" then db.adventure = {} end
     local o = db.adventure
-    for _, k in ipairs({ "seen", "reopen", "log" }) do if type(o[k]) ~= "table" then o[k] = {} end end
+    for _, k in ipairs({ "seen", "reopen", "log", "deleted" }) do if type(o[k]) ~= "table" then o[k] = {} end end
     return o
 end
 
@@ -1494,6 +1613,9 @@ function Adv.maintain()
         end
     end
     if me() then Adv.local_().log[me()] = Adv.pruneLog(Adv.myLog(), t) end
+    -- GF-002-J: tickets I deleted that have left the ledger.
+    local deleted = Adv.local_().deleted
+    for id in pairs(deleted) do if not views[id] then deleted[id] = nil end end
     local seen = Adv.local_().seen
     for key in pairs(seen) do
         local id = key:match("^(.-)|")
@@ -1655,6 +1777,7 @@ function Adv.rowsFor()
     local myWorker = workers[my]
     local log = Adv.questLog()
     local tickets, count = {}, 0
+    local deleted = Adv.local_().deleted
     for _, v in pairs(Adv.all()) do
         local hide = v.closed and v.closedAt and t - v.closedAt >= Adv.KEEP_CLOSED
         if not hide then
@@ -1663,7 +1786,9 @@ function Adv.rowsFor()
             if att then count = count + 1 end
             local roleHit = myWorker and not v.closed and v.leader ~= my
                 and (((v.seats[myWorker.main] or 0) > 0) or ((myWorker.alt and (v.seats[myWorker.alt] or 0) > 0) or false))
-            tickets[#tickets + 1] = { view = v, attention = att, roleHit = roleHit }
+            -- GF-002-J (R-17.22): a shared group / elite quest, then a shared quest, then the zone.
+            local score = (myWorker and not v.closed and v.leader ~= my) and Adv.matchScore(v, myWorker, log) or 0
+            if not deleted[v.id] then tickets[#tickets + 1] = { view = v, attention = att, roleHit = roleHit, score = score } end
         end
     end
     -- My reopen prompts of tickets that already left the list count too.
@@ -1673,6 +1798,7 @@ function Adv.rowsFor()
     table.sort(tickets, function(x, y)
         local ax, ay = x.attention and 0 or 1, y.attention and 0 or 1
         if ax ~= ay then return ax < ay end
+        if (x.score or 0) ~= (y.score or 0) then return (x.score or 0) > (y.score or 0) end
         local rx, ry = x.roleHit and 0 or 1, y.roleHit and 0 or 1 -- R-6.2: my role first
         if rx ~= ry then return rx < ry end
         local cx, cy = x.view.closed and 1 or 0, y.view.closed and 1 or 0
@@ -1692,11 +1818,12 @@ function Adv.rowsFor()
                     for _, list in ipairs({ v.members, v.waitlist, v.pending, v.invited }) do
                         for _, x in ipairs(list) do if x.a == a then inside = true end end
                     end
-                    if not inside and Adv.matches(v, w, m and m.level) then
+                    local hit, _, score = Adv.matches(v, w, m and m.level)
+                    if not inside and hit then
                         local key = "m" .. v.id .. "|" .. a
                         local att = not seen[key] and { key = key, decide = false, code = "worker" } or nil
                         if att then count = count + 1 end
-                        matched[#matched + 1] = { ticket = v, worker = a, w = w, attention = att }
+                        matched[#matched + 1] = { ticket = v, worker = a, w = w, attention = att, score = score or 0 }
                     end
                 end
             end
@@ -1704,6 +1831,7 @@ function Adv.rowsFor()
     end
     table.sort(matched, function(x, y)
         if x.w.online ~= y.w.online then return x.w.online end -- R-5.5: offline workers after
+        if x.score ~= y.score then return x.score > y.score end -- R-17.22
         if x.ticket.id ~= y.ticket.id then return x.ticket.id < y.ticket.id end
         return guidLess(x.worker, y.worker)
     end)

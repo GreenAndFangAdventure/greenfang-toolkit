@@ -17,16 +17,31 @@ ns.GameIcons = G
 local ROLES_FILE = "Interface\\LFGFrame\\UI-LFG-ICON-ROLES"
 -- Pixel boxes in the 64x64 role sheet (the same as the game's GetTexCoordsForRole).
 local ROLE_BOX = { t = { 0, 19, 22, 41 }, h = { 20, 39, 1, 20 }, d = { 20, 39, 22, 41 } }
+-- GF-002-J: the group finder's round role portraits (same layout as the sheet above)
+-- and the LFG role strip (four icons side by side: leader, dps, tank, healer).
+local PORTRAIT_FILE = "Interface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES"
+local LFGROLE_FILE = "Interface\\LFGFrame\\LFGRole"
+local LFGROLE_BOX = { t = { 32, 48, 0, 64 }, h = { 48, 64, 0, 64 }, d = { 16, 32, 0, 64 } }
+-- Square spell / item icons: cut the dark border (GF-UI-A §1.4 item 5; owner 0.14.0:
+-- no black square on the buttons): 0.08 - 0.92, in 64ths 5 - 59.
+G.ICON_CROP = { 0.08, 0.92, 0.08, 0.92 }
 
 -- Each entry: a list of candidates { file, box = { l, r, t, b } in 64ths } tried in order.
 G.ART = {
     -- GF-002-F: whole spell icons first (the role sheet came out dark and cut in
     -- half on 16001: its layout differs), the role sheet as a fallback.
-    role_t = { { "Interface\\Icons\\Ability_Warrior_DefensiveStance" }, { "Interface\\Icons\\Ability_Defend" },
+    -- GF-002-J (owner 0.14.0: 「職責用遊戲同款圓形圖示、不要文字」): the round role
+    -- icons of the group finder first (their place in the sheet from the client's own
+    -- GetTexCoordsForRoleSmallCircle when it has it), the LFG role strip next, then
+    -- the whole spell icons (GF-002-F) and the old sheet.
+    role_t = { { PORTRAIT_FILE, box = ROLE_BOX.t, role = "TANK" }, { LFGROLE_FILE, box = LFGROLE_BOX.t },
+        { "Interface\\Icons\\Ability_Warrior_DefensiveStance" }, { "Interface\\Icons\\Ability_Defend" },
         { ROLES_FILE, box = ROLE_BOX.t } },
-    role_h = { { "Interface\\Icons\\Spell_Holy_FlashHeal" }, { "Interface\\Icons\\Spell_Holy_Heal" },
+    role_h = { { PORTRAIT_FILE, box = ROLE_BOX.h, role = "HEALER" }, { LFGROLE_FILE, box = LFGROLE_BOX.h },
+        { "Interface\\Icons\\Spell_Holy_FlashHeal" }, { "Interface\\Icons\\Spell_Holy_Heal" },
         { ROLES_FILE, box = ROLE_BOX.h } },
-    role_d = { { "Interface\\Icons\\Ability_DualWield" }, { "Interface\\Icons\\INV_Sword_04" },
+    role_d = { { PORTRAIT_FILE, box = ROLE_BOX.d, role = "DAMAGER" }, { LFGROLE_FILE, box = LFGROLE_BOX.d },
+        { "Interface\\Icons\\Ability_DualWield" }, { "Interface\\Icons\\INV_Sword_04" },
         { ROLES_FILE, box = ROLE_BOX.d } },
     -- GF-002-G (owner: 「組隊與人數的圖標，採用社交那種人頭或多人頭」): the
     -- social window's portraits: one head for a person / the number of people,
@@ -126,10 +141,21 @@ function G.registerDungeons(list)
     end
 end
 
-local function coords(box)
-    if not box then return 0, 1, 0, 1 end
-    return box[1] / 64, box[2] / 64, box[3] / 64, box[4] / 64
+local function isSquareIcon(file) return type(file) == "string" and file:find("^Interface\\Icons\\") ~= nil end
+G.isSquareIcon = isSquareIcon
+-- A candidate's texture coordinates (0 - 1): the client's own role layout when it has
+-- one, else its box, else the cropped square for spell / item icons, else the whole file.
+local function coords(c)
+    if c.role and type(GetTexCoordsForRoleSmallCircle) == "function" then
+        local ok, l, r, t, b = pcall(GetTexCoordsForRoleSmallCircle, c.role)
+        if ok and type(l) == "number" and type(b) == "number" then return l, r, t, b end
+    end
+    local box = c.box
+    if box then return box[1] / 64, box[2] / 64, box[3] / 64, box[4] / 64 end
+    if isSquareIcon(c[1]) then return G.ICON_CROP[1], G.ICON_CROP[2], G.ICON_CROP[3], G.ICON_CROP[4] end
+    return 0, 1, 0, 1
 end
+G.coords = coords
 
 -- Does the client have this file? One hidden probe texture, results cached.
 local probe, known = nil, {}
@@ -161,7 +187,7 @@ function G.set(tex, key)
     if not list then tex:Hide(); return false end
     for _, c in ipairs(list) do
         if ns.Icons.set(tex, c[1]) then
-            if tex.SetTexCoord then tex:SetTexCoord(coords(c.box)) end
+            if tex.SetTexCoord then tex:SetTexCoord(coords(c)) end
             tex:Show()
             return true
         end
@@ -175,10 +201,11 @@ function G.markup(key, size)
     size = size or 14
     local c = G.pick(key)
     if not c then return "" end
-    if c.box then
-        return string.format("|T%s:%d:%d:0:0:64:64:%d:%d:%d:%d|t", c[1], size, size, c.box[1], c.box[2], c.box[3], c.box[4])
-    end
-    return "|T" .. c[1] .. ":" .. size .. "|t"
+    -- GF-002-J: the same coordinates as on a texture (the crop of square icons too).
+    local l, r, t, b = coords(c)
+    if l == 0 and r == 1 and t == 0 and b == 1 then return "|T" .. c[1] .. ":" .. size .. "|t" end
+    local function px(v) return math.floor(v * 64 + 0.5) end
+    return string.format("|T%s:%d:%d:0:0:64:64:%d:%d:%d:%d|t", c[1], size, size, px(l), px(r), px(t), px(b))
 end
 
 function G.dungeonKey(id) return G.ART["dungeon_" .. str(id)] and ("dungeon_" .. id) or "key" end

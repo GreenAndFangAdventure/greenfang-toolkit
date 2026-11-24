@@ -121,15 +121,18 @@ return function(T)
         eq(f.timeButtons, nil, "no 現在 / 今天 / 之後 buttons")
         ok(plain(f.startButton:GetText()):find("現在", 1, true), "the slot: 現在 first")
         local pk = A.pickStart(f.startButton)
-        ok(pk.now:IsShown() and pk.other:IsShown(), "現在 and 其他日期 in the picker")
+        ok(pk.now:IsShown() and pk.dayUp:IsShown() and pk.dayDown:IsShown(), "現在 and the date steps in the picker (GF-002-J)")
         ok(pk.lenLabel:IsShown(), "長度 with 現在 (GF-002-H)")
         eq(pk.remove:IsShown(), false, "one slot: no 移除")
         eq(pk.dayLabels[1]:GetText() .. pk.dayLabels[2]:GetText(), "今天明天", "today and tomorrow")
         eq(#pk.minutes, 4, "quarters")
-        wow.click(pk.other)
-        local menu = _G[ns.Framework.MENU_NAME]
-        ok(menu:IsShown(), "the date list")
-        wow.click(menu.items[2]) -- the day after tomorrow
+        -- GF-002-J (owner: the date list went off the screen): ▼ steps to the day after tomorrow.
+        ok(pk.dayUp.disabled, "today / tomorrow: ▲ greyed out")
+        wow.click(pk.dayDown)
+        pk = A.picker()
+        ok(pk:IsShown() and not pk.dayUp.disabled, "the picker stays, the day after tomorrow")
+        ok(pk.dayLabels[1]:IsShown() and not pk.dayLabels[2]:IsShown(), "one day's hours")
+        wow.click(pk.hours[1][20])
         ok(plain(f.startButton:GetText()):match("%d%d%d%d/%d%d/%d%d"), "the date with the year")
         local id = A.submitTicket()
         eq(ns.Adventure.get(id).timeMode, "f", "a later day")
@@ -249,7 +252,7 @@ return function(T)
         for _, r in ipairs(A.rowFrames()) do if r:IsShown() and r.lfg then row = r end end
         ok(row, "a 尋求組隊 row")
         eq(row.lfg.dungeon, "smg", "only my dungeon")
-        ok(plain(row.roles:GetText()):find("坦", 1, true), "what they need")
+        ok(row.roles:GetText():find("缺", 1, true) and row.roles:GetText():find("|T", 1, true), "what they need (the role icons)")
         ok(plain(row.who:GetText()):find("測試戊", 1, true), "the leader")
         local apply
         for _, b in ipairs(row.buttons) do if b:IsShown() and b.action == "lfgApply" then apply = b end end

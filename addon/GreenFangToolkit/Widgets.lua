@@ -292,3 +292,72 @@ function W.drawFlow(f, rows)
     f:SetSize(math.max(maxX + W.CARD_PAD, ns.measure(f.title) + 2 * W.CARD_PAD), -top + #rows * W.CARD_ROW + W.CARD_PAD)
     return f
 end
+
+---------------------------------------------------------------------------
+-- GF-002-J (owner 0.14.0): every sub-window and picker has an X in its top right
+-- corner (as well as ESC and a click outside).
+---------------------------------------------------------------------------
+
+W.CLOSE_SIZE = 28
+function W.closeButton(f, onClose)
+    if f.gfClose then return f.gfClose end
+    local b = ns.createFrame("Button", nil, f, "UIPanelCloseButton")
+    b:SetSize(W.CLOSE_SIZE, W.CLOSE_SIZE)
+    b:ClearAllPoints()
+    b:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -2)
+    if b.gfNoTemplate then
+        -- No template on this client: the game's close art by hand.
+        b.tex = b:CreateTexture(nil, "ARTWORK"); b.tex:SetAllPoints()
+        ns.Icons.set(b.tex, W.CLOSE_ART)
+    end
+    b.tip = "關閉"
+    b.infoOnly = false
+    b.fieldNamed = "關閉" -- an X needs no written name (the game's own)
+    b:SetScript("OnClick", function() if onClose then onClose() else f:Hide() end end)
+    f.gfClose = b
+    return b
+end
+W.CLOSE_ART = "Interface\Buttons\UI-Panel-MinimizeButton-Up"
+
+---------------------------------------------------------------------------
+-- GF-002-J: a small confirmation (刪除, 清除): a short noun phrase, 確定 / 取消, the X.
+-- A menu-level frame: ESC and a click outside cancel it.
+---------------------------------------------------------------------------
+
+W.CONFIRM_NAME = "GreenFangToolkit_Confirm"
+local confirm
+function W.confirm(text, onYes)
+    if not confirm then
+        local f = CreateFrame("Frame", W.CONFIRM_NAME, UIParent)
+        f:SetFrameStrata("TOOLTIP")
+        if f.SetFrameLevel then f:SetFrameLevel(70) end
+        ns.makeOpaque(f, 0)
+        f:EnableMouse(true)
+        ns.escRegister(f, ns.ESC_LEVEL.grid)
+        f.text = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
+        f.text:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -20)
+        f.yes = ns.OrdersUI.textButton(f, "確定", function()
+            local fn = f.onYes
+            f.onYes = nil
+            f:Hide()
+            if fn then fn() end
+        end, 90)
+        f.no = ns.OrdersUI.textButton(f, "取消", function() f.onYes = nil; f:Hide() end, 90)
+        W.closeButton(f)
+        f:Hide()
+        confirm = f
+    end
+    local f = confirm
+    f.text:SetText(text or "")
+    f.onYes = onYes
+    local w = math.max(300, ns.labelWidth(text or "") + 40 + W.CLOSE_SIZE)
+    f:SetSize(w, 116)
+    f.yes:ClearAllPoints(); f.yes:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -20, 16)
+    f.no:ClearAllPoints(); f.no:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -20 - 90 - 12, 16)
+    f:ClearAllPoints()
+    f:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
+    if f.SetClampedToScreen then f:SetClampedToScreen(true) end
+    f:Show()
+    return f
+end
+function W.confirmFrame() return confirm end

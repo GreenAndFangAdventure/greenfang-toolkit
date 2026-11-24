@@ -30,19 +30,36 @@ return function(T)
 
     -- GF-002-F: the role sheet came out dark and cut in half on 16001; whole
     -- spell icons first, the sheet (with its box) is the last fallback.
-    test("GF-002-C role art: whole spell icons first; the group finder sheet with its box as the last fallback", function()
+    -- GF-002-J (owner 0.14.0): the group finder's round role icons first; the whole
+    -- spell icons (cropped) after them; the old sheet last.
+    test("GF-002-C role art: the round group finder icons first, then whole spell icons, the old sheet last", function()
         local STANCE = "Interface\\Icons\\Ability_Warrior_DefensiveStance"
+        local PORTRAIT = "Interface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES"
+        local STRIP = "Interface\\LFGFrame\\LFGRole"
         local ns = login()
         local G = ns.GameIcons
         local t = tex()
-        ok(G.set(t, "role_t"), "set"); eq(t._texture, STANCE, "defensive stance")
-        eq(t._texCoord[2], 1, "full icon (no box)")
-        ok(G.markup("role_h", 14):find("Spell_Holy_FlashHeal", 1, true), "markup: the healer icon")
-        ns = login({ missingFiles = { [STANCE] = true } })
+        ok(G.set(t, "role_t"), "set"); eq(t._texture, PORTRAIT, "the round portrait")
+        eq(t._texCoord[1] .. "," .. t._texCoord[2], "0," .. (19 / 64), "the tank's place in it")
+        GetTexCoordsForRoleSmallCircle = function(role) if role == "HEALER" then return 0.3, 0.6, 0.0, 0.3 end end
+        G.set(t, "role_h")
+        eq(t._texCoord[1] .. "," .. t._texCoord[2], "0.3,0.6", "the client's own layout when it has one")
+        GetTexCoordsForRoleSmallCircle = nil
+        ok(G.markup("role_h", 18):find("PORTRAITROLES", 1, true), "markup: the healer portrait")
+        ns = login({ missingFiles = { [PORTRAIT] = true } })
+        G = ns.GameIcons
+        t = tex()
+        ok(G.set(t, "role_t"), "the strip"); eq(t._texture, STRIP, "LFGRole"); eq(t._texCoord[1], 0.5, "tank: the third quarter")
+        ns = login({ missingFiles = { [PORTRAIT] = true, [STRIP] = true } })
+        G = ns.GameIcons
+        t = tex()
+        ok(G.set(t, "role_t"), "spell icon"); eq(t._texture, STANCE, "defensive stance")
+        eq(t._texCoord[1] .. "," .. t._texCoord[2], "0.08,0.92", "a square icon: its dark edge cut")
+        ns = login({ missingFiles = { [PORTRAIT] = true, [STRIP] = true, [STANCE] = true } })
         G = ns.GameIcons
         t = tex()
         ok(G.set(t, "role_t"), "fallback set"); eq(t._texture, DEFEND, "Ability_Defend instead")
-        ns = login({ missingFiles = { [STANCE] = true, [DEFEND] = true } })
+        ns = login({ missingFiles = { [PORTRAIT] = true, [STRIP] = true, [STANCE] = true, [DEFEND] = true } })
         G = ns.GameIcons
         t = tex()
         ok(G.set(t, "role_t"), "last fallback"); eq(t._texture, ROLES, "role sheet")
@@ -101,7 +118,7 @@ return function(T)
         ok(row, "row")
         local shown, grey = 0, 0
         for _, s in ipairs(row.slots) do
-            if s._shown then shown = shown + 1; if s._alpha and s._alpha < 1 then grey = grey + 1 end; ok(tostring(s._texture):find("Interface\\Icons\\", 1, true), "role art") end
+            if s._shown then shown = shown + 1; if s._alpha and s._alpha < 1 then grey = grey + 1 end; ok(tostring(s._texture):find("Interface\\LFGFrame\\", 1, true) or tostring(s._texture):find("Interface\\Icons\\", 1, true), "role art") end
         end
         eq(shown, 4, "4 seat icons"); eq(grey, 4, "all open (grey)")
         ok(not row.roles:GetText():find("/", 1, true), "no 2/3 text")
