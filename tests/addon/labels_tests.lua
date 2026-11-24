@@ -113,7 +113,9 @@ return function(T)
         local w = _G[ns.AdventureUI.WORKER_NAME]
         eq(table.concat(w.fields, ","), "地城,任務,職責,副職責,時段", "worker field names (GF-002-H: 長度 is in each slot's picker)")
         eq(w.addDungeon:GetText(), "＋地城", "no dungeon yet: only 「＋地城」 (GF-002-F)"); eq(w.quests:GetText(), "選擇任務", "no quest yet (not x0)")
-        eq(w.mainRoles.d.label._text, "輸出", "role names"); ok(w.remove.label._text:find("移除", 1, true), "remove named")
+        -- GF-002-J (owner): role icons without names (the one exception); the name is the tooltip.
+        ok(not (w.mainRoles.d.label and w.mainRoles.d.label:IsShown()), "no role names"); eq(w.mainRoles.d.tip, "輸出", "the tooltip")
+        ok(w.remove.label._text:find("移除", 1, true), "remove named")
         ns.Framework.open("orders")
         local pb = ns.OrdersUI.profButtons()[1]
         ok(pb and (pb.label._text == "接單" or pb.label._text == "不接"), "接單 switch named")

@@ -513,10 +513,14 @@ return function(T)
         Adv.onEnterWorld()
         U.refresh()
         local glow
-        for _, r in ipairs(U.rowFrames()) do
-            if r:IsShown() and r.view and r.view.id == id then
-                for _, b in ipairs(r.buttons) do if b:IsShown() and b.action == "done" then glow = b.glowing and b.sel:IsShown() end end
-                eq(plain(r.badge.text._text), "成團", "GF-002-I R-17.11: 成團 on the state badge (line 2)")
+        -- GF-002-J (R-17.22): matching tickets rank first; scroll through every row.
+        for k = 0, #U.shownRows() do
+            U.scrollFrame():SetVerticalScroll(k * U.ROW_HEIGHT)
+            for _, r in ipairs(U.rowFrames()) do
+                if r:IsShown() and r.view and r.view.id == id then
+                    for _, b in ipairs(r.buttons) do if b:IsShown() and b.action == "done" then glow = b.glowing and b.sel:IsShown() end end
+                    eq(plain(r.badge.text._text), "成團", "GF-002-I R-17.11: 成團 on the state badge (line 2)")
+                end
             end
         end
         ok(glow, "完成 glows")
@@ -719,26 +723,46 @@ return function(T)
         wow.click(f.pickQuest)
         local qp = U.questPickerFrame()
         ok(qp:IsShown(), "open")
-        local heads = {}
-        for _, h in ipairs(qp.heads) do if h:IsShown() then heads[#heads + 1] = h:GetText() end end
-        eq(table.concat(heads, ","), "貧瘠之地,剃刀沼澤", "zone headers in log order")
+        -- GF-002-J (R-17.20): the zones first, in log order; then a zone's quests.
+        local zones = {}
+        for _, z in ipairs(qp.zoneRows) do if z:IsShown() then zones[#zones + 1] = z.zone end end
+        eq(table.concat(zones, ","), "雷霆崖,貧瘠之地,剃刀沼澤", "where I am, then the zones in log order")
+        local function openZone(name)
+            for _, z in ipairs(qp.zoneRows) do if z:IsShown() and z.zone == name then wow.click(z); return end end
+            if qp.back:IsShown() then wow.click(qp.back) end
+            for _, z in ipairs(qp.zoneRows) do if z:IsShown() and z.zone == name then wow.click(z); return end end
+        end
         local rows = {}
-        for _, r in ipairs(qp.rows) do if r:IsShown() then rows[r.questId] = r end end
+        local function readRows()
+            rows = {}
+            for _, r in ipairs(qp.rows) do if r:IsShown() then rows[r.questId] = r end end
+        end
+        openZone("剃刀沼澤"); readRows()
+        local rfkRow = rows[1101]
+        ok(rfkRow, "剃刀沼澤: its quest")
+        openZone("貧瘠之地"); readRows()
+        rows[1101] = rfkRow
         eq(rows[850].name:GetText(), "測試任務：草原之心", "the full name")
         ok(rows[850].level:GetText():find("16", 1, true) and rows[850].level:GetText():find("^|cff"), "a colored level")
         ok(rows[851].wanted and not rows[850].wanted, "❗ on the quest B's ticket wants")
         eq(U.questDungeon({ zone = "剃刀沼澤" }), "rfk", "a dungeon quest: its dungeon (its art on the row)")
+        -- A dungeon quest brings its dungeon (剃刀沼澤 is a zone of the log and the dungeon).
+        openZone("剃刀沼澤"); readRows()
         wow.click(rows[1101])
-        eq(d.dungeon, "rfk", "brings its dungeon"); eq(#d.quests, 1, "and the quest")
-        wow.click(rows[850]); wow.click(rows[851])
-        wow.click(rows[1101])
+        eq(d.dungeon, "rfk", "brings its dungeon"); eq(#d.quests, 1, "and the quest"); eq(d.zone, "剃刀沼澤", "the zone")
+        -- Another zone: the old zone's quests go, and with them the dungeon.
+        openZone("貧瘠之地"); readRows()
+        eq(#d.quests, 0, "another zone: its quests only")
         eq(d.dungeon, nil, "no dungeon quest left: no dungeon")
+        wow.click(rows[850]); wow.click(rows[851])
+        eq(d.zone, "貧瘠之地", "the zone")
         local id = U.submitTicket()
         local e
         for _, x in ipairs(ns.Adventure.listOf(A, "T")) do if x.id == id then e = x end end
         ok(e.qn and e.qn:find("850:測試任務：草原之心", 1, true), "names travel in-game: " .. tostring(e and e.qn))
-        local text = plain(U.destText(ns.Adventure.get(id)))
-        eq(text, "測試任務：草原之心 16 +1", "the first quest, its level, +1")
+        -- GF-002-J (R-17.20): the zone leads the row; the quests on line 2.
+        eq(plain(U.destText(ns.Adventure.get(id))), "貧瘠之地", "the zone")
+        ok(plain(U.detailText(ns.Adventure.get(id))):find("測試任務：草原之心 16 +1", 1, true), "the first quest, its level, +1")
         ns.Sync.recordSelf(true)
         local entry
         for _, x in ipairs(GreenFangToolkitDB.sync.outbox) do if x.kind == "character.self" then entry = x end end
@@ -757,6 +781,7 @@ return function(T)
             { questID = 4, title = "q4", level = 10 }, { questID = 5, title = "q5", level = 10 }, { questID = 6, title = "q6", level = 10 } })
         d = U.openTicket()
         U.pickQuests(f.pickQuest)
+        for _, z in ipairs(qp.zoneRows) do if z:IsShown() and z.zone == "其他" then wow.click(z); break end end -- quests without a zone
         for _, r in ipairs(qp.rows) do if r:IsShown() then wow.click(r) end end
         eq(#d.quests, 5, "at most 5")
         C_QuestLog = nil

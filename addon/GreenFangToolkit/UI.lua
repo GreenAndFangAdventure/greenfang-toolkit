@@ -122,14 +122,22 @@ end
 
 -- Roster filters (GF-001-D19): skill (skillLineID), class (class token),
 -- online (true = only online), minLevel (number). All optional.
-UI.filters = { skill = nil, class = nil, online = false, minLevel = nil, active = false }
+-- GF-UI-C (owner): 專業 and 職業 are multi-select lists: skills / classes are
+-- sets { [value] = true } (nil = everything; an empty set = nothing).
+UI.filters = { skill = nil, class = nil, skills = nil, classes = nil, online = false, minLevel = nil, active = false }
 
 local function passes(m, f)
     if not f then return true end
     if f.online and m.online ~= true then return false end
     if f.class and m.classToken ~= f.class then return false end
+    if f.classes and not f.classes[str(m.classToken)] then return false end
     if f.minLevel and (type(m.level) ~= "number" or m.level < f.minLevel) then return false end
     if f.skill and not UI.memberSkills(m)[f.skill] then return false end
+    if f.skills then
+        local any = false
+        for id in pairs(UI.memberSkills(m)) do if f.skills[id] then any = true end end
+        if not any then return false end
+    end
     -- GF-006-B (R-4.2): only crafters taking orders.
     if f.active and not (ns.Orders and ns.Orders.isActiveAny(m.guid)) then return false end
     return true
@@ -157,9 +165,11 @@ function UI.professionOptions()
     for _, m in ipairs(s and s.members or {}) do
         for id in pairs(UI.memberSkills(m)) do have[id] = true end
     end
-    local list = { { value = nil, text = "全部專業" } }
+    local list = {}
     for _, id in ipairs(PROFESSION_ORDER) do
-        if have[id] then list[#list + 1] = { value = id, text = ns.Data.skillName(nil, id) or ("專業 " .. id) } end
+        if have[id] then
+            list[#list + 1] = { value = id, text = ns.Data.skillName(nil, id) or ("專業 " .. id), icon = ns.Icons.professionIcon(id) }
+        end
     end
     return list
 end
@@ -175,15 +185,35 @@ function UI.classOptions()
         end
     end
     table.sort(list, function(a, b) return keyName(a.text) < keyName(b.text) end)
-    table.insert(list, 1, { value = nil, text = "全部職業" })
     return list
 end
 
--- Set the profession filter (icon click: the same one again clears it).
+-- The button text of a multi-select filter: 全部專業 / one name / N 個專業 / 未選.
+function UI.choiceSummary(allText, unit)
+    return function(b)
+        if b.selected == nil then return allText end
+        local on = {}
+        for _, o in ipairs(b.options()) do if b.isOn(o.value) then on[#on + 1] = o end end
+        if #on == 0 then return "未選" end
+        if #on == 1 then return on[1].text end
+        return #on .. " 個" .. unit
+    end
+end
+-- The filters follow the two lists (a copy of what is ticked).
+function UI.syncChoiceFilters()
+    local function copy(set) if not set then return nil end local o = {} for k, v in pairs(set) do o[k] = v end return o end
+    UI.filters.skills = UI.skillChoice and copy(UI.skillChoice.selected) or nil
+    UI.filters.classes = UI.classChoice and copy(UI.classChoice.selected) or nil
+end
+
+-- Only one profession ticked (offline tests and other pages).
 function UI.setSkillFilter(id)
-    UI.filters.skill = id
-    if UI.skillChoice then UI.skillChoice.value = id; UI.skillChoice.refreshText() end
-    UI.refresh(true)
+    if UI.skillChoice then
+        if id then UI.skillChoice.setOnly(id) else UI.skillChoice.selectAll() end
+    else
+        UI.filters.skills = id and { [id] = true } or nil
+        UI.refresh(true)
+    end
 end
 
 function UI.loadSettings()
@@ -825,15 +855,19 @@ end
 -- GF-001-Q: guild management on the roster (ns.GuildAdmin does the work)
 ---------------------------------------------------------------------------
 
--- Right-click menu and the bar under the list: the same actions.
+-- Right-click menu: the current rank (a header), 配方, then every action the
+-- character may do (GF-UI-C: text only; the officer tools are only here).
 UI.RECIPE_ICON = "Interface\\Icons\\INV_Scroll_04"
 function UI.memberMenuItems(m)
     if not m or not ns.GuildAdmin then return {} end
     local items = {}
+    local rest = ns.GuildAdmin.menuItems(m)
+    local k = 1
+    if rest[1] and rest[1].header then items[1] = rest[1]; k = 2 end
     if UI.hasRecipes(m.guid) then
-        items[#items + 1] = { text = "|T" .. UI.RECIPE_ICON .. ":18|t 配方", fn = function() ns.Recipes.show(m.guid) end }
+        items[#items + 1] = { text = "配方", key = "recipes", fn = function() ns.Recipes.show(m.guid) end }
     end
-    for _, it in ipairs(ns.GuildAdmin.menuItems(m)) do items[#items + 1] = it end
+    for i = k, #rest do items[#items + 1] = rest[i] end
     return items
 end
 
@@ -843,7 +877,6 @@ function UI.select(m)
     UI.layoutRows()
 end
 
-UI.BAR_MAX = 9
 function UI.drawActionBar()
     local bar = UI.actionBar
     if not bar then return end
@@ -858,59 +891,76 @@ function UI.drawActionBar()
     local c = Icons.classColor(m.classToken)
     bar.name:SetText(ns.shortName(m.name))
     bar.name:SetTextColor(c[1], c[2], c[3])
-    local list = {}
-    if UI.hasRecipes(m.guid) then
-        list[#list + 1] = { key = "recipes", text = "配方", icon = UI.RECIPE_ICON, fn = function() ns.Recipes.show(m.guid) end }
-    end
-    for _, a in ipairs(G.actionsFor(m)) do list[#list + 1] = a end
+    -- GF-UI-C (owner): only the everyday actions (密語, 組隊, 查看 when the
+    -- game can inspect this member), as 30 px text buttons. Officer tools
+    -- are in the right-click menu.
+    local list = G.barActions(m)
     local shown = {}
     for i = 1, UI.BAR_MAX do
         local b = bar.buttons[i]
         local a = list[i]
         if not b then
-            b = ns.OrdersUI.iconButton(bar, ns.ICON, "unknown", nil, nil, "")
+            b = ns.OrdersUI.textButton(bar, "查看", nil)
             bar.buttons[i] = b
         end
         if a then
-            ns.Icons.set(b.tex, a.icon)
-            b.tip, b.action = a.text, a.key
-            ns.OrdersUI.setLabel(b, a.text)
+            b:SetText(a.text)
+            b.tip, b.action = nil, a.key
             local fn = a.fn
-            b:SetScript("OnClick", function() fn(m) end)
+            b:SetScript("OnClick", function() fn(m); UI.drawActionBar() end)
             b:Show()
             shown[#shown + 1] = b
         else
             b:Hide(); b.action = nil
         end
     end
-    ns.OrdersUI.flow(bar, shown, bar.nameWidth, -6, 18)
+    local x = bar.nameWidth
+    for _, b in ipairs(shown) do
+        b:ClearAllPoints()
+        b:SetPoint("LEFT", bar, "LEFT", x, 0)
+        b.flowX = x
+        x = x + b.gfWidth + 10
+    end
 end
+UI.BAR_MAX = 3
 
 -- 公會資訊: the message of the day and the guild info, with 編輯 where allowed.
+-- GF-UI-C (owner: the info was cut off): the info sits in a scroll frame and
+-- takes the height its text needs; 編輯 opens a large multi-line editor.
 UI.GUILD_INFO_NAME = "GreenFangToolkit_GuildInfo"
+UI.INFO_W, UI.INFO_H = 640, 480
 function UI.openGuildInfo()
     local G = ns.GuildAdmin
     if not UI.guildInfo then
-        local f = ns.popupWindow(UI.GUILD_INFO_NAME, 640, 420)
+        local f = ns.popupWindow(UI.GUILD_INFO_NAME, UI.INFO_W, UI.INFO_H)
         f:SetPoint("CENTER", 0, 40)
         f:EnableMouse(true)
         ns.exclusivePopup(f)
         if f.TitleText then f.TitleText:SetText("公會資訊") end
         local O = ns.OrdersUI
-        O.fieldLabel(f, "今日訊息", O.FIELD_X, -52)
-        f.motd = f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
-        f.motd:SetPoint("TOPLEFT", f, "TOPLEFT", O.FIELD_X, -80)
-        f.motd:SetWidth(592); f.motd:SetJustifyH("LEFT")
+        local X, W = O.FIELD_X, UI.INFO_W - 2 * O.FIELD_X - 24
+        O.fieldLabel(f, "今日訊息", X, -52)
         f.editMotd = O.textButton(f, "編輯", function() G.editMOTD() end)
         f.editMotd:SetPoint("TOPRIGHT", f, "TOPRIGHT", -24, -44)
-        O.fieldLabel(f, "公會資訊", O.FIELD_X, -152)
-        f.info = f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
-        f.info:SetPoint("TOPLEFT", f, "TOPLEFT", O.FIELD_X, -180)
-        f.info:SetWidth(592); f.info:SetJustifyH("LEFT"); f.info:SetJustifyV("TOP")
-        f.info:SetHeight(170)
+        f.motd = f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
+        f.motd:SetPoint("TOPLEFT", f, "TOPLEFT", X, -84)
+        f.motd:SetWidth(W + 24); f.motd:SetJustifyH("LEFT")
+        if f.motd.SetWordWrap then f.motd:SetWordWrap(true) end
+        O.fieldLabel(f, "公會資訊", X, -140)
         f.editInfo = O.textButton(f, "編輯", function() G.editInfo() end)
-        f.editInfo:SetPoint("TOPRIGHT", f, "TOPRIGHT", -24, -144)
-        f.close = O.textButton(f, ns.GameIcons.markup("yes", 20) .. " 完成", function() f:Hide() end, 110)
+        f.editInfo:SetPoint("TOPRIGHT", f, "TOPRIGHT", -24, -132)
+        local scroll = ns.createFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
+        scroll:SetPoint("TOPLEFT", f, "TOPLEFT", X, -172)
+        scroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -44, 60)
+        local content = CreateFrame("Frame", nil, scroll)
+        content:SetSize(W, 1)
+        scroll:SetScrollChild(content)
+        f.infoScroll, f.infoContent, f.infoWidth = scroll, content, W
+        f.info = content:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
+        f.info:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
+        f.info:SetWidth(W); f.info:SetJustifyH("LEFT"); f.info:SetJustifyV("TOP")
+        if f.info.SetWordWrap then f.info:SetWordWrap(true) end
+        f.close = O.textButton(f, "完成", function() f:Hide() end, 110)
         f.close:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -24, 18)
         f:Hide()
         UI.guildInfo = f
@@ -919,6 +969,67 @@ function UI.openGuildInfo()
     f:Show()
     UI.drawGuildInfo()
     return f
+end
+
+-- The guild info editor (GF-UI-C): a multi-line edit box in a scroll frame,
+-- several lines in view, 儲存 / 取消. ESC and a click on 取消 drop the edit.
+UI.INFO_EDIT_NAME = "GreenFangToolkit_GuildInfoEdit"
+function UI.openInfoEditor()
+    local G = ns.GuildAdmin
+    if not (G and G.can("info")) then return nil end
+    if not UI.infoEditor then
+        local f = ns.popupWindow(UI.INFO_EDIT_NAME, UI.INFO_W, UI.INFO_H)
+        f:SetPoint("CENTER", 0, 40)
+        f:EnableMouse(true)
+        ns.exclusivePopup(f)
+        if f.TitleText then f.TitleText:SetText("公會資訊") end
+        local O = ns.OrdersUI
+        local X, W = O.FIELD_X, UI.INFO_W - 2 * O.FIELD_X - 24
+        f.count = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT))
+        f.count:SetPoint("TOPLEFT", f, "TOPLEFT", X, -44)
+        local scroll = ns.createFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
+        scroll:SetPoint("TOPLEFT", f, "TOPLEFT", X, -72)
+        scroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -44, 60)
+        local bg = f:CreateTexture(nil, "BACKGROUND", nil, 1)
+        bg:SetPoint("TOPLEFT", scroll, "TOPLEFT", -4, 4)
+        bg:SetPoint("BOTTOMRIGHT", scroll, "BOTTOMRIGHT", 4, -4)
+        bg:SetColorTexture(0, 0, 0, 0.45)
+        local box = CreateFrame("EditBox", nil, scroll)
+        box:SetMultiLine(true)
+        box:SetAutoFocus(false)
+        box:SetFontObject(ns.LABEL_FONT)
+        box:SetWidth(W)
+        box:SetHeight(UI.INFO_H - 140)
+        if box.SetTextInsets then box:SetTextInsets(4, 4, 4, 4) end
+        box:SetMaxLetters(G.INFO_MAX)
+        box:SetScript("OnEscapePressed", function(self) self:ClearFocus(); f:Hide() end)
+        box:SetScript("OnTextChanged", function(self)
+            f.count:SetText(string.format("%d/%d", #str(self:GetText()), G.INFO_MAX))
+        end)
+        scroll:SetScrollChild(box)
+        f.box, f.scroll = box, scroll
+        f.save = O.textButton(f, "儲存", function() UI.saveInfoEditor() end, 96)
+        f.save:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -24, 18)
+        -- 取消: back to the info window (only one popup is open at a time).
+        f.cancel = O.textButton(f, "取消", function() f:Hide(); UI.openGuildInfo() end, 96)
+        f.cancel:SetPoint("RIGHT", f.save, "LEFT", -10, 0)
+        f:Hide()
+        UI.infoEditor = f
+    end
+    local f = UI.infoEditor
+    f.box:SetText(G.infoText())
+    f.count:SetText(string.format("%d/%d", #G.infoText(), G.INFO_MAX))
+    f:Show()
+    if f.box.SetFocus then f.box:SetFocus() end
+    return f
+end
+function UI.saveInfoEditor()
+    local f = UI.infoEditor
+    if not f then return false end
+    local ok = ns.GuildAdmin.saveInfo(f.box:GetText())
+    f:Hide()
+    UI.openGuildInfo()
+    return ok
 end
 function UI.drawGuildInfo()
     local f, G = UI.guildInfo, ns.GuildAdmin
@@ -930,6 +1041,10 @@ function UI.drawGuildInfo()
     local faint = NO_DATA_COLOR
     if motd ~= "" then f.motd:SetTextColor(1, 1, 1) else f.motd:SetTextColor(faint[1], faint[2], faint[3]) end
     if info ~= "" then f.info:SetTextColor(1, 1, 1) else f.info:SetTextColor(faint[1], faint[2], faint[3]) end
+    -- The whole text: as high as it needs, the scroll frame shows the rest.
+    local h = ns.textHeight(f.info, f.infoWidth)
+    f.info:SetHeight(h)
+    f.infoContent:SetHeight(math.max(1, h))
     if G.can("motd") then f.editMotd:Show() else f.editMotd:Hide() end
     if G.can("info") then f.editInfo:Show() else f.editInfo:Hide() end
 end
@@ -943,7 +1058,6 @@ function UI.refreshAdminButtons()
     local list = {}
     if G.can("invite") then UI.inviteButton:Show(); list[#list + 1] = UI.inviteButton else UI.inviteButton:Hide() end
     if G.has("GetGuildRosterMOTD") or G.has("GetGuildInfoText") then UI.infoButton:Show(); list[#list + 1] = UI.infoButton else UI.infoButton:Hide() end
-    if G.canOpenGameUI() then UI.gameGuildButton:Show(); list[#list + 1] = UI.gameGuildButton else UI.gameGuildButton:Hide() end
     local x = UI.diagLeft or (UI.ROW_WIDTH + 20)
     for i = #list, 1, -1 do
         local b = list[i]
@@ -1008,10 +1122,11 @@ end
 -- 「清除」: search text and every filter.
 function UI.clearFilters()
     UI.filters.skill, UI.filters.class, UI.filters.online, UI.filters.minLevel = nil, nil, false, nil
+    UI.filters.skills, UI.filters.classes = nil, nil
     UI.filters.active = false
     if UI.activeCheck then UI.activeCheck.set(false) end
-    if UI.skillChoice then UI.skillChoice.value = nil; UI.skillChoice.refreshText() end
-    if UI.classChoice then UI.classChoice.value = nil; UI.classChoice.refreshText() end
+    if UI.skillChoice then UI.skillChoice.selected = nil; UI.skillChoice.refreshText() end
+    if UI.classChoice then UI.classChoice.selected = nil; UI.classChoice.refreshText() end
     if UI.onlineCheck then UI.onlineCheck.set(false) end
     if UI.levelBox then UI.levelBox:SetText("") end
     if searchBox then searchBox:SetText("") end
@@ -1071,7 +1186,8 @@ local function build(p)
         x = x + ns.labelWidth(text) + 2
         return l
     end
-    UI.updateButton = button(f, GI.markup("refresh", 20) .. " 更新", nil, nil, x, Y, manualUpdate)
+    -- GF-UI-C (item 12): text buttons in words only.
+    UI.updateButton = button(f, "更新", nil, nil, x, Y, manualUpdate)
     after(UI.updateButton.gfWidth)
     label("搜尋")
     searchBox = ns.createFrame("EditBox", nil, f, "InputBoxTemplate")
@@ -1084,18 +1200,18 @@ local function build(p)
     searchBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     UI.searchBox = searchBox
     after(124)
-    UI.skillChoice = ns.choiceButton(f, 110, x, Y, UI.professionOptions,
-        function(value) UI.filters.skill = value; UI.refresh(true) end, "全部專業",
-        function(id) return ns.Data.skillName(nil, id) end)
+    -- GF-UI-C (owner): multi-select lists with check boxes.
+    UI.skillChoice = ns.multiChoiceButton(f, 110, x, Y, UI.professionOptions,
+        function() UI.syncChoiceFilters(); UI.refresh(true) end, UI.choiceSummary("全部專業", "專業"))
     after(110)
-    UI.classChoice = ns.choiceButton(f, 110, x, Y, UI.classOptions,
-        function(value) UI.filters.class = value; UI.refresh(true) end, "全部職業")
+    UI.classChoice = ns.multiChoiceButton(f, 110, x, Y, UI.classOptions,
+        function() UI.syncChoiceFilters(); UI.refresh(true) end, UI.choiceSummary("全部職業", "職業"))
     after(110)
     UI.onlineCheck = ns.checkBox(f, "在線", x, Y - 1,
         function(on) UI.filters.online = on; UI.refresh(true) end)
     after(28 + ns.labelWidth("在線"))
-    -- GF-006-B (R-4.2): 只看接單中 (gold hammer, GF-UI-B: 16 px).
-    local hammer = O.tex("hammer", 16) .. " 接單中"
+    -- GF-006-B (R-4.2): 只看接單中 (GF-UI-C: the words are enough).
+    local hammer = "接單中"
     UI.activeCheck = ns.checkBox(f, hammer, x, Y - 1,
         function(on) UI.filters.active = on; UI.refresh(true) end)
     after(28 + ns.labelWidth(hammer))
@@ -1116,7 +1232,7 @@ local function build(p)
     x = x + 4 + 40 + 8 -- the box border is drawn ~6 px outside it
     UI.levelSuffix = label("以上")
     x = x + UI.TOOLBAR_GAP - 2
-    UI.clearButton = button(f, GI.markup("no", 20) .. " 清除", nil, nil, x, Y, UI.clearFilters)
+    UI.clearButton = button(f, "清除", nil, nil, x, Y, UI.clearFilters)
     after(UI.clearButton.gfWidth)
     UI.toolbarRight = x
     UI.countIcon = f:CreateTexture(nil, "ARTWORK")
@@ -1168,7 +1284,7 @@ local function build(p)
     UI.emptyLabel = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.TITLE_FONT))
     UI.emptyLabel:SetPoint("TOP", UI.emptyIcon, "BOTTOM", 0, -10)
     UI.emptyLabel:Hide()
-    UI.emptyUpdate = O.textButton(f, GI.markup("refresh", 20) .. " 更新", manualUpdate)
+    UI.emptyUpdate = O.textButton(f, "更新", manualUpdate)
     UI.emptyUpdate:SetPoint("TOP", UI.emptyIcon, "BOTTOM", 0, -10)
     UI.emptyUpdate:Hide()
     -- GF-001-Q: the selected member's actions (the same as the right-click menu).
@@ -1196,10 +1312,9 @@ local function build(p)
     syncIndicator = ns.Diag.smallButton(f, "BOTTOMRIGHT", -20, UI.BOTTOM_Y)
     UI.syncIndicator = syncIndicator
     UI.diagLeft = ns.Framework.PANEL_WIDTH - 20 - (syncIndicator.gfWidth or 0)
-    -- GF-001-Q, GF-UI-B (GF-UI-A §2.2 item 4): 邀請 / 公會 / 遊戲公會 (only what may be used).
-    UI.inviteButton = O.textButton(f, GI.markup("invite", 20) .. " 邀請", function() G.inviteGuild() end)
-    UI.infoButton = O.textButton(f, GI.markup("guildinfo", 20) .. " 公會", function() UI.openGuildInfo() end)
-    UI.gameGuildButton = O.textButton(f, GI.markup("tabard", 20) .. " 遊戲公會", function() G.openGameUI() end)
+    -- GF-001-Q, GF-UI-C (owner): 邀請 / 公會, text only (遊戲公會 is gone).
+    UI.inviteButton = O.textButton(f, "邀請", function() G.inviteGuild() end)
+    UI.infoButton = O.textButton(f, "公會", function() UI.openGuildInfo() end)
 end
 
 ns.Framework.register({

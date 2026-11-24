@@ -393,6 +393,66 @@ function F.createMinimapButton()
 end
 
 ---------------------------------------------------------------------------
+-- GF-UI-C (owner: the toolkit covered the profession window). Choice (a):
+-- while the game's profession window (TradeSkillFrame / CraftFrame) is open
+-- the toolkit window and its popups step aside, and come back when it
+-- closes. (b) docking beside it does not fit: the toolkit is ~1290 px wide
+-- and the profession window ~350, more than a 1920 px screen at scale 1;
+-- (c) a lower strata would still cover it whenever both are on the same
+-- part of the screen, and the toolkit's popups would fall under the game's
+-- windows too. Only frames that were shown are brought back; if the player
+-- opens the toolkit again meanwhile, nothing is restored twice.
+---------------------------------------------------------------------------
+
+F.PROFESSION_EVENTS = { TRADE_SKILL_SHOW = "show", TRADE_SKILL_CLOSE = "close", CRAFT_SHOW = "show", CRAFT_CLOSE = "close" }
+local stepAside -- the frames hidden for the profession window, or nil
+local professionOpen = {}
+
+function F.professionShown(kind)
+    professionOpen[kind or "trade"] = true
+    if stepAside then return stepAside end
+    local hidden = {}
+    if window and window:IsShown() then hidden[#hidden + 1] = window end
+    for _, f in ipairs(ns.exclusivePopups and ns.exclusivePopups() or {}) do
+        if f:IsShown() then hidden[#hidden + 1] = f end
+    end
+    if ns.Diag and ns.Diag.window and ns.Diag.window() and ns.Diag.window():IsShown() then hidden[#hidden + 1] = ns.Diag.window() end
+    if #hidden == 0 then return nil end
+    if ns.closeMenus then ns.closeMenus() end
+    for _, f in ipairs(hidden) do f:Hide() end
+    stepAside = hidden
+    return hidden
+end
+
+function F.professionClosed(kind)
+    professionOpen[kind or "trade"] = nil
+    if next(professionOpen) then return nil end -- the other one is still open
+    local list = stepAside
+    stepAside = nil
+    if not list then return nil end
+    -- The window first, then the popups above it.
+    for _, f in ipairs(list) do
+        if not f:IsShown() then
+            -- The window: shown again through select(), so the page redraws (it
+            -- may have changed while hidden, e.g. recipes read from the window).
+            if f == window and currentId then F.open(currentId) else f:Show() end
+        end
+    end
+    return list
+end
+function F.steppedAside() return stepAside end
+
+do
+    local ev = CreateFrame("Frame")
+    for name in pairs(F.PROFESSION_EVENTS) do pcall(ev.RegisterEvent, ev, name) end
+    ev:SetScript("OnEvent", function(_, event)
+        local kind = event:find("^CRAFT") and "craft" or "trade"
+        if F.PROFESSION_EVENTS[event] == "show" then F.professionShown(kind) else F.professionClosed(kind) end
+    end)
+    F.professionEventFrame = ev
+end
+
+---------------------------------------------------------------------------
 -- Small filter widgets (GF-001-D19): plain frames and buttons only, so they
 -- work without UIDropDownMenu or the newer menu system.
 ---------------------------------------------------------------------------
@@ -418,6 +478,19 @@ function ns.dropArrow(b)
         if fs.SetWordWrap then fs:SetWordWrap(false) end
     end
     return b.arrow
+end
+
+-- GF-UI-C (owner: 「選項沒對齊」): a list item's text starts at the same x on
+-- every row (the game centres button text by default).
+F.ITEM_TEXT_X = 8
+function ns.leftText(b, x)
+    local fs = b.GetFontString and b:GetFontString()
+    if fs and fs.ClearAllPoints then
+        fs:ClearAllPoints()
+        fs:SetPoint("LEFT", b, "LEFT", x or F.ITEM_TEXT_X, 0)
+        if fs.SetJustifyH then fs:SetJustifyH("LEFT") end
+    end
+    b.gfTextX = x or F.ITEM_TEXT_X
 end
 
 local function closeMenu()
@@ -486,6 +559,7 @@ function ns.choiceButton(parent, w, x, y, options, onChoose, allText, label)
                 menu.items[i] = item
             end
             item:SetText(o.text)
+            ns.leftText(item)
             local value = o.value
             item:SetScript("OnClick", function() b.choose(value) end)
             item:Show()
@@ -554,8 +628,14 @@ function ns.showMenu(owner, items)
         end
         b:SetSize(w - 8, 28)
         b:SetText(item.text)
+        ns.leftText(b)
+        -- GF-UI-C: a header line (e.g. the member's current rank): gold, not clickable.
+        b.header = item.header == true
+        if b.SetDisabledFontObject then pcall(b.SetDisabledFontObject, b, ns.FIELD_FONT) end
+        if b.SetEnabled then b:SetEnabled(not b.header) end
         local fn = item.fn
-        b:SetScript("OnClick", function() closeMenu(); fn() end)
+        if b.header then b:SetScript("OnClick", nil)
+        else b:SetScript("OnClick", function() closeMenu(); fn() end) end
         b:Show()
     end
     for i = #items + 1, #popup.items do popup.items[i]:Hide() end
@@ -652,6 +732,11 @@ function ns.multiChoiceButton(parent, w, x, y, options, onChange, summary)
     function b.drawItems()
         local list = b.options()
         local entries = { { text = "全選", fn = b.selectAll }, { text = "全不選", fn = b.selectNone } }
+        -- GF-UI-C: every name starts at one x (after the box, and after the icon column when any option has one).
+        local anyIcon = false
+        for _, o in ipairs(list) do if o.icon then anyIcon = true end end
+        local textX = anyIcon and 54 or 26
+        b.textX = textX
         for _, o in ipairs(list) do
             local value = o.value
             entries[#entries + 1] = { text = o.text, icon = o.icon, on = b.isOn(value), fn = function() b.toggle(value) end }
@@ -663,7 +748,7 @@ function ns.multiChoiceButton(parent, w, x, y, options, onChange, summary)
             it.label:ClearAllPoints()
             local hasIcon = e.icon and ns.Icons.set(it.icon, e.icon)
             if hasIcon then it.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93); it.icon:Show() else it.icon:Hide() end
-            it.label:SetPoint("LEFT", it, "LEFT", hasIcon and 54 or (e.on ~= nil and 26 or 6), 0)
+            it.label:SetPoint("LEFT", it, "LEFT", textX, 0)
             -- GF-UI-B (GF-UI-A §1.6): ticked and empty boxes are both drawn.
             if e.on ~= nil then ns.GameIcons.set(it.check, e.on and "check_on" or "check_off") else it.check:Hide() end
             it.isOption = e.on ~= nil

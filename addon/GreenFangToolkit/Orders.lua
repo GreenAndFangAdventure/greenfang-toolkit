@@ -1265,6 +1265,79 @@ function Orders.addTestViews(views)
     end
 end
 
+---------------------------------------------------------------------------
+-- GF-UI-C (owner: 「測試取消的單要能清掉」): 同步與診斷 → 清除紀錄. Deletes
+-- my own closed orders (成交 / 取消): my W entries of closed orders, my J
+-- entries of closed orders, the closed test orders, and this character's
+-- order history. Open orders and other members' halves are never touched.
+-- Returns { w, j, test, history } counts.
+---------------------------------------------------------------------------
+
+function Orders.closedCounts()
+    local views = Orders.all()
+    local me = S().selfAuthor()
+    local n = { w = 0, j = 0, test = 0, history = 0 }
+    local function closed(v) return v and (v.state == "deal" or v.state == "cancel") end
+    if me then
+        for _, e in ipairs(listOf(me, "W")) do if e.st == "x" or e.st == "d" or closed(views[e.id]) then n.w = n.w + 1 end end
+        for _, j in ipairs(listOf(me, "J")) do if closed(views[j.id]) then n.j = n.j + 1 end end
+    end
+    local db = ns.db
+    local t = type(db) == "table" and type(db.orders) == "table" and db.orders.test
+    for _, e in ipairs(type(t) == "table" and type(t.W) == "table" and t.W or {}) do
+        if e.st == "x" or e.st == "d" or closed(views[e.id]) then n.test = n.test + 1 end
+    end
+    local key = ns.Data.player().guid or "?"
+    local h = Orders.local_().history[key]
+    n.history = type(h) == "table" and #h or 0
+    n.total = n.w + n.j + n.test + n.history
+    return n
+end
+
+function Orders.clearClosed()
+    local views = Orders.all()
+    local me = S().selfAuthor()
+    local n = Orders.closedCounts()
+    local function closed(v) return v and (v.state == "deal" or v.state == "cancel") end
+    if me then
+        local keepW, keepJ = {}, {}
+        for _, e in ipairs(listOf(me, "W")) do
+            if not (e.st == "x" or e.st == "d" or closed(views[e.id])) then keepW[#keepW + 1] = e end
+        end
+        for _, j in ipairs(listOf(me, "J")) do
+            if not closed(views[j.id]) then keepJ[#keepJ + 1] = j end
+        end
+        if n.w > 0 then led:put("W", Orders.encodeList(keepW)) end
+        if n.j > 0 then led:put("J", Orders.encodeList(keepJ)) end
+    end
+    local db = ns.db
+    local t = type(db) == "table" and type(db.orders) == "table" and db.orders.test
+    if type(t) == "table" then
+        local keepT, gone = {}, {}
+        for _, e in ipairs(type(t.W) == "table" and t.W or {}) do
+            if e.st == "x" or e.st == "d" or closed(views[e.id]) then gone[e.id] = true else keepT[#keepT + 1] = e end
+        end
+        local keepTJ = {}
+        for _, j in ipairs(type(t.J) == "table" and t.J or {}) do if not gone[j.id] then keepTJ[#keepTJ + 1] = j end end
+        t.W, t.J = keepT, keepTJ
+        if next(gone) then
+            Orders.testVersion = Orders.testVersion + 1
+            cache.version = -1
+        end
+    end
+    local key = ns.Data.player().guid or "?"
+    Orders.local_().history[key] = nil
+    -- Reminders of what is gone.
+    local o = Orders.local_()
+    views = Orders.all()
+    for k in pairs(o.seen) do
+        local id = k:match("^(.-)|")
+        if not (id and views[id]) then o.seen[k] = nil end
+    end
+    if Orders.onChanged then Orders.onChanged() end
+    return n
+end
+
 function Orders.resetSession()
     asked, answering, cache, svCache, activeCache = {}, {}, { version = -1 }, {}, { version = -1 }
     led:resetSession()

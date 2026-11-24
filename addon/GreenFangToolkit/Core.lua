@@ -361,8 +361,12 @@ function ns.textHeight(fs, w)
     if not fs then return 0 end
     local h = ns.num((fs.GetStringHeight and fs:GetStringHeight()))
     if h and h > 0 then return h end
-    local lines = math.max(1, math.ceil(ns.labelWidth(fs:GetText()) / math.max(1, w or 1)))
-    return lines * 20
+    -- GF-UI-C: every line break starts a new line too.
+    local lines = 0
+    for part in (tostring(fs:GetText() or "") .. "\n"):gmatch("(.-)\n") do
+        lines = lines + math.max(1, math.ceil(ns.labelWidth(part) / math.max(1, w or 1)))
+    end
+    return math.max(1, lines) * 20
 end
 -- A text that sizes itself to its content: no width, one line.
 function ns.freeText(fs)
