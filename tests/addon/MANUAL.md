@@ -1223,6 +1223,49 @@ owner 實測 0.12.2 回報：字太小、有些名稱被擠成兩行（「目的
 
 - □ 所有紅色按鈕：大部分只有字；有圖示的（冒險頁的「＋冒險單」等）圖示比按鈕小一圈，**沒有**黑色方框
 
+## 3uid. GF-UI-D 外觀（0.15.0 起）
+
+依據：owner 指定 wowfah.com 拍賣頁的樣子，只用遊戲本身的圖和字型。離線測試在 `tests/addon/theme_tests.lua`；下面每一項都**未實機驗證**。每頁截一張圖回報，不對的地方在圖上圈起來。
+
+### 截圖（一頁一張）
+
+1. □ 名冊：整個視窗（左邊模組清單、欄位標題、幾列名單、下面那一排）
+2. □ 名冊：右鍵選單打開
+3. □ 名冊：「全部職業」清單打開
+4. □ 配方頁：上半部（搜尋框、篩選、勾選框）
+5. □ 訂單頁：整頁；再一張下單視窗（有金額）
+6. □ 冒險頁：整頁；再一張冒險單視窗
+7. □ 冒險單 → 目的地選單（上面的分頁有一個是金色）
+8. □ 冒險單 → 時間選擇（選到的小時是金色）
+9. □ 職工單視窗、行事曆
+10. □ 角色頁
+11. □ 診斷（同步與診斷視窗）
+12. □ 刪除的確認框
+
+### 每張圖都看
+
+- □ 視窗是深色、一條細灰框；標題是金色字；右上是一個 X（不是紅色按鈕）
+- □ 按鈕是透明細框；滑鼠移上去框變亮、字變白
+- □ 選到的分頁或模組：金色細框加淡金色底（不是整塊黃色）
+- □ 沒有任何紅色大按鈕
+- □ 字都不小於以前的字；沒有東西疊在一起
+- □ 輸入框打字時框變金色；ESC 離開輸入框
+- □ ESC 和點外面一樣會關掉選單和小視窗
+
+### 用到的遊戲圖（16001 沒有清單可查，以實機為準）
+
+| 用途 | 遊戲路徑 | 沒有時 |
+|---|---|---|
+| 面板、按鈕底色、1 px 框線 | 純色（`SetColorTexture`） | `Interface\Buttons\WHITE8X8` 染色，再不行 `Interface\Tooltips\UI-Tooltip-Background` |
+| 勾選框的勾 | `Interface\Buttons\UI-CheckBox-Check` | `Interface\RaidFrame\ReadyCheck-Ready` |
+| 選到的清單列 | `Interface\QuestFrame\UI-QuestLogTitleHighlight` | `Interface\QuestFrame\UI-QuestTitleHighlight`，再不行只有左邊金色細條 |
+| 金額 | `Interface\MoneyFrame\UI-GoldIcon`、`UI-SilverIcon`、`UI-CopperIcon` | 沒有 `GetCoinTextureString` 時寫 g / s / c |
+| 關閉 X | 遊戲字型的「X」 | 不用圖 |
+| 字型 | `GameFontHighlight`、`GameFontNormal`、`GameFontDisable` 放大到 16（標題 18） | 遊戲的 Large 字型 |
+| 數字字型 | `NumberFontNormal` 放大到 16 | 一般 16 點字型 |
+
+職業、職責（圓形）、物品和專業圖示沒有改，見 §3ui、§3af。
+
 ## 3b. 睡袋路線（GF-008-A，0.6.0 起；部落角色）
 
 - □ 左側清單有「睡袋路線」；聯盟角色看不到這一項

@@ -57,7 +57,10 @@ local Icons = ns.Icons
 -- client has no GetCoinTextureString).
 function UI.money(c)
     c = math.floor(tonumber(c) or 0)
+    -- GF-UI-D: where the client has the coin art, the numbers in gold / silver /
+    -- copper with the game's coin icons (Theme.coinText).
     if type(GetCoinTextureString) == "function" then
+        if ns.Theme then return ns.Theme.coinText(c) end
         local ok, s = pcall(GetCoinTextureString, c)
         if ok and type(s) == "string" and s ~= "" then return s end
     end
@@ -235,12 +238,11 @@ function UI.buttonText(text)
 end
 
 -- GF-002-E: a text button as wide as its text (an icon markup counts as one).
+-- GF-UI-D: the theme's outlined button (no red UIPanelButton).
 function UI.textButton(parent, text, onClick, minWidth, exactWidth)
-    local b = ns.createFrame("Button", nil, parent, "UIPanelButtonTemplate")
     local w = exactWidth or math.max(minWidth or 0, ns.labelWidth(text) + 28)
-    b:SetSize(w, ns.BUTTON_H)
+    local b = ns.Theme.button(parent, nil, w, ns.BUTTON_H)
     b.gfWidth, b.gfHeight = w, ns.BUTTON_H
-    if b.SetNormalFontObject then pcall(b.SetNormalFontObject, b, ns.FIELD_FONT) end
     local set = b.SetText
     b.SetText = function(self, t) return set(self, UI.buttonText(t)) end
     b:SetText(text)
@@ -670,9 +672,8 @@ function UI.openPaste()
         f.icon = f:CreateTexture(nil, "ARTWORK"); f.icon:SetSize(ns.ICON, ns.ICON)
         f.icon:SetPoint("TOPLEFT", f, "TOPLEFT", X, -42)
         Icons.set(f.icon, UI.ICON.paste)
-        local box = ns.createFrame("EditBox", nil, f, "InputBoxTemplate")
+        local box = ns.Theme.editBox(f)
         box:SetSize(400, 30)
-        if box.SetFontObject then box:SetFontObject("ChatFontNormal") end
         box:SetPoint("TOPLEFT", f, "TOPLEFT", X + 44, -44)
         box:SetAutoFocus(true)
         if box.SetMaxLetters then box:SetMaxLetters(0) end
@@ -831,18 +832,14 @@ function UI.arrowButton(parent, which, fallbackText)
         b.art = up .. "Up"
         return b
     end
-    local b = ns.createFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    b:SetSize(24, 22)
-    b:SetText(fallbackText)
-    return b
+    return ns.Theme.button(parent, fallbackText, 26, 26)
 end
 
 local function moneyBoxes(parent, x, y, onChange)
     local boxes = {}
     for i, unit in ipairs({ "gold", "silver", "copper" }) do
-        local e = ns.createFrame("EditBox", nil, parent, "InputBoxTemplate")
+        local e = ns.Theme.editBox(parent)
         e:SetSize(i == 1 and 60 or 36, 30)
-        if e.SetFontObject then e:SetFontObject("ChatFontNormal") end
         e:SetPoint("TOPLEFT", parent, "TOPLEFT", x + (i - 1) * 84, y)
         e:SetAutoFocus(false)
         if e.SetNumeric then e:SetNumeric(true) end
@@ -1244,9 +1241,8 @@ function UI.openPicker()
         if f.TitleText then f.TitleText:SetText("下單：選配方") end
         UI.fieldLabel(f, "搜尋", UI.FIELD_X, -46)
         local X = UI.controlX({ "搜尋" })
-        local box = ns.createFrame("EditBox", nil, f, "InputBoxTemplate")
+        local box = ns.Theme.editBox(f)
         box:SetSize(300, 30)
-        if box.SetFontObject then box:SetFontObject("ChatFontNormal") end
         box:SetPoint("TOPLEFT", f, "TOPLEFT", X + 6, -40)
         box:SetAutoFocus(true)
         box:SetMaxLetters(60)

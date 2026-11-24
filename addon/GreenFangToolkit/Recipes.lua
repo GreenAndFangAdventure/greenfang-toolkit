@@ -925,7 +925,7 @@ Recipes.COLS, Recipes.CONTROL_DX = { 22, 272, 522, 772 }, 80
 local function build(p)
     local C, DX = Recipes.COLS, Recipes.CONTROL_DX
     label(p, "搜尋", C[1])
-    search = ns.createFrame("EditBox", nil, p, "InputBoxTemplate")
+    search = ns.Theme.editBox(p)
     search:SetSize(150, 30)
     search:SetPoint("TOPLEFT", p, "TOPLEFT", C[1] + DX, FILTER_Y)
     search:SetAutoFocus(false)

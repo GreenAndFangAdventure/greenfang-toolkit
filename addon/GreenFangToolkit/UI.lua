@@ -1190,12 +1190,11 @@ local function build(p)
     UI.updateButton = button(f, "更新", nil, nil, x, Y, manualUpdate)
     after(UI.updateButton.gfWidth)
     label("搜尋")
-    searchBox = ns.createFrame("EditBox", nil, f, "InputBoxTemplate")
+    searchBox = ns.Theme.editBox(f)
     searchBox:SetSize(120, ns.BUTTON_H)
     searchBox:SetPoint("TOPLEFT", f, "TOPLEFT", x + 4, Y)
     searchBox:SetAutoFocus(false)
     searchBox:SetMaxLetters(100)
-    if searchBox.SetFontObject then searchBox:SetFontObject("ChatFontNormal") end
     searchBox:SetScript("OnTextChanged", function() UI.refresh(true) end)
     searchBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     UI.searchBox = searchBox
@@ -1216,13 +1215,12 @@ local function build(p)
         function(on) UI.filters.active = on; UI.refresh(true) end)
     after(28 + ns.labelWidth(hammer))
     UI.levelLabel = label("等級")
-    UI.levelBox = ns.createFrame("EditBox", nil, f, "InputBoxTemplate")
+    UI.levelBox = ns.Theme.editBox(f)
     UI.levelBox:SetSize(40, ns.BUTTON_H)
     UI.levelBox:SetPoint("TOPLEFT", f, "TOPLEFT", x + 4, Y)
     UI.levelBox:SetAutoFocus(false)
     UI.levelBox:SetMaxLetters(2)
     if UI.levelBox.SetNumeric then UI.levelBox:SetNumeric(true) end
-    if UI.levelBox.SetFontObject then UI.levelBox:SetFontObject("ChatFontNormal") end
     UI.levelBox:SetScript("OnTextChanged", function(self)
         local n = tonumber(str(self:GetText()))
         UI.filters.minLevel = (n and n > 1) and n or nil
@@ -1242,14 +1240,11 @@ local function build(p)
     UI.countText:SetText("")
     rosterControls = { UI.updateButton, searchBox, UI.clearButton, UI.skillChoice, UI.classChoice,
         UI.onlineCheck, UI.levelBox }
-    -- Column header: 28 px, the brand colour, gold names; the sorted one white with an arrow.
+    -- Column header: 28 px, a faint bar with a line (GF-UI-D), gold names; the sorted one white with an arrow.
     local header = CreateFrame("Frame", nil, f)
     header:SetPoint("TOPLEFT", f, "TOPLEFT", 20, UI.HEADER_Y)
     header:SetSize(UI.ROW_WIDTH, UI.HEADER_H)
-    local bg = header:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    local brand = ns.COLOR.brand
-    bg:SetColorTexture(brand[1], brand[2], brand[3], 0.4)
+    ns.Theme.headerBar(header) -- GF-UI-D: a faint bar and a 1 px line under it
     UI.header = header
     for _, col in ipairs(columns) do
         local heading = CreateFrame("Button", nil, header)
@@ -1291,9 +1286,7 @@ local function build(p)
     local bar = CreateFrame("Frame", nil, f)
     bar:SetPoint("TOPLEFT", f, "BOTTOMLEFT", 20, UI.LIST_BOTTOM - 6)
     bar:SetSize(UI.ROW_WIDTH, 44)
-    local barBg = bar:CreateTexture(nil, "BACKGROUND")
-    barBg:SetAllPoints()
-    barBg:SetColorTexture(brand[1], brand[2], brand[3], 0.25)
+    ns.Theme.barPanel(bar) -- GF-UI-D: a faint panel with a line on top
     bar.name = ns.freeText(bar:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
     bar.name:SetPoint("LEFT", bar, "LEFT", 10, 0)
     bar.nameWidth = 170
@@ -1395,7 +1388,7 @@ local function createExport()
     exportEdit = CreateFrame("EditBox", nil, scroll)
     exportEdit:SetMultiLine(true)
     exportEdit:SetAutoFocus(false)
-    exportEdit:SetFontObject("ChatFontNormal")
+    exportEdit:SetFontObject(ns.LABEL_FONT)
     exportEdit:SetWidth(836)
     exportEdit:SetHeight(405)
     exportEdit:SetTextInsets(4, 4, 4, 4)

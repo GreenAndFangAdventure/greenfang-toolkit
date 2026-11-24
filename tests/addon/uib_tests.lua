@@ -282,7 +282,7 @@ return function(T)
         local function check(root, what)
             for _, b in ipairs(shownUnder(root, "Button")) do
                 local t = b._text ~= "" and b._text or (b.label and b.label._text) or ""
-                if plain(t) ~= "" and b._template == "UIPanelButtonTemplate" then
+                if plain(t) ~= "" and b.gfTheme == "button" then
                     ok(cjk(t) <= 4, what .. ": " .. plain(t))
                 end
             end
@@ -362,7 +362,7 @@ return function(T)
         local ns = login()
         local function heights(root, what)
             for _, b in ipairs(shownUnder(root, "Button")) do
-                if b._template == "UIPanelButtonTemplate" then eq(b._h, 30, what .. ": " .. plain(b._text)) end
+                if b.gfTheme == "button" then eq(b._h, 30, what .. ": " .. plain(b._text)) end
             end
         end
         ns.Framework.open("roster"); heights(ns.Framework.panel("roster"), "roster")

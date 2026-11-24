@@ -64,7 +64,7 @@ return function(T)
         eq(barKeys(ns), "whisper,group,inspect", "everyday actions only, with every right")
         for _, b in ipairs(ns.UI.actionBar.buttons) do
             if b:IsShown() then
-                eq(b._template, "UIPanelButtonTemplate", "text buttons")
+                eq(b.gfTheme, "button", "text buttons (GF-UI-D: the theme button)")
                 eq(b._h, 30, "30 px")
                 ok(not b._text:find("|T", 1, true), "no icon")
             end
@@ -321,7 +321,7 @@ return function(T)
         -- The adventure page's buttons get it too (shared widget).
         ns.Framework.open("adventure")
         for _, o in ipairs(wow.allObjects()) do
-            if o._kind == "Button" and o._template == "UIPanelButtonTemplate" and o._shown then
+            if o._kind == "Button" and o.gfTheme == "button" and o._shown then
                 for n in tostring(o._text):gmatch("|T[^:|]+:(%d+)") do ok(tonumber(n) <= 22, "≤ 22: " .. o._text) end
                 for path in tostring(o._text):gmatch("|T([^:|]+)") do
                     if path:find("^Interface\\Icons\\") then ok(o._text:find(":5:59:5:59|t", 1, true), "cropped: " .. o._text) end
@@ -361,7 +361,7 @@ return function(T)
             for _, o in ipairs(wow.allObjects()) do
                 local f, inside = o, false
                 while f do if f == root then inside = true end f = f._parent end
-                if inside and o._kind == "Button" and o._template == "UIPanelButtonTemplate" and o._text ~= "" then
+                if inside and o._kind == "Button" and o.gfTheme == "button" and o._text ~= "" then
                     ok(not o._text:find("|T", 1, true), what .. ": " .. o._text)
                 end
                 if inside and o._kind == "CheckButton" and o.label then
