@@ -70,6 +70,9 @@ G.ART = {
     tag_slow = { { "Interface\\Icons\\Ability_Hunter_Pet_Turtle" }, { "Interface\\Icons\\Spell_Nature_Sleep" } },
     tag_fast = { { "Interface\\Icons\\Ability_Rogue_Sprint" }, { "Interface\\Icons\\INV_Gauntlets_04" } },
     tag_voice = { { "Interface\\Icons\\Ability_Warrior_BattleShout" }, { "Interface\\Icons\\INV_Misc_Horn_01" } },
+    -- GF-002-H: 定案 = the date is sealed: a rolled scroll; 行事曆 = an agenda book.
+    final = { { "Interface\\Icons\\INV_Scroll_04" }, { "Interface\\Icons\\INV_Scroll_03" }, { "Interface\\RaidFrame\\ReadyCheck-Ready" } },
+    calendar = { { "Interface\\Icons\\INV_Misc_Book_11" }, { "Interface\\Icons\\INV_Misc_Book_09" }, { "Interface\\Icons\\INV_Misc_PocketWatch_01" } },
     -- 我的服務 (crafter settings): the smith's hammer.
     services = { { "Interface\\Icons\\Trade_BlackSmithing" }, { "Interface\\Icons\\INV_Hammer_20" } },
     -- ＋下單 (place an order): a letter (an order sent to a crafter).

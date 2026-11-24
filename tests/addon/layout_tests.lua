@@ -262,8 +262,9 @@ return function(T)
         local d = A.openTicket()
         d.dungeon = "smg"
         A.pickTime(nil, "t")
-        eq(A.clock(d.start), "23:00", "the next quarter")
-        -- GF-002-G: the 開始 picker has today's hours left and all of tomorrow's.
+        local sl = d.slots[1]
+        eq(A.clock(sl.start), "23:00", "the next quarter")
+        -- GF-002-G: the picker has today's hours left and all of tomorrow's.
         local pk = A.pickStart(_G[A.TICKET_NAME].startButton)
         local today, tomorrow = 0, 0
         for h = 0, 23 do
@@ -273,14 +274,12 @@ return function(T)
         eq(today, 2, "today: 22 and 23 left")
         eq(tomorrow, 24, "tomorrow: every hour (past midnight)")
         eq(pk.dayLabels[2]:GetText(), "明天", "明天")
+        wow.click(pk.lens[4]) -- 3 小時
         pk:Hide()
-        A.pickDuration(_G[A.TICKET_NAME].startButton)
-        local dm = _G[ns.Framework.MENU_NAME]
-        ok(plain(dm.items[4]:GetText()):find("（隔天）", 1, true), "3 小時 shows it ends the next day")
-        wow.click(dm.items[4])
-        eq(d.finish - d.start, 3 * 3600, "3 hours")
-        eq(A.clock(d.finish), "02:00", "ends 02:00")
-        ok(A.spanText(d.start, d.finish):find("23:00～02:00（隔天）", 1, true), "23:00～02:00（隔天）")
+        eq(sl.dur, 3, "3 hours")
+        local finish = sl.start + sl.dur * 3600
+        eq(A.clock(finish), "02:00", "ends 02:00")
+        ok(plain(_G[A.TICKET_NAME].startButton:GetText()):find("23:00～02:00（隔天）", 1, true), "the chip: 23:00～02:00（隔天）")
         local id = A.submitTicket()
         ok(id, "opened")
         local v = ns.Adventure.get(id)
@@ -290,17 +289,18 @@ return function(T)
         d2.dungeon = "smg"
         pk = A.pickStart(_G[A.TICKET_NAME].startButton)
         wow.click(pk.hours[2][0]); wow.click(pk.minutes[3])
-        eq(A.startText(d2.start), "明天 00:30", "明天 00:30")
+        eq(A.startText(d2.slots[1].start), "明天 00:30", "明天 00:30")
         local id2 = A.submitTicket()
         ok(id2, "opened with a start after midnight")
         ok(plain(A.timeText(ns.Adventure.get(id2))):find("明天 00:30", 1, true), "shown as 明天 00:30")
-        -- Worker time slots: the same picker.
+        -- Worker time slots: the same picker (with 長度).
         A.openWorker()
         local sp = A.pickWorkerSlots(UIParent)
         wow.click(sp.hours[2][1])
-        local sl = A.workerDraft().slots[1]
-        ok(not sl.now and A.startText(sl.s) == "明天 01:00", "worker slot 明天 01:00")
-        eq(sl.e - sl.s, 2 * 3600, "2 hours")
+        wow.click(sp.lens[3]) -- 2 小時
+        local wsl = A.workerDraft().slots[1]
+        ok(not wsl.now and A.startText(wsl.start) == "明天 01:00", "worker slot 明天 01:00")
+        eq(wsl.dur, 2, "2 hours")
     end)
 
     test("GF-002-F 之後: dates with the year, a proper icon", function()
@@ -310,8 +310,8 @@ return function(T)
         d.dungeon = "smg"
         A.pickTime(nil, "f")
         local f = _G[A.TICKET_NAME]
-        ok(plain(f.dayButton:GetText()):match("^%d%d%d%d/%d%d/%d%d（.+）$"), "date with the year: " .. plain(f.dayButton:GetText()))
-        local menu = A.pickDay(f.dayButton)
+        ok(plain(f.startButton:GetText()):match("%d%d%d%d/%d%d/%d%d"), "date with the year: " .. plain(f.startButton:GetText()))
+        local menu = A.pickDay(f.startButton)
         ok(plain(menu.items[2]:GetText()):match("^%d%d%d%d/%d%d/%d%d"), "the date menu has the year")
         menu:Hide()
         local id = A.submitTicket()
@@ -407,5 +407,44 @@ return function(T)
         wow.click(f.roleGroups.any.minus)
         eq(d.size, 4, "quest size －")
         eq(f.roleButton, nil, "the old 調整 button is gone")
+    end)
+
+    test("GF-002-H nothing overlaps with 5 slots (ticket, worker), in the picker's 長度 row, the slot chooser and the calendar", function()
+        local ns = login()
+        withData(ns)
+        local A = ns.AdventureUI
+        local function check(what, win, min)
+            local text, n = overlaps(win)
+            eq(text, "", what .. ": overlaps")
+            eq(insideWindow(win), "", what .. ": inside the window")
+            ok(n >= (min or 5), what .. ": parts measured (" .. n .. ")")
+        end
+        local d = A.openTicket()
+        d.dungeon = "smg"
+        local tf = _G[A.TICKET_NAME]
+        local t = ns.Share.serverNow()
+        d.slots = { { now = true, dur = 2 } }
+        for k = 1, 4 do d.slots[#d.slots + 1] = { start = A.dayStart(2 + k) + 23 * 3600, dur = 3, dayOff = 2 + k } end
+        A.drawTicket()
+        check("ticket with 5 slots (two lines of chips)", tf)
+        d.slots = { { now = true } }; A.drawTicket(); check("ticket with 1 slot", tf)
+        local pk = A.pickStart(tf.startButton)
+        check("the picker with 長度", pk, 20)
+        pk:Hide()
+        A.openWorker()
+        local wf = _G[A.WORKER_NAME]
+        for _, id in ipairs({ "rfc", "wc", "dm", "sfk", "bfd", "stk", "smg", "gnr", "rfk", "brd", "lbrs" }) do A.toggleWorkerDungeon(id) end
+        local wd = A.workerDraft()
+        for k = 1, 4 do wd.slots[#wd.slots + 1] = { start = A.dayStart(2 + k) + 20 * 3600, dur = 2, dayOff = 2 + k } end
+        A.drawWorker()
+        check("worker with 11 dungeons and 5 slots", wf)
+        local ch = A.slotChooser(UIParent, { title = "定案", multi = false, selected = { 2 }, counts = { [2] = { t = 1, h = 2, d = 3, total = 6 } },
+            slots = { { id = 1, now = true }, { id = 2, s = A.dayStart(3) + 23 * 3600, d = 3 * 3600 }, { id = 3, s = t + 86400 },
+                { id = 4, s = A.dayStart(10) + 20 * 3600 }, { id = 5, s = A.dayStart(12) + 21 * 3600, d = 5 * 3600 } },
+            onDone = function() end })
+        check("the slot chooser", ch, 8)
+        ch:Hide()
+        local f = A.openCalendar()
+        check("the calendar", f, 10)
     end)
 end
