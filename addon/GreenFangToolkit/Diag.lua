@@ -2,7 +2,7 @@
 -- Everything technical lives here so the toolkit's pages only show what
 -- players use: site sync status and what waits for GF Sync, in-game sharing
 -- statistics, the roster scan, versions and clock, and the roster export.
--- Opened by the small 「同步與診斷」 button on the roster page and by /gftk sync.
+-- Opened by the 「診斷」 button at the bottom right of the pages and by /gftk sync.
 -- D-015: no switches; the minimap reset lives here (the settings page is gone).
 
 local _, ns = ...
@@ -82,6 +82,8 @@ function Diag.ordersText()
     }
     local shift = ns.num(O.local_().debugShift) or 0
     if shift ~= 0 then parts[#parts + 1] = string.format("測試：訂單時間往前 %d 天", shift / 86400) end
+    -- GF-UI-B: the order test mode (local only, never sent or uploaded).
+    if O.testOn and O.testOn() then parts[#parts + 1] = string.format("測試模式：開，測試單 %d 張（只在這台電腦，不送出、不上傳）", O.testCount()) end
     if #(ns.missingEvents or {}) > 0 then
         parts[#parts + 1] = "客戶端沒有的事件：" .. table.concat(ns.missingEvents, "、")
     end
@@ -155,6 +157,34 @@ local SECTIONS = {
     { title = "版本", text = Diag.versionText },
 }
 
+-- GF-UI-B (GF-UI-A §2.11): 16 px text (18 px state line, gold section
+-- names); the sections sit in a scroll frame, each one right under the one
+-- before it (its measured height + 12), so a long one never covers the next.
+Diag.WIDTH, Diag.HEIGHT, Diag.BODY_W, Diag.GAP = 640, 700, 570, 12
+local heads = {}
+
+-- Place the sections one under the other; returns the content height.
+function Diag.layout()
+    if not window then return 0 end
+    local y = 0
+    for i = 1, #SECTIONS do
+        local head, body = heads[i], lines[i]
+        head:ClearAllPoints()
+        head:SetPoint("TOPLEFT", window.content, "TOPLEFT", 0, -y)
+        y = y + 22
+        body:ClearAllPoints()
+        body:SetPoint("TOPLEFT", window.content, "TOPLEFT", 8, -y)
+        body.gfY = y
+        local h = ns.textHeight(body, Diag.BODY_W)
+        body.gfH = h
+        body:SetHeight(h)
+        y = y + h + Diag.GAP
+        head.gfY = body.gfY - 22
+    end
+    window.content:SetHeight(math.max(1, y))
+    return y
+end
+
 function Diag.refresh()
     if not window then return end
     for i, sec in ipairs(SECTIONS) do
@@ -162,21 +192,21 @@ function Diag.refresh()
         lines[i]:SetText(ok and str(value) or "讀取失敗")
     end
     window.state:SetText(ns.Sync.shortStatus())
+    if Diag.testCheck then Diag.testCheck.set(ns.Orders and ns.Orders.testOn() or false) end
+    Diag.layout()
 end
 
-local function button(parent, text, w, x, y, fn)
-    local b = ns.createFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    b:SetSize(w, 24)
-    b:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", x, y)
-    b:SetText(text)
-    b:SetScript("OnClick", fn)
-    return b
+-- GF-UI-B: 30 px text buttons, 2-4 character names (GF-UI-A §2.11 item 3).
+local function button(parent, text, x, fn)
+    local b = ns.OrdersUI.textButton(parent, text, fn)
+    b:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", x, 16)
+    return b, x + b.gfWidth + 10
 end
 
 local function create()
     if window then return window end
     -- GF-001-D20: opaque and above the toolkit window (was see-through).
-    local f = ns.popupWindow(Diag.WINDOW_NAME, 640, 700)
+    local f = ns.popupWindow(Diag.WINDOW_NAME, Diag.WIDTH, Diag.HEIGHT)
     f:SetPoint("CENTER", 0, 20)
     f:SetMovable(true)
     f:EnableMouse(true)
@@ -185,26 +215,53 @@ local function create()
     f:SetScript("OnDragStop", f.StopMovingOrSizing)
     f:SetClampedToScreen(true)
     if f.TitleText then f.TitleText:SetText("綠皮冒險工具箱｜同步與診斷") end
-    f.state = f:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    f.state = f:CreateFontString(nil, "ARTWORK", ns.TITLE_FONT)
     f.state:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -36)
-    local y = -70
+    local scroll = ns.createFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -66)
+    scroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -40, 60)
+    local content = CreateFrame("Frame", nil, scroll)
+    content:SetSize(Diag.BODY_W + 10, 1)
+    scroll:SetScrollChild(content)
+    f.scroll, f.content = scroll, content
     for i, sec in ipairs(SECTIONS) do
-        local head = f:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-        head:SetPoint("TOPLEFT", f, "TOPLEFT", 20, y)
+        local head = content:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT)
+        head:SetJustifyH("LEFT")
         head:SetText(sec.title)
-        local body = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        body:SetPoint("TOPLEFT", f, "TOPLEFT", 28, y - 20)
-        body:SetWidth(590)
+        heads[i] = head
+        local body = content:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
+        body:SetWidth(Diag.BODY_W)
         body:SetJustifyH("LEFT")
+        if body.SetJustifyV then body:SetJustifyV("TOP") end
+        if body.SetWordWrap then body:SetWordWrap(true) end
         lines[i] = body
-        y = y - (i == 3 and 80 or 66)
     end
-    Diag.exportTSVButton = button(f, "匯出名冊 TSV", 130, 20, 16, function() ns.UI.startExport("tsv") end)
-    Diag.exportJSONButton = button(f, "匯出名冊 JSON", 130, 158, 16, function() ns.UI.startExport("json") end)
-    Diag.refreshButton = button(f, "重新整理", 100, 296, 16, Diag.refresh)
-    Diag.minimapButton = button(f, "小地圖按鈕回到預設位置", 200, 404, 16, function()
+    local GI = ns.GameIcons
+    -- 匯出 [TSV] [JSON]  [更新]  [小地圖]  [ ] 測試
+    f.exportLabel = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
+    f.exportLabel:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 20, 22)
+    f.exportLabel:SetText(GI.markup("export", 20) .. " 匯出")
+    local x = 20 + ns.labelWidth(f.exportLabel:GetText()) + 6
+    Diag.exportTSVButton, x = button(f, "TSV", x, function() ns.UI.startExport("tsv") end)
+    Diag.exportJSONButton, x = button(f, "JSON", x, function() ns.UI.startExport("json") end)
+    Diag.refreshButton, x = button(f, GI.markup("refresh", 20) .. " 更新", x + 6, Diag.refresh)
+    Diag.minimapButton, x = button(f, GI.markup("minimap", 20) .. " 小地圖", x, function(self)
         ns.Framework.resetMinimap()
-        ns.say("小地圖按鈕已回到外圈左下方；也可以按住拖曳，沿外圈調整位置。")
+        self:SetText(GI.markup("yes", 20) .. " 小地圖")
+        ns.after(3, function() self:SetText(GI.markup("minimap", 20) .. " 小地圖") end)
+    end)
+    Diag.minimapButton:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("重置")
+        GameTooltip:Show()
+    end)
+    Diag.minimapButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    -- GF-UI-B: the order test mode (Orders.setTestMode). Off deletes the test orders.
+    Diag.testCheck = ns.checkBox(f, GI.markup("test", 20) .. " 測試", x + 6, -(Diag.HEIGHT - 16 - 29), function(on)
+        if ns.Orders then ns.Orders.setTestMode(on) end
+        Diag.refresh()
+        if ns.OrdersUI and ns.OrdersUI.refresh then ns.OrdersUI.refresh() end
+        if ns.Recipes and ns.Framework.isModuleShown("recipes") then ns.Recipes.refresh() end
     end)
     f:SetScript("OnShow", Diag.refresh)
     f:Hide()
@@ -226,15 +283,18 @@ end
 
 function Diag.isShown() return window ~= nil and window:IsShown() end
 function Diag.lines() return lines end
+function Diag.heads() return heads end
+function Diag.window() return window end
 
--- The small 「同步與診斷」 button on the roster page.
+-- The 「診斷」 button at the bottom right of a page (GF-UI-B, GF-UI-A §2.11
+-- item 4: a gear and 2 characters, 30 px; was the 120 x 22 「同步與診斷」).
+-- Its name takes the sync status colour (UI.refreshSyncIndicator).
 local smallButtons = {}
+Diag.BUTTON_TEXT = "診斷"
 function Diag.smallButton(parent, point, x, y)
-    local b = ns.createFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    b:SetSize(120, 22)
+    local b = ns.OrdersUI.textButton(parent, ns.GameIcons.markup("diag", 20) .. " " .. Diag.BUTTON_TEXT, Diag.toggle)
     b:SetPoint(point, parent, point, x, y)
-    b:SetText("同步與診斷")
-    b:SetScript("OnClick", Diag.toggle)
+    b.label = b.GetFontString and b:GetFontString() or nil
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("同步與診斷")
@@ -242,10 +302,20 @@ function Diag.smallButton(parent, point, x, y)
     end)
     b:SetScript("OnLeave", function() GameTooltip:Hide() end)
     smallButtons[#smallButtons + 1] = b
+    if ns.Sync and ns.Sync.statusColor and b.label and b.label.SetTextColor then
+        local c = ns.Sync.statusColor()
+        b.label:SetTextColor(c[1], c[2], c[3])
+    end
     return b
 end
+function Diag.smallButtons() return smallButtons end
 
 local function onChange()
+    -- GF-UI-B: every page's 診斷 button follows the sync status colour.
+    local c = ns.Sync.statusColor and ns.Sync.statusColor()
+    for _, b in ipairs(smallButtons) do
+        if c and b.label and b.label.SetTextColor then b.label:SetTextColor(c[1], c[2], c[3]) end
+    end
     if Diag.isShown() then ns.coalesce("diag", 1, function() if Diag.isShown() then Diag.refresh() end end) end
 end
 ns.Sync.onChange(onChange)

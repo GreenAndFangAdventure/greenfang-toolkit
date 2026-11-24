@@ -1,5 +1,8 @@
 -- UI: the roster module (first module of the toolkit window) and the export
--- window. Layout and behaviour are unchanged from v0.3.1.
+-- window. GF-UI-B (0.13.1, GF-UI-A §2.2): 16 px text, 36 px rows, 24 px class
+-- and 28 px profession icons, a 40 px tool bar, a 28 px header with arrow
+-- textures, no sentences or time stamps on the page (the scan time is in
+-- 同步與診斷), race in the tooltip.
 
 local _, ns = ...
 local str, keyName = ns.str, ns.keyName
@@ -9,9 +12,9 @@ local Icons = ns.Icons
 local UI = {}
 ns.UI = UI
 
-local ROW_HEIGHT = 23
+local ROW_HEIGHT = ns.PAGE_ROW -- GF-UI-B: 36 (was 23)
 local panel, exportWindow
-local rowScroll, rowContent, searchBox, reportLine, summaryLine, statusLine
+local rowScroll, rowContent, searchBox
 -- Only the rows in view exist (GF-001-D14, EVAL-1000 §3.5): a small pool is
 -- refilled while scrolling. matching is the sorted, filtered member list.
 local rowWidgets = {}
@@ -34,33 +37,39 @@ UI.SORT_KEYS = { name = true, rank = true, race = true, class = true, profession
 -- "－" (full-width, faint) means no data. Row height is unchanged.
 -- GF-001-D19: icons 20 px (were 14), full colour for names-only members;
 -- each icon has its own short tooltip, and a click filters the roster.
+-- GF-UI-B: profession icons 28 px (were 20), the hammer 16 px (was 10).
 local LIST_SLOTS, LIST_GAP, GROUP_GAP = 6, 8, 6
-local ICON_SIZE, ICON_GAP, MORE_WIDTH = 20, 2, 20
+local ICON_SIZE, ICON_GAP, MORE_WIDTH = ns.ROW_ICON, 2, 24
+local CLASS_ICON, BADGE_SIZE, STATUS_ICON = 24, 16, 16
+UI.ICON_SIZE, UI.CLASS_ICON, UI.BADGE_SIZE, UI.STATUS_ICON = ICON_SIZE, CLASS_ICON, BADGE_SIZE, STATUS_ICON
 local NO_DATA = "－"
 local SECONDARY_COLOR, NAMES_COLOR, TEXT_COLOR = { 0.72, 0.8, 0.74 }, { 0.6, 0.6, 0.6 }, { 1, 1, 1 }
 local NO_DATA_COLOR = { 0.42, 0.42, 0.42 }
 local NAMES_ALPHA, SECONDARY_ALPHA = 1, 0.85
-local ONLINE_COLOR, OFFLINE_COLOR = { 0.4, 1, 0.4 }, { 0.55, 0.55, 0.55 }
+local ONLINE_COLOR, OFFLINE_COLOR = ns.COLOR.good, ns.COLOR.disabled
 local RANK_COLOR = { 0.85, 0.82, 0.65 }
 
 -- Make each visible row from the stored snapshot, never from a stale chat printout.
 -- GF-001-Q: two note columns on the right (公會註記 for everyone, 幹部註記
--- only for those the game lets see it); the others gave a little room.
+-- only for those the game lets see it).
+-- GF-UI-B (GF-UI-A §2.2 item 1): reflowed for the 16 px font; 種族 moved to
+-- the tooltip. 4 px between columns; the notes share the last 124 px when
+-- the officer column is shown (each 60), else 公會註記 takes all of it.
 local columns = {
-    { name = "角色", key = "name", x = 5, w = 150 },
-    { name = "會階", key = "rank", x = 158, w = 70 },
-    { name = "種族", key = "race", x = 231, w = 66 },
-    { name = "職業", key = "class", x = 300, w = 92, icon = true },
-    { name = "專業技能", key = "professions", x = 395, w = 286 },
-    { name = "等級", key = "level", x = 684, w = 34, firstDescending = true, center = true },
-    { name = "位置", key = "zone", x = 721, w = 70 },
-    { name = "狀態", key = "online", x = 794, w = 40, firstDescending = true },
-    { name = "公會註記", key = "note", x = 837, w = 104, noSort = true },
-    { name = "幹部註記", key = "officerNote", x = 944, w = 94, noSort = true, officer = true },
+    { name = "角色", key = "name", x = 4, w = 160 },
+    { name = "會階", key = "rank", x = 168, w = 80 },
+    { name = "職業", key = "class", x = 252, w = 120, icon = true },
+    { name = "專業", key = "professions", x = 376, w = 300 },
+    { name = "等級", key = "level", x = 680, w = 44, firstDescending = true, center = true },
+    { name = "位置", key = "zone", x = 728, w = 110 },
+    { name = "狀態", key = "online", x = 842, w = 70, firstDescending = true, status = true },
+    { name = "公會註記", key = "note", x = 916, w = 124, noSort = true, wSplit = 60 },
+    { name = "幹部註記", key = "officerNote", x = 980, w = 60, noSort = true, officer = true },
 }
 UI.columns = columns
 UI.ROW_WIDTH = 1040
-UI.REPORT_WIDTH = 520 -- the two lines on top; the guild buttons are right of them
+UI.CELL = {}
+for j, col in ipairs(columns) do UI.CELL[col.key] = j end
 
 ---------------------------------------------------------------------------
 -- Sorting and filtering (pure; covered by offline tests)
@@ -187,26 +196,33 @@ end
 -- Main window
 ---------------------------------------------------------------------------
 
+-- GF-UI-B: every text button is the toolkit's 30 px textButton (GF-UI-A §1.3).
 local function button(parent, text, w, h, x, y, callback)
-    local b = ns.createFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    b:SetSize(w, h)
+    local b = ns.OrdersUI.textButton(parent, text, callback, w)
     b:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
-    b:SetText(text)
-    b:SetScript("OnClick", callback)
     return b
 end
 
+-- GF-UI-B (GF-UI-A §2.2 item 8): the column being sorted is white with an
+-- arrow texture (never arrow characters); the others stay gold.
 local function updateSortHeaders()
     for _, entry in ipairs(sortHeaders) do
         local active = entry.col.key == UI.sortKey
-        entry.label:SetText(entry.col.name .. (active and (UI.sortAscending and " ▲" or " ▼") or ""))
+        entry.label:SetText(entry.col.name)
         if active then
-            entry.label:SetTextColor(0.53, 1.0, 0.68)
+            ns.setTextColor(entry.label, "white")
+            ns.GameIcons.set(entry.arrow, UI.sortAscending and "sort_up" or "sort_down")
+            entry.arrow:ClearAllPoints()
+            entry.arrow:SetPoint("LEFT", entry.heading, "LEFT", ns.measure(entry.label) + 4, 0)
+            entry.arrow:Show()
         else
-            entry.label:SetTextColor(1, 0.82, 0)
+            ns.setTextColor(entry.label, "gold")
+            entry.arrow:Hide()
         end
+        entry.heading.sortDir = active and (UI.sortAscending and "up" or "down") or nil
     end
 end
+UI.sortHeaders = function() return sortHeaders end
 
 local function changeSort(col)
     if UI.sortKey == col.key then
@@ -227,26 +243,32 @@ local function newRow(i)
     row.bg = row:CreateTexture(nil, "BACKGROUND")
     row.bg:SetAllPoints()
     -- GF-001-Q: the selected member (its actions are in the bar under the list).
-    row.selected = row:CreateTexture(nil, "BORDER")
-    row.selected:SetAllPoints()
-    row.selected:SetColorTexture(1, 0.82, 0, 0.18)
-    row.selected:Hide()
-    row.cells = {}
+    -- GF-UI-B: the shared list-row selection (gold glow + a 3 px bar).
+    row.selected = ns.rowSelect(row)
+    row.cells, row.cell = {}, {}
     for j, col in ipairs(columns) do
-        local font = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        local font = row:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
         local x, w = col.x, col.w
         if col.icon then
             row.classIcon = row:CreateTexture(nil, "ARTWORK")
-            row.classIcon:SetSize(16, 16)
+            row.classIcon:SetSize(CLASS_ICON, CLASS_ICON)
             row.classIcon:SetPoint("LEFT", row, "LEFT", col.x, 0)
-            x, w = col.x + 20, col.w - 20
+            x, w = col.x + CLASS_ICON + 4, col.w - CLASS_ICON - 4
+        end
+        if col.status then
+            row.statusIcon = row:CreateTexture(nil, "ARTWORK")
+            row.statusIcon:SetSize(STATUS_ICON, STATUS_ICON)
+            row.statusIcon:SetPoint("LEFT", row, "LEFT", col.x, 0)
+            x, w = col.x + STATUS_ICON + 4, col.w - STATUS_ICON - 4
         end
         font:SetPoint("LEFT", row, "LEFT", x, 0)
         font:SetWidth(w)
         font:SetHeight(ROW_HEIGHT)
         font:SetJustifyH(col.center and "CENTER" or "LEFT")
         font:SetWordWrap(false)
+        font.colX, font.colW = x, w
         row.cells[j] = font
+        row.cell[col.key] = font
         if col.key == "professions" then
             row.profX, row.profW = col.x, col.w
             row.profSlots = {}
@@ -254,19 +276,19 @@ local function newRow(i)
                 local icon = row:CreateTexture(nil, "ARTWORK")
                 icon:SetSize(ICON_SIZE, ICON_SIZE)
                 icon:Hide()
-                local label = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+                local label = row:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
                 label:SetHeight(ROW_HEIGHT)
                 label:SetJustifyH("LEFT")
                 label:SetWordWrap(false)
                 -- GF-006-B (R-4.2): gold hammer corner on an active profession.
                 local badge = row:CreateTexture(nil, "OVERLAY")
-                badge:SetSize(10, 10)
-                badge:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", 3, -3)
+                badge:SetSize(BADGE_SIZE, BADGE_SIZE)
+                badge:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", 4, -4)
                 badge:Hide()
                 local slot = { icon = icon, label = label, badge = badge }
                 row.profSlots[k] = slot
             end
-            row.profMore = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+            row.profMore = row:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
             row.profMore:SetHeight(ROW_HEIGHT)
         end
     end
@@ -285,35 +307,35 @@ local function newRow(i)
         self.hoverSlot = nil
         GameTooltip:Hide()
     end)
-    -- Click on a profession: filter the roster by it (again: clear).
-    -- Elsewhere: that member's recipes (D-013). A plain frame, nothing secure.
-    row:SetScript("OnMouseUp", function(self, mouse)
-        local slot = UI.slotAt(self, UI.cursorX(self))
-        local id = slot and slot.entry.prof and ns.Professions.skillLineOf(slot.entry.prof)
-        -- GF-006-B (R-5.1): right-click someone's profession = 「下單給〈名字〉」.
-        if mouse == "RightButton" and id and ns.OrdersUI then
-            local m = { guid = self.memberGuid, name = self.memberName }
-            ns.showMenu(self, ns.OrdersUI.rosterMenuItems(m, id))
-            return
-        end
-        -- GF-001-Q: right-click elsewhere = the member menu (whisper, group,
-        -- look up, and what this character may do in the guild).
-        if mouse == "RightButton" then
-            UI.select(self.member)
-            local items = UI.memberMenuItems(self.member)
-            if #items > 0 then ns.showMenu(self, items) end
-            return
-        end
-        if id then
-            UI.setSkillFilter(UI.filters.skill ~= id and id or nil)
-        else
-            -- GF-001-Q: a left click selects the member; the same buttons show
-            -- under the list (配方 among them when the member shared recipes).
-            UI.select(self.member)
-        end
-    end)
+    row:SetScript("OnMouseUp", function(self, mouse) UI.rowClick(self, mouse, UI.slotAt(self, UI.cursorX(self))) end)
     rowWidgets[i] = row
     return row
+end
+
+-- GF-UI-B (owner): a left click on a member's profession icon opens that
+-- member's recipes of that profession (filtering stays on the 專業 filter);
+-- a left click anywhere else selects the member. Right-click is unchanged:
+-- on a profession 「下單給〈名字〉」, elsewhere the member menu.
+-- A plain frame, nothing secure. Returns what it did (offline tests).
+function UI.rowClick(row, mouse, slot)
+    local id = slot and slot.entry and slot.entry.prof and ns.Professions.skillLineOf(slot.entry.prof)
+    if mouse == "RightButton" and id and ns.OrdersUI then
+        local m = { guid = row.memberGuid, name = row.memberName }
+        ns.showMenu(row, ns.OrdersUI.rosterMenuItems(m, id))
+        return "order-menu"
+    end
+    if mouse == "RightButton" then
+        UI.select(row.member)
+        local items = UI.memberMenuItems(row.member)
+        if #items > 0 then ns.showMenu(row, items) end
+        return "member-menu"
+    end
+    if id and row.memberGuid and ns.Recipes then
+        ns.Recipes.show(row.memberGuid, id)
+        return "recipes"
+    end
+    UI.select(row.member)
+    return "select"
 end
 
 -- Cursor x from the row's left edge, or nil (offline tests: no cursor).
@@ -348,11 +370,18 @@ function UI.showRowTooltip(row, slot)
         return
     end
     local detail, names = row.detail, row.rosterNames
-    if not detail and not (names and #names > 0) then
-        GameTooltip:Hide()
-        return
-    end
-    GameTooltip:AddLine(str(row.memberName))
+    -- GF-UI-B (GF-UI-A §2.2 item 10): a small card: name, level, race, class,
+    -- rank (種族 left the columns), then each profession.
+    local m = row.member or {}
+    local c = Icons.classColor(m.classToken)
+    GameTooltip:AddLine(str(row.memberName), c[1], c[2], c[3])
+    local facts = {}
+    if type(m.level) == "number" and m.level > 0 then facts[#facts + 1] = tostring(m.level) end
+    local race = Export.raceText(m)
+    if str(race) ~= "" then facts[#facts + 1] = race end
+    if str(m.class) ~= "" then facts[#facts + 1] = m.class end
+    if str(m.guildRank) ~= "" then facts[#facts + 1] = m.guildRank end
+    if #facts > 0 then GameTooltip:AddLine(table.concat(facts, "  "), 0.9, 0.9, 0.9) end
     if detail then
         for _, prof in ipairs(detail.professions) do
             local c = ns.Professions.isSecondary(prof) and SECONDARY_COLOR or { 0.9, 0.9, 0.9 }
@@ -406,7 +435,7 @@ function UI.skillLabel(prof)
     return value and (str(prof.name) .. " " .. value) or str(prof.name)
 end
 
--- "2026-11-20 21:05" (header): the scan time without seconds.
+-- "2026-11-20 21:05": the scan time without seconds (同步與診斷 only).
 function UI.shortTime(s)
     local t = Export.timestampText(s)
     return (t:gsub("^(%d+%-%d+%-%d+ %d+:%d+):%d+$", "%1"))
@@ -461,7 +490,25 @@ ns.Sync.onChange(function()
 end)
 ns.Share.onUpdate(refreshSoon)
 
--- Message shown instead of the roster, or nil when the roster is available.
+-- GF-UI-B (GF-UI-A §2.2 item 3): what the middle of the list shows instead
+-- of rows: a 48 px icon and a 2-4 character name, never a sentence.
+-- nil when there are rows to show.
+UI.EMPTY = {
+    loading = { art = "loading", text = "讀取中" },
+    none = { art = "noguild", text = "未入會" },
+    other = { art = "tabard", text = "非本會", grey = true },
+    noRoster = { art = "refresh", text = "" }, -- the 更新 button itself sits under the icon
+    noMatch = { art = "person", text = "沒有", grey = true },
+}
+function UI.emptyState(s)
+    local state = ns.guildState()
+    if state ~= "target" then return state end
+    if not s then return "noRoster" end
+    if #matching == 0 then return "noMatch" end
+    return nil
+end
+
+-- Message for chat and 同步與診斷 when the roster is not available, or nil.
 function UI.unavailableText()
     local state = ns.guildState()
     if state == "target" then return nil end
@@ -489,23 +536,18 @@ function UI.refresh(resetScroll)
     if unavailable and searchBox and searchBox.ClearFocus then searchBox:ClearFocus() end
     local s = not unavailable and ns.Roster.current() or nil
     matching = {}
-    if unavailable then
-        reportLine:SetText(unavailable)
-        summaryLine:SetText("睡袋路線等其他功能照常可以使用。")
-        statusLine:SetText(ns.Sync.guildNote() or "")
-    elseif s then
-        -- D-014 point 6: only what players use; scan details are in 「同步與診斷」.
-        reportLine:SetText(string.format("%s｜%d 位成員｜%s 更新",
-            s.guild or "", s.total or #s.members, UI.shortTime(s)))
-        summaryLine:SetText("")
+    if s then
+        -- D-014 point 6, GF-UI-B: only what players use. The guild name is in the
+        -- window title, the count on the tool bar; the scan time is in 同步與診斷.
         matching = UI.sortMembers(UI.filterMembers(s.members, searchBox and searchBox:GetText() or "", UI.filters),
             UI.sortKey, UI.sortAscending)
-        statusLine:SetText(string.format("顯示 %d / %d 位", #matching, #s.members))
+        UI.countText:SetText(string.format("%d/%d", #matching, #s.members))
     else
-        reportLine:SetText("尚無名冊；按「更新名冊」取得公會資料。")
-        summaryLine:SetText("")
-        statusLine:SetText("")
+        UI.countText:SetText("")
     end
+    UI.placeCount()
+    UI.drawEmpty(UI.emptyState(s))
+    ns.Framework.refreshTitle()
     UI.refreshSyncIndicator()
     UI.refreshAdminButtons()
     if UI.selected then
@@ -534,6 +576,7 @@ function UI.layoutRows()
     local offset = ns.num((rowScroll:GetVerticalScroll())) or 0
     local first = math.max(1, math.floor(offset / ROW_HEIGHT) + 1)
     local count = UI.visibleRowCount()
+    UI.officerLayout()
     for k = 1, math.max(count, #rowWidgets) do
         local i = first + k - 1
         local m = k <= count and matching[i] or nil
@@ -543,7 +586,7 @@ function UI.layoutRows()
                 row.index = i
                 row:ClearAllPoints()
                 row:SetPoint("TOPLEFT", rowContent, "TOPLEFT", 0, -(i - 1) * ROW_HEIGHT)
-                row.bg:SetColorTexture(0.17, 0.2, 0.18, i % 2 == 0 and 0.35 or 0.09)
+                ns.stripe(row.bg, i) -- GF-UI-B: the shared stripe
                 UI.fillRow(row, m)
                 row:Show()
             else
@@ -726,38 +769,55 @@ function UI.placeOwnButtons()
     Prof.hideFrom("roster", n + 1)
 end
 
+-- GF-UI-B: 公會註記 takes the officer column's room while that one is hidden.
+function UI.officerLayout()
+    local noteCol = columns[UI.CELL.note]
+    local w = UI.officerVisible and noteCol.wSplit or noteCol.w
+    for _, row in ipairs(rowWidgets) do row.cell.note:SetWidth(w); row.cell.note.colW = w end
+    for _, entry in ipairs(sortHeaders) do
+        if entry.col.key == "note" then entry.heading:SetSize(w - 2, UI.HEADER_H) end
+    end
+end
+
 -- One roster row: class icon and colour, rank, centred level, coloured status.
 function UI.fillRow(row, m)
     local color = Icons.classColor(m.classToken)
     local cells = row.cells
     row.member = m
     if UI.selected and m.name == UI.selected.name then row.selected:Show() else row.selected:Hide() end
-    cells[1]:SetText(str(m.name))
-    cells[1]:SetTextColor(color[1], color[2], color[3])
-    cells[2]:SetText(str(m.guildRank))
-    cells[2]:SetTextColor(RANK_COLOR[1], RANK_COLOR[2], RANK_COLOR[3])
-    cells[3]:SetText(Export.raceText(m))
+    local cell = row.cell
+    cell.name:SetText(str(m.name))
+    cell.name:SetTextColor(color[1], color[2], color[3])
+    cell.rank:SetText(str(m.guildRank))
+    cell.rank:SetTextColor(RANK_COLOR[1], RANK_COLOR[2], RANK_COLOR[3])
     Icons.setClassIcon(row.classIcon, m.classToken)
-    cells[4]:SetText(str(m.class))
-    cells[4]:SetTextColor(color[1], color[2], color[3])
-    fillProfessions(row, cells[5], m)
-    cells[6]:SetText(tostring(m.level or 0))
-    cells[7]:SetText(str(m.zone) ~= "" and str(m.zone) or "未記錄")
+    cell.class:SetText(str(m.class))
+    cell.class:SetTextColor(color[1], color[2], color[3])
+    fillProfessions(row, cell.professions, m)
+    cell.level:SetText(tostring(m.level or 0))
+    -- GF-UI-B (GF-UI-A §2.2 items 6, 7): a faint "－" for no zone; a 16 px
+    -- online / offline icon in front of the status.
+    if str(m.zone) ~= "" then
+        cell.zone:SetText(str(m.zone)); cell.zone:SetTextColor(1, 1, 1)
+    else
+        cell.zone:SetText(NO_DATA); cell.zone:SetTextColor(NO_DATA_COLOR[1], NO_DATA_COLOR[2], NO_DATA_COLOR[3])
+    end
     local status = m.online and ONLINE_COLOR or OFFLINE_COLOR
-    cells[8]:SetText(m.online and "在線" or "離線")
-    cells[8]:SetTextColor(status[1], status[2], status[3])
+    ns.GameIcons.set(row.statusIcon, m.online and "online" or "offline")
+    cell.online:SetText(m.online and "在線" or "離線")
+    cell.online:SetTextColor(status[1], status[2], status[3])
     -- GF-001-Q: notes straight from the game's roster (memory only, never saved).
     local note, officer = "", nil
     if ns.GuildAdmin then note, officer = ns.GuildAdmin.notes(m.name) end
-    cells[9]:SetText(note)
-    cells[9]:SetTextColor(0.9, 0.9, 0.9)
+    cell.note:SetText(note)
+    cell.note:SetTextColor(0.9, 0.9, 0.9)
     if UI.officerVisible then
-        cells[10]:SetText(officer or "")
-        cells[10]:SetTextColor(0.6, 1, 0.6)
-        cells[10]:Show()
+        cell.officerNote:SetText(officer or "")
+        cell.officerNote:SetTextColor(0.6, 1, 0.6)
+        cell.officerNote:Show()
     else
-        cells[10]:SetText("")
-        cells[10]:Hide()
+        cell.officerNote:SetText("")
+        cell.officerNote:Hide()
     end
 end
 
@@ -771,7 +831,7 @@ function UI.memberMenuItems(m)
     if not m or not ns.GuildAdmin then return {} end
     local items = {}
     if UI.hasRecipes(m.guid) then
-        items[#items + 1] = { text = "|T" .. UI.RECIPE_ICON .. ":16|t 配方", fn = function() ns.Recipes.show(m.guid) end }
+        items[#items + 1] = { text = "|T" .. UI.RECIPE_ICON .. ":18|t 配方", fn = function() ns.Recipes.show(m.guid) end }
     end
     for _, it in ipairs(ns.GuildAdmin.menuItems(m)) do items[#items + 1] = it end
     return items
@@ -789,13 +849,12 @@ function UI.drawActionBar()
     if not bar then return end
     local m = UI.selected
     local G = ns.GuildAdmin
+    -- GF-UI-B (GF-UI-A §2.2 item 3): nobody chosen = an empty bar, no hint.
     if not (m and G) then
         bar.name:SetText("")
-        bar.hint:SetText("點一列選成員")
         for _, b in ipairs(bar.buttons) do b:Hide() end
         return
     end
-    bar.hint:SetText("")
     local c = Icons.classColor(m.classToken)
     bar.name:SetText(ns.shortName(m.name))
     bar.name:SetTextColor(c[1], c[2], c[3])
@@ -865,13 +924,19 @@ function UI.drawGuildInfo()
     local f, G = UI.guildInfo, ns.GuildAdmin
     if not (f and G) then return end
     local motd, info = G.motd(), G.infoText()
-    f.motd:SetText(motd ~= "" and motd or "（沒有）")
-    f.info:SetText(info ~= "" and info or "（沒有）")
+    -- GF-UI-B (GF-UI-A §2.10 item 4): a faint "－" for nothing, no brackets.
+    f.motd:SetText(motd ~= "" and motd or NO_DATA)
+    f.info:SetText(info ~= "" and info or NO_DATA)
+    local faint = NO_DATA_COLOR
+    if motd ~= "" then f.motd:SetTextColor(1, 1, 1) else f.motd:SetTextColor(faint[1], faint[2], faint[3]) end
+    if info ~= "" then f.info:SetTextColor(1, 1, 1) else f.info:SetTextColor(faint[1], faint[2], faint[3]) end
     if G.can("motd") then f.editMotd:Show() else f.editMotd:Hide() end
     if G.can("info") then f.editInfo:Show() else f.editInfo:Hide() end
 end
 
--- Buttons on top of the page: only what this character may use.
+-- Buttons of the bottom row (GF-UI-B, GF-UI-A §2.2 item 9): only what this
+-- character may use, right-aligned left of 診斷.
+UI.BOTTOM_Y = 12
 function UI.refreshAdminButtons()
     local G = ns.GuildAdmin
     if not (G and UI.inviteButton) then return end
@@ -879,14 +944,12 @@ function UI.refreshAdminButtons()
     if G.can("invite") then UI.inviteButton:Show(); list[#list + 1] = UI.inviteButton else UI.inviteButton:Hide() end
     if G.has("GetGuildRosterMOTD") or G.has("GetGuildInfoText") then UI.infoButton:Show(); list[#list + 1] = UI.infoButton else UI.infoButton:Hide() end
     if G.canOpenGameUI() then UI.gameGuildButton:Show(); list[#list + 1] = UI.gameGuildButton else UI.gameGuildButton:Hide() end
-    -- Right-aligned on the top line.
-    local x = UI.ROW_WIDTH + 20
+    local x = UI.diagLeft or (UI.ROW_WIDTH + 20)
     for i = #list, 1, -1 do
         local b = list[i]
-        x = x - b.gfWidth
+        x = x - 10 - b.gfWidth
         b:ClearAllPoints()
-        b:SetPoint("TOPLEFT", panel, "TOPLEFT", x, -34)
-        x = x - 10
+        b:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", x, UI.BOTTOM_Y)
     end
     UI.adminLeft = x
     local view = G.can("viewOfficer")
@@ -913,7 +976,9 @@ local function manualUpdate()
         return
     end
     manualScan = true
-    summaryLine:SetText("名冊更新中，請稍候。")
+    -- GF-UI-B: no sentence on the page; the 更新 button waits instead.
+    if UI.updateButton and UI.updateButton.Disable then UI.updateButton:Disable() end
+    ns.after(6.5, function() if UI.updateButton and UI.updateButton.Enable then UI.updateButton:Enable() end end)
     -- Club info and guild roster can arrive separately.
     ns.after(2, function()
         if not manualScan then return end
@@ -953,109 +1018,168 @@ function UI.clearFilters()
     UI.refresh(true)
 end
 
--- Build the roster page into the framework panel (same coordinates as the
--- old stand-alone window, which the panel replaces).
+-- GF-UI-B (GF-UI-A §1.2, §2.2): the page from top to bottom:
+--   tool bar (y -36, 30 px controls):
+--     [更新] 搜尋 [box] [專業][職業] [ ]在線 [ ]接單中 等級 [  ] 以上 [清除]   [人頭] 12/80
+--   column header (y -76, 28 px, gold, arrow textures)
+--   the list (36 px rows)
+--   the chosen member's buttons (44 px bar)
+--   bottom row: [邀請] [公會] [遊戲公會] [診斷] on the right
+UI.TOOLBAR_Y, UI.HEADER_Y, UI.HEADER_H, UI.LIST_TOP, UI.LIST_BOTTOM = -36, -76, 28, -106, 100
+UI.TOOLBAR_GAP = 8
+UI.EMPTY_ICON = 48
+
+-- The middle of the list when there are no rows (UI.EMPTY).
+function UI.drawEmpty(state)
+    local e = state and UI.EMPTY[state]
+    UI.emptyKey = state
+    if not e then
+        UI.emptyIcon:Hide(); UI.emptyLabel:SetText(""); UI.emptyLabel:Hide(); UI.emptyUpdate:Hide()
+        return
+    end
+    ns.GameIcons.set(UI.emptyIcon, e.art)
+    if UI.emptyIcon.SetDesaturated then UI.emptyIcon:SetDesaturated(e.grey == true) end
+    UI.emptyLabel:SetText(e.text)
+    if e.text ~= "" then UI.emptyLabel:Show() else UI.emptyLabel:Hide() end
+    if state == "noRoster" then UI.emptyUpdate:Show() else UI.emptyUpdate:Hide() end
+end
+
+-- The member count, right-aligned on the tool bar: [人頭] shown/all.
+function UI.placeCount()
+    local w = ns.measure(UI.countText)
+    local right = UI.ROW_WIDTH + 20
+    UI.countText:ClearAllPoints()
+    UI.countText:SetPoint("TOPLEFT", panel, "TOPLEFT", right - w, UI.TOOLBAR_Y - 6)
+    UI.countIcon:ClearAllPoints()
+    UI.countIcon:SetPoint("TOPLEFT", panel, "TOPLEFT", right - w - 24, UI.TOOLBAR_Y - 5)
+    if UI.countText:GetText() ~= "" then UI.countIcon:Show() else UI.countIcon:Hide() end
+end
+
 local function build(p)
     panel = p
     local f = p
-    reportLine = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    reportLine:SetPoint("TOPLEFT", 22, -38)
-    reportLine:SetWidth(UI.REPORT_WIDTH)
-    reportLine:SetJustifyH("LEFT")
-    summaryLine = f:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    summaryLine:SetPoint("TOPLEFT", 22, -58)
-    summaryLine:SetWidth(UI.REPORT_WIDTH)
-    summaryLine:SetJustifyH("LEFT")
-    -- GF-001-Q: 邀請入會 / 公會資訊 / 開啟遊戲公會介面 (top right; only what may be used).
     local G = ns.GuildAdmin
     local O = ns.OrdersUI
-    UI.inviteButton = O.textButton(f, "|TInterface\\Icons\\Spell_Holy_PrayerOfSpirit:20|t 邀請入會", function() G.inviteGuild() end)
-    UI.infoButton = O.textButton(f, "|TInterface\\Icons\\INV_Misc_Note_06:20|t 公會資訊", function() UI.openGuildInfo() end)
-    UI.gameGuildButton = O.textButton(f, "|TInterface\\Icons\\INV_Shirt_GuildTabard_01:20|t 開啟遊戲公會介面", function() G.openGameUI() end)
-    UI.updateButton = button(f, "更新名冊", 115, 26, 20, -80, manualUpdate)
-    -- GF-001-D20: one filter line with room between every control:
-    -- [更新名冊] 搜尋 [box]  [專業 ▼]  [職業 ▼]  [ ] 只看在線  等級 [  ] 以上  [清除]
-    local function label(text, x)
-        local l = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        l:SetPoint("TOPLEFT", f, "TOPLEFT", x, -87)
+    local GI = ns.GameIcons
+    local Y = UI.TOOLBAR_Y
+    local x = 20
+    local function after(w) x = x + w + UI.TOOLBAR_GAP end
+    local function label(text)
+        local l = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
+        l:SetPoint("TOPLEFT", f, "TOPLEFT", x, Y - 6)
         l:SetText(text)
+        x = x + ns.labelWidth(text) + 2
         return l
     end
-    label("搜尋", 150)
+    UI.updateButton = button(f, GI.markup("refresh", 20) .. " 更新", nil, nil, x, Y, manualUpdate)
+    after(UI.updateButton.gfWidth)
+    label("搜尋")
     searchBox = ns.createFrame("EditBox", nil, f, "InputBoxTemplate")
-    searchBox:SetSize(150, 24)
-    searchBox:SetPoint("TOPLEFT", f, "TOPLEFT", 186, -80)
+    searchBox:SetSize(120, ns.BUTTON_H)
+    searchBox:SetPoint("TOPLEFT", f, "TOPLEFT", x + 4, Y)
     searchBox:SetAutoFocus(false)
     searchBox:SetMaxLetters(100)
+    if searchBox.SetFontObject then searchBox:SetFontObject("ChatFontNormal") end
     searchBox:SetScript("OnTextChanged", function() UI.refresh(true) end)
     searchBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     UI.searchBox = searchBox
-    UI.skillChoice = ns.choiceButton(f, 110, 352, -80, UI.professionOptions,
+    after(124)
+    UI.skillChoice = ns.choiceButton(f, 110, x, Y, UI.professionOptions,
         function(value) UI.filters.skill = value; UI.refresh(true) end, "全部專業",
         function(id) return ns.Data.skillName(nil, id) end)
-    UI.classChoice = ns.choiceButton(f, 100, 474, -80, UI.classOptions,
+    after(110)
+    UI.classChoice = ns.choiceButton(f, 110, x, Y, UI.classOptions,
         function(value) UI.filters.class = value; UI.refresh(true) end, "全部職業")
-    UI.onlineCheck = ns.checkBox(f, "只看在線", 588, -80,
+    after(110)
+    UI.onlineCheck = ns.checkBox(f, "在線", x, Y - 1,
         function(on) UI.filters.online = on; UI.refresh(true) end)
-    UI.levelLabel = label("等級", 684)
+    after(28 + ns.labelWidth("在線"))
+    -- GF-006-B (R-4.2): 只看接單中 (gold hammer, GF-UI-B: 16 px).
+    local hammer = O.tex("hammer", 16) .. " 接單中"
+    UI.activeCheck = ns.checkBox(f, hammer, x, Y - 1,
+        function(on) UI.filters.active = on; UI.refresh(true) end)
+    after(28 + ns.labelWidth(hammer))
+    UI.levelLabel = label("等級")
     UI.levelBox = ns.createFrame("EditBox", nil, f, "InputBoxTemplate")
-    UI.levelBox:SetSize(40, 24)
-    UI.levelBox:SetPoint("TOPLEFT", f, "TOPLEFT", 724, -80)
+    UI.levelBox:SetSize(40, ns.BUTTON_H)
+    UI.levelBox:SetPoint("TOPLEFT", f, "TOPLEFT", x + 4, Y)
     UI.levelBox:SetAutoFocus(false)
     UI.levelBox:SetMaxLetters(2)
     if UI.levelBox.SetNumeric then UI.levelBox:SetNumeric(true) end
+    if UI.levelBox.SetFontObject then UI.levelBox:SetFontObject("ChatFontNormal") end
     UI.levelBox:SetScript("OnTextChanged", function(self)
         local n = tonumber(str(self:GetText()))
         UI.filters.minLevel = (n and n > 1) and n or nil
         UI.refresh(true)
     end)
     UI.levelBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    UI.levelSuffix = label("以上", 776)
-    UI.clearButton = button(f, "清除", 60, 25, 816, -80, UI.clearFilters)
-    -- GF-006-B (R-4.2): 只看接單中 (gold hammer).
-    UI.activeCheck = ns.checkBox(f, (ns.OrdersUI and ns.OrdersUI.tex("hammer", 14) or "") .. " 接單中", 884, -80,
-        function(on) UI.filters.active = on; UI.refresh(true) end)
+    x = x + 4 + 40 + 8 -- the box border is drawn ~6 px outside it
+    UI.levelSuffix = label("以上")
+    x = x + UI.TOOLBAR_GAP - 2
+    UI.clearButton = button(f, GI.markup("no", 20) .. " 清除", nil, nil, x, Y, UI.clearFilters)
+    after(UI.clearButton.gfWidth)
+    UI.toolbarRight = x
+    UI.countIcon = f:CreateTexture(nil, "ARTWORK")
+    UI.countIcon:SetSize(20, 20)
+    GI.set(UI.countIcon, "person")
+    UI.countText = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
+    UI.countText:SetText("")
     rosterControls = { UI.updateButton, searchBox, UI.clearButton, UI.skillChoice, UI.classChoice,
         UI.onlineCheck, UI.levelBox }
+    -- Column header: 28 px, the brand colour, gold names; the sorted one white with an arrow.
     local header = CreateFrame("Frame", nil, f)
-    header:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -119)
-    header:SetSize(UI.ROW_WIDTH, 25)
+    header:SetPoint("TOPLEFT", f, "TOPLEFT", 20, UI.HEADER_Y)
+    header:SetSize(UI.ROW_WIDTH, UI.HEADER_H)
     local bg = header:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
-    bg:SetColorTexture(0.13, 0.37, 0.30, 0.4)
+    local brand = ns.COLOR.brand
+    bg:SetColorTexture(brand[1], brand[2], brand[3], 0.4)
+    UI.header = header
     for _, col in ipairs(columns) do
         local heading = CreateFrame("Button", nil, header)
         heading:SetPoint("LEFT", header, "LEFT", col.x, 0)
-        heading:SetSize(col.w - 2, 25)
-        local label = heading:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-        label:SetAllPoints()
-        label:SetJustifyH("LEFT")
-        label:SetWordWrap(false)
+        heading:SetSize(col.w - 2, UI.HEADER_H)
+        local text = heading:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT)
+        text:SetPoint("LEFT", heading, "LEFT", 0, 0)
+        text:SetJustifyH("LEFT")
+        text:SetWordWrap(false)
+        local arrow = heading:CreateTexture(nil, "ARTWORK")
+        arrow:SetSize(16, 16)
+        arrow:Hide()
         if not col.noSort then
             heading:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
             heading:SetScript("OnClick", function() changeSort(col) end)
             rosterControls[#rosterControls + 1] = heading
         end
         heading.fieldNamed = col.name
-        sortHeaders[#sortHeaders + 1] = { col = col, label = label, heading = heading }
+        sortHeaders[#sortHeaders + 1] = { col = col, label = text, heading = heading, arrow = arrow }
     end
     updateSortHeaders()
     rowScroll = ns.createFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
-    rowScroll:SetPoint("TOPLEFT", 20, -149)
-    rowScroll:SetPoint("BOTTOMRIGHT", -40, 96)
+    rowScroll:SetPoint("TOPLEFT", 20, UI.LIST_TOP)
+    rowScroll:SetPoint("BOTTOMRIGHT", -40, UI.LIST_BOTTOM)
     rowContent = CreateFrame("Frame", nil, rowScroll)
     rowContent:SetSize(UI.ROW_WIDTH, 1)
+    -- No rows: a 48 px icon and a short name in the middle (GF-UI-A §2.2 item 3).
+    UI.emptyIcon = f:CreateTexture(nil, "ARTWORK")
+    UI.emptyIcon:SetSize(UI.EMPTY_ICON, UI.EMPTY_ICON)
+    UI.emptyIcon:SetPoint("TOP", f, "TOP", -20, UI.LIST_TOP - 80)
+    UI.emptyIcon:Hide()
+    UI.emptyLabel = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.TITLE_FONT))
+    UI.emptyLabel:SetPoint("TOP", UI.emptyIcon, "BOTTOM", 0, -10)
+    UI.emptyLabel:Hide()
+    UI.emptyUpdate = O.textButton(f, GI.markup("refresh", 20) .. " 更新", manualUpdate)
+    UI.emptyUpdate:SetPoint("TOP", UI.emptyIcon, "BOTTOM", 0, -10)
+    UI.emptyUpdate:Hide()
     -- GF-001-Q: the selected member's actions (the same as the right-click menu).
     local bar = CreateFrame("Frame", nil, f)
-    bar:SetPoint("TOPLEFT", f, "BOTTOMLEFT", 20, 92)
+    bar:SetPoint("TOPLEFT", f, "BOTTOMLEFT", 20, UI.LIST_BOTTOM - 6)
     bar:SetSize(UI.ROW_WIDTH, 44)
     local barBg = bar:CreateTexture(nil, "BACKGROUND")
     barBg:SetAllPoints()
-    barBg:SetColorTexture(0.13, 0.37, 0.30, 0.25)
+    barBg:SetColorTexture(brand[1], brand[2], brand[3], 0.25)
     bar.name = ns.freeText(bar:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
     bar.name:SetPoint("LEFT", bar, "LEFT", 10, 0)
-    bar.hint = ns.freeText(bar:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT))
-    bar.hint:SetPoint("LEFT", bar, "LEFT", 10, 0)
     bar.nameWidth = 170
     bar.buttons = {}
     UI.actionBar = bar
@@ -1068,12 +1192,14 @@ local function build(p)
     end)
     -- They live on UIParent: hide them with the page (in combat they already are).
     p:HookScript("OnHide", function() ns.Professions.hideFrom("roster", 1) end)
-    statusLine = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    statusLine:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 22, 20)
-    statusLine:SetWidth(700)
-    syncIndicator = ns.Diag.smallButton(f, "BOTTOMRIGHT", -20, 14)
+    -- Bottom row: 診斷 on the right; the guild buttons left of it (refreshAdminButtons).
+    syncIndicator = ns.Diag.smallButton(f, "BOTTOMRIGHT", -20, UI.BOTTOM_Y)
     UI.syncIndicator = syncIndicator
-    statusLine:SetJustifyH("LEFT")
+    UI.diagLeft = ns.Framework.PANEL_WIDTH - 20 - (syncIndicator.gfWidth or 0)
+    -- GF-001-Q, GF-UI-B (GF-UI-A §2.2 item 4): 邀請 / 公會 / 遊戲公會 (only what may be used).
+    UI.inviteButton = O.textButton(f, GI.markup("invite", 20) .. " 邀請", function() G.inviteGuild() end)
+    UI.infoButton = O.textButton(f, GI.markup("guildinfo", 20) .. " 公會", function() UI.openGuildInfo() end)
+    UI.gameGuildButton = O.textButton(f, GI.markup("tabard", 20) .. " 遊戲公會", function() G.openGameUI() end)
 end
 
 ns.Framework.register({
@@ -1081,6 +1207,11 @@ ns.Framework.register({
     title = "公會名冊",
     order = 10,
     create = build,
+    -- GF-UI-B: the guild's name in the window title (it left the page).
+    windowTitle = function()
+        local s = ns.guildState() == "target" and ns.Roster.current() or nil
+        return s and str(s.guild) ~= "" and s.guild or nil
+    end,
     show = function() if ns.GuildAdmin then ns.GuildAdmin.invalidate() end UI.refresh(true) end,
 })
 
@@ -1120,11 +1251,11 @@ local function createExport()
     f:SetClampedToScreen(true)
     if f.TitleText then f.TitleText:SetText("綠皮冒險工具箱｜報告匯出") end
     exportWindow = f
-    exportInfo = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    exportInfo = f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
     exportInfo:SetPoint("TOPLEFT", 20, -37)
     exportInfo:SetWidth(870)
     exportInfo:SetJustifyH("LEFT")
-    local instruction = f:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    local instruction = f:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT)
     instruction:SetPoint("TOPLEFT", 20, -58)
     instruction:SetWidth(870)
     instruction:SetJustifyH("LEFT")
@@ -1139,7 +1270,7 @@ local function createExport()
     nextPart = button(f, "下一段", 99, 26, 255, -79, function()
         if exportPartIndex < #exportParts then exportPartIndex = exportPartIndex + 1; refreshExport() end
     end)
-    partLabel = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    partLabel = f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
     partLabel:SetPoint("TOPLEFT", 374, -85)
     partLabel:SetWidth(480)
     partLabel:SetJustifyH("LEFT")

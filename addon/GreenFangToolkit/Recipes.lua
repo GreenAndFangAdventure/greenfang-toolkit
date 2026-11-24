@@ -489,7 +489,7 @@ function Recipes.crafterText(list, skill)
     local names = {}
     for i = 1, math.min(3, #list) do
         local hammer = ns.Orders and skill and ns.Orders.isActive(list[i].guid, skill)
-        names[i] = (hammer and (ns.OrdersUI.tex("hammer", 12) .. " ") or "") .. ns.shortName(list[i].name)
+        names[i] = (hammer and (ns.OrdersUI.tex("hammer", 16) .. " ") or "") .. ns.shortName(list[i].name)
     end
     local text = table.concat(names, "、")
     if #list > 3 then text = text .. " +" .. (#list - 3) end
@@ -688,9 +688,11 @@ end
 Recipes.COL_WHO, Recipes.COL_FEE, Recipes.COL_BUTTON = 350, 720, 900
 
 -- The row button: 下單 when someone else can make it, else 我的工錢 for my own recipe.
+-- GF-UI-B: in the order test mode (同步與診斷 → 測試) my own recipe can be ordered too.
 function Recipes.rowAction(data)
     if not data then return nil end
     for _, m in ipairs(data.crafters or {}) do if not m.self then return "order" end end
+    if data.mine and ns.Orders and ns.Orders.testOn() then return "order" end
     if data.mine then return "fee" end
     return nil
 end
@@ -746,13 +748,13 @@ function Recipes.selectedSkills(skills)
     return out
 end
 
--- "全部專業" / "烹飪" / "3 個專業" / "沒有選專業"
+-- "全部專業" / "烹飪" / "3 個專業" / "未選" (GF-UI-B: 2-4 characters)
 function Recipes.skillSummary(b)
     local list = b.options()
     if b.selected == nil then return "全部專業" end
     local on = {}
     for _, o in ipairs(list) do if b.isOn(o.value) then on[#on + 1] = o end end
-    if #on == 0 then return "沒有選專業" end
+    if #on == 0 then return "未選" end
     if #on == #list then return "全部專業" end
     if #on == 1 then return on[1].text end
     return #on .. " 個專業"
@@ -774,11 +776,12 @@ function Recipes.whoFilter()
     return "none"
 end
 
+-- GF-UI-B: 2-4 characters on the button.
 function Recipes.whoSummary()
     local w = Recipes.whoFilter()
-    if w == "mine" then return "只看我的" end
-    if w == "others" then return "只看別人的" end
-    if w == "none" then return "沒有選" end
+    if w == "mine" then return "我的" end
+    if w == "others" then return "別人的" end
+    if w == "none" then return "未選" end
     return "所有人"
 end
 
@@ -799,7 +802,7 @@ function Recipes.layoutRows()
                 row.data = data
                 row:ClearAllPoints()
                 row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -(i - 1) * ROW_HEIGHT)
-                row.bg:SetColorTexture(0.17, 0.2, 0.18, i % 2 == 0 and 0.35 or 0.09)
+                ns.stripe(row.bg, i) -- GF-UI-B: the shared stripe
                 Recipes.setIcon(row.icon, data.id, data.skill)
                 row.name:SetText(data.name)
                 row.who:SetText(Recipes.crafterText(data.crafters, data.skill))
@@ -810,8 +813,8 @@ function Recipes.layoutRows()
                 row.fee:SetText(ns.OrdersUI.feeText(fee))
                 local action = Recipes.rowAction(data)
                 if action then
-                    row.order:SetText(action == "order" and (ns.GameIcons.markup("order", 16) .. " 下單")
-                        or (ns.GameIcons.markup("services", 16) .. " 我的工錢"))
+                    row.order:SetText(action == "order" and (ns.GameIcons.markup("order", 20) .. " 下單")
+                        or (ns.GameIcons.markup("services", 20) .. " 我的工錢"))
                     row.order.action = action
                     row.order:Show()
                 else
@@ -828,7 +831,22 @@ function Recipes.rowFrames() return rowWidgets end
 -- All rows of the current list (offline tests).
 function Recipes.shownRows() return shownRows end
 
-Recipes.BUILDING_TEXT = "配方整理中，請稍候。"
+-- GF-UI-B (GF-UI-A §2.3 item 2): short names in the middle of the list,
+-- never sentences; with no profession ticked, a grey profession icon.
+Recipes.BUILDING_TEXT = "整理中"
+Recipes.EMPTY_TEXT = { none = "沒有配方", noSkill = "未選專業", noMatch = "找不到" }
+local function setEmpty(text, icon)
+    emptyLine:SetText(text or "")
+    if Recipes.emptyIcon then
+        if icon then
+            ns.Icons.set(Recipes.emptyIcon, icon)
+            if Recipes.emptyIcon.SetDesaturated then Recipes.emptyIcon:SetDesaturated(true) end
+            Recipes.emptyIcon:Show()
+        else
+            Recipes.emptyIcon:Hide()
+        end
+    end
+end
 
 function Recipes.refresh()
     if not panel then return end
@@ -839,7 +857,7 @@ function Recipes.refresh()
         shownRows = {}
         content:SetHeight(1)
         Recipes.layoutRows()
-        emptyLine:SetText(Recipes.BUILDING_TEXT)
+        setEmpty(Recipes.BUILDING_TEXT)
         filterLine:SetText("")
         clearFilter:Hide()
         return
@@ -857,19 +875,20 @@ function Recipes.refresh()
     Recipes.layoutRows()
     local filtered = current.query ~= "" or current.online or opts.who ~= nil or current.active or current.fee ~= nil
     if #skills == 0 then
-        emptyLine:SetText(current.guid and "這位成員還沒有分享配方。" or "還沒有人分享配方。")
+        setEmpty(Recipes.EMPTY_TEXT.none)
     elseif #chosen == 0 then
-        emptyLine:SetText("沒有選專業。")
+        setEmpty(Recipes.EMPTY_TEXT.noSkill, ns.RECIPE_ICON or "Interface\\Icons\\INV_Scroll_04")
     elseif #rows == 0 then
-        emptyLine:SetText(filtered and "找不到符合的配方。" or "這個專業還沒有配方資料。")
+        setEmpty(filtered and Recipes.EMPTY_TEXT.noMatch or Recipes.EMPTY_TEXT.none)
     else
-        emptyLine:SetText("")
+        setEmpty("")
     end
     if current.guid then
         local name
         for _, m in ipairs((ns.Roster.current() or { members = {} }).members) do
             if m.guid == current.guid then name = m.name end
         end
+        -- GF-UI-B: 「只看：名字」 and a short 「全部」 button (was 「看全部的人」).
         filterLine:SetText("只看：" .. ns.shortName(name or "?"))
         clearFilter:Show()
     else
@@ -888,7 +907,7 @@ function Recipes.show(guid, skill)
 end
 
 -- GF-001-D20 layout: one filter line at the top, like the roster's:
--- 搜尋 [box]  專業 [▼]  會做的人 [▼]  [ ] 只看在線   N 個配方
+-- 搜尋 [box]  專業 [v]  會做的人 [v]  [ ] 只看在線   N 個配方
 local FILTER_Y = -44
 
 local function label(p, text, x, y)
@@ -918,18 +937,17 @@ local function build(p)
         function() Recipes.refresh() end, Recipes.whoSummary)
     Recipes.onlineCheck = ns.checkBox(p, "只看在線", 690, FILTER_Y, function(on) current.online = on; Recipes.refresh() end)
     -- GF-002-E (owner: 「工錢應直接顯示，且可篩選」): second line.
-    Recipes.activeCheck = ns.checkBox(p, "只看接單中", 22, FILTER_Y2, function(on) current.active = on; Recipes.refresh() end)
+    -- GF-UI-B: a hammer and 「接單中」 (was the 5-character 「只看接單中」).
+    Recipes.activeCheck = ns.checkBox(p, ns.OrdersUI.tex("hammer", 16) .. " 接單中", 22, FILTER_Y2,
+        function(on) current.active = on; Recipes.refresh() end)
     label(p, "工錢", 170, FILTER_Y2)
     Recipes.feeChoice = ns.choiceButton(p, 130, 218, FILTER_Y2, function() return Recipes.FEE_OPTIONS end,
         function(v) current.fee = v; Recipes.refresh() end, "工錢不限")
     filterLine = ns.freeText(p:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
     filterLine:SetPoint("TOPLEFT", p, "TOPLEFT", 820, FILTER_Y - 5)
     filterLine:SetJustifyH("LEFT")
-    clearFilter = ns.createFrame("Button", nil, p, "UIPanelButtonTemplate")
-    clearFilter:SetSize(110, ns.BUTTON_H)
-    clearFilter:SetPoint("TOPLEFT", p, "TOPLEFT", 940, FILTER_Y - 1)
-    clearFilter:SetText("看全部的人")
-    clearFilter:SetScript("OnClick", function() current.guid = nil; Recipes.refresh() end)
+    clearFilter = ns.OrdersUI.textButton(p, ns.GameIcons.markup("no", 20) .. " 全部", function() current.guid = nil; Recipes.refresh() end)
+    clearFilter:SetPoint("TOPLEFT", p, "TOPLEFT", 960, FILTER_Y - 1)
     clearFilter:Hide()
     Recipes.clearFilterButton = clearFilter
     local HEAD_Y = -122
@@ -945,8 +963,12 @@ local function build(p)
     content:SetSize(Recipes.ROW_WIDTH, 1)
     scroll:SetScrollChild(content)
     scroll:HookScript("OnVerticalScroll", function() Recipes.layoutRows() end)
-    emptyLine = p:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
-    emptyLine:SetPoint("TOP", p, "TOP", 0, -150)
+    Recipes.emptyIcon = p:CreateTexture(nil, "ARTWORK")
+    Recipes.emptyIcon:SetSize(48, 48)
+    Recipes.emptyIcon:SetPoint("TOP", p, "TOP", 0, -170)
+    Recipes.emptyIcon:Hide()
+    emptyLine = p:CreateFontString(nil, "ARTWORK", ns.TITLE_FONT)
+    emptyLine:SetPoint("TOP", p, "TOP", 0, -226)
     panel = p -- last: refresh() needs every widget above
 end
 

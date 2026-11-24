@@ -89,8 +89,10 @@ end
 ---------------------------------------------------------------------------
 
 -- Inline texture for menus and strings (the game fonts have no emoji).
+-- GF-UI-B (GF-UI-A §1.3): 18 px by default, never under 16 next to 16 px text.
+UI.INLINE = 18
 function UI.tex(key, size)
-    return "|T" .. (UI.ICON[key] or key) .. ":" .. tostring(size or 14) .. "|t"
+    return "|T" .. (UI.ICON[key] or key) .. ":" .. tostring(math.max(16, size or UI.INLINE)) .. "|t"
 end
 
 local function setIcon(tex, key)
@@ -295,12 +297,16 @@ function UI.pageRows()
     return out
 end
 
+-- GF-UI-B (GF-UI-A §2.9 item 3): the clock the undo swirl runs on.
+local function clock() return ns.num((ns.call(GetTime))) or ns.now() end
+UI.clock = clock
+
 local function press(row, button)
     local v = row.view
     local key = v.id .. "|" .. button
     if UI.DELAYED[button] then
         if pendingPress[key] then pendingPress[key] = nil; UI.refresh(); return "undone" end
-        pendingPress[key] = true
+        pendingPress[key] = clock() -- when it started (the swirl on the button)
         UI.refresh()
         ns.after(O().UNDO, function()
             if not pendingPress[key] then return end
@@ -322,7 +328,7 @@ local function newRow(i)
     row:SetSize(UI.ROW_WIDTH, ROW_HEIGHT)
     row.bg = row:CreateTexture(nil, "BACKGROUND")
     row.bg:SetAllPoints()
-    row.att = row:CreateTexture(nil, "ARTWORK"); row.att:SetSize(18, 18); row.att:SetPoint("LEFT", row, "LEFT", 2, 0)
+    row.att = row:CreateTexture(nil, "ARTWORK"); row.att:SetSize(20, 20); row.att:SetPoint("LEFT", row, "LEFT", 2, 0)
     row.item = iconButton(row, 32, "unknown", nil)
     row.item:SetPoint("LEFT", row, "LEFT", 24, 0)
     row.item:SetScript("OnEnter", function(self) itemTooltip(self, self:GetParent().view and self:GetParent().view.item) end)
@@ -332,17 +338,18 @@ local function newRow(i)
     row.cls = row:CreateTexture(nil, "ARTWORK"); row.cls:SetSize(22, 22); row.cls:SetPoint("LEFT", row, "LEFT", 150, 0)
     row.who = row:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
     row.who:SetPoint("LEFT", row, "LEFT", 176, 0); row.who:SetWidth(130); row.who:SetJustifyH("LEFT"); row.who:SetWordWrap(false)
+    -- GF-UI-B (GF-UI-A §2.9 item 2): materials 28 px, the coin 20 px.
     row.mats = {}
     for k = 1, 5 do
-        local m = iconButton(row, 26, "unknown", nil)
-        m:SetPoint("LEFT", row, "LEFT", 312 + (k - 1) * 28, 0)
+        local m = iconButton(row, ns.ROW_ICON, "unknown", nil)
+        m:SetPoint("LEFT", row, "LEFT", 312 + (k - 1) * 30, 0)
         m:SetScript("OnEnter", function(self) itemTooltip(self, self.itemID) end)
         m.infoOnly = true
         row.mats[k] = m
     end
-    row.coin = row:CreateTexture(nil, "ARTWORK"); row.coin:SetSize(18, 18); row.coin:SetPoint("LEFT", row, "LEFT", 456, 0)
+    row.coin = row:CreateTexture(nil, "ARTWORK"); row.coin:SetSize(20, 20); row.coin:SetPoint("LEFT", row, "LEFT", 466, 0)
     row.fee = row:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
-    row.fee:SetPoint("LEFT", row, "LEFT", 478, 0); row.fee:SetWidth(120); row.fee:SetJustifyH("LEFT"); row.fee:SetWordWrap(false)
+    row.fee:SetPoint("LEFT", row, "LEFT", 490, 0); row.fee:SetWidth(108); row.fee:SetJustifyH("LEFT"); row.fee:SetWordWrap(false)
     row.state = iconButton(row, ns.ROW_ICON, "waiting", nil)
     row.state:SetPoint("LEFT", row, "LEFT", 604, 0)
     row.buttons = {}
@@ -351,6 +358,11 @@ local function newRow(i)
     for k = 1, 3 do
         local b = iconButton(row, ns.ROW_ICON, "deal", nil)
         b:SetPoint("LEFT", row, "LEFT", UI.ROW_BUTTON_X, 0)
+        -- GF-UI-B: the action bar's cooldown swirl while a press can be undone (5 s).
+        b.cd = ns.createFrame("Cooldown", nil, b, "CooldownFrameTemplate")
+        b.cd:SetAllPoints(b)
+        if b.cd.SetReverse then pcall(b.cd.SetReverse, b.cd, false) end
+        b.cd:Hide()
         row.buttons[k] = b
     end
     row.head = row:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT)
@@ -359,8 +371,22 @@ local function newRow(i)
     return row
 end
 
+-- The swirl on a row button: started at `at` (UI.clock), O().UNDO seconds long.
+function UI.setSwirl(b, at)
+    local cd = b.cd
+    if not cd then return end
+    if at and type(cd.SetCooldown) == "function" then
+        cd:Show()
+        pcall(cd.SetCooldown, cd, at, O().UNDO)
+        cd.gfStart, cd.gfDuration = at, O().UNDO
+    else
+        cd.gfStart, cd.gfDuration = nil, nil
+        cd:Hide()
+    end
+end
+
 local function fillRow(row, data, i)
-    row.bg:SetColorTexture(0.17, 0.2, 0.18, i % 2 == 0 and 0.35 or 0.09)
+    ns.stripe(row.bg, i) -- GF-UI-B: the shared stripe
     local parts = { row.att, row.item, row.qty, row.cls, row.who, row.coin, row.fee, row.state }
     if data.header then
         for _, w in ipairs(parts) do w:Hide() end
@@ -383,7 +409,12 @@ local function fillRow(row, data, i)
     row.qty:SetText(qty)
     -- The other side: the customer (for my jobs) or the crafter (for my orders).
     local other = v.customer == me and v.crafter or v.customer
-    if v.customer == me and v.guild and not v.crafter then
+    if v.test then
+        -- GF-UI-B: a test order (to myself, local only): the test icon and 測試.
+        if not ns.GameIcons.set(row.cls, "test") then row.cls:Hide() end
+        row.who:SetText("測試")
+        ns.setTextColor(row.who, "warn")
+    elseif v.customer == me and v.guild and not v.crafter then
         setIcon(row.cls, "guild")
         row.who:SetText("公會")
         row.who:SetTextColor(0.9, 0.9, 0.9)
@@ -393,7 +424,7 @@ local function fillRow(row, data, i)
         row.who:SetText(m and ns.shortName(m.name) or "?")
         local c = Icons.classColor(m and m.classToken)
         row.who:SetTextColor(c[1], c[2], c[3])
-        if m and m.online then row.who:SetText(row.who:GetText() .. " " .. UI.tex("online", 10)) end
+        if m and m.online then row.who:SetText(row.who:GetText() .. " " .. UI.tex("online", 16)) end
     end
     -- Materials the customer gives (ticked) and the ones the crafter gives.
     local r = v.recipe and P().cachedReagents(v.recipe)
@@ -410,7 +441,7 @@ local function fillRow(row, data, i)
     for j = k + 1, #row.mats do row.mats[j]:Hide() end
     -- Review 5-3: the fee the customer wrote; at 0 the quote only says free / not filled in.
     showFee(row.coin, row.fee, v.fee > 0 and v.fee or (v.feeQuoted == nil and nil or 0))
-    if v.paid then row.fee:SetText(row.fee:GetText() .. " " .. UI.tex("deal", 12)) end
+    if v.paid then row.fee:SetText(row.fee:GetText() .. " " .. UI.tex("deal", 16)) end
     -- State icon; a crafter's close carries a small hammer, a cancel the canceller's class.
     setIcon(row.state.tex, v.state)
     row.state.badge:Hide()
@@ -437,6 +468,7 @@ local function fillRow(row, data, i)
             local key = v.id .. "|" .. name
             if pendingPress[key] then setIcon(b.tex, "undo"); b.tip = "復原"
             else setIcon(b.tex, spec.icon); b.tip = spec.tip end
+            UI.setSwirl(b, pendingPress[key] and (type(pendingPress[key]) == "number" and pendingPress[key] or clock()) or nil)
             setLabel(b, b.tip)
             if spec.hammer then setIcon(b.badge, "hammer") else b.badge:Hide() end
             b:SetScript("OnClick", function() press(row, name) end)
@@ -444,6 +476,7 @@ local function fillRow(row, data, i)
             b:Show()
         else
             b:Hide(); b.action = nil
+            UI.setSwirl(b, nil)
         end
     end
     local shown = {}
@@ -489,7 +522,7 @@ local function refreshProfBar()
             b:SetPoint("LEFT", profBar, "LEFT", UI.PROF_X + (i - 1) * UI.PROF_STEP, 0)
             b.feeButton = UI.textButton(profBar, "工錢")
             b.feeButton:SetPoint("LEFT", b, "RIGHT", 4 + ns.labelWidth("接單") + 8, 0)
-            b.feeTex = profBar:CreateTexture(nil, "ARTWORK"); b.feeTex:SetSize(18, 18)
+            b.feeTex = profBar:CreateTexture(nil, "ARTWORK"); b.feeTex:SetSize(20, 20)
             b.feeTex:SetPoint("LEFT", b.feeButton, "RIGHT", 4, 0)
             b.feeText = ns.freeText(profBar:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
             b.feeText:SetPoint("LEFT", b.feeButton, "RIGHT", 26, 0)
@@ -664,13 +697,26 @@ local draft -- { recipe, skill, item, qty, crafter (author or "*"), mats = { [id
 -- Prefilled draft (pure): crafters = members who know the recipe (sorted active first).
 function UI.newDraft(opts)
     local recipe, skill = opts.recipe, opts.skill
+    -- GF-UI-B: in the test mode I am in the list too (an order to myself is a test order).
+    local test = O().testOn()
     local crafters = {}
-    for _, m in ipairs(opts.crafters or {}) do if not m.self then crafters[#crafters + 1] = m end end
+    for _, m in ipairs(opts.crafters or {}) do if test or not m.self then crafters[#crafters + 1] = m end end
     O().sortCrafters(crafters, skill)
     local target = opts.crafter
     if not target then
-        local first = crafters[1]
-        if first and O().isActive(first.guid, skill) then target = S().authorOf(first.guid) end
+        -- Never myself by default: a test order is always chosen by hand.
+        for _, m in ipairs(crafters) do
+            if not m.self then
+                if O().isActive(m.guid, skill) then target = S().authorOf(m.guid) end
+                break
+            end
+        end
+    end
+    -- My own recipe and nobody else: the test order is the only choice.
+    if not target and test and #crafters > 0 then
+        local others = false
+        for _, m in ipairs(crafters) do if not m.self then others = true end end
+        if not others then target = S().selfAuthor() end
     end
     local d = { recipe = recipe, skill = skill, qty = 1, crafter = target or "*", mats = {}, crafters = crafters }
     local r = P().reagents(recipe)
@@ -931,7 +977,8 @@ function UI.pickCrafter(owner)
         local fee = O().feeFor(m.guid, draft.skill, draft.recipe)
         local mark = O().isActive(m.guid, draft.skill) and (UI.tex("hammer") .. " ") or ""
         local feeText = fee == nil and "  ?" or (fee == 0 and "  免費" or ("  " .. UI.money(fee)))
-        items[#items + 1] = { text = mark .. ns.shortName(m.name) .. (m.online and (" " .. UI.tex("online", 10)) or "") .. feeText,
+        if m.self then mark = ns.GameIcons.markup("test", 18) .. " 測試 " end
+        items[#items + 1] = { text = mark .. ns.shortName(m.name) .. (m.online and (" " .. UI.tex("online", 16)) or "") .. feeText,
             fn = function() draft.crafter = a; UI.applyFee(draft); drawPopup() end }
         if #items >= 12 then break end
     end
@@ -1111,7 +1158,8 @@ function UI.pickerRows(query)
     local index = ns.Recipes and ns.Recipes.index()
     if not index then return {} end
     local skills = ns.Recipes.professionsInIndex(index)
-    return ns.Recipes.rowsFor(index, skills, query or "", nil, { who = "others" })
+    -- GF-UI-B: in the test mode my own recipes too (a test order to myself).
+    return ns.Recipes.rowsFor(index, skills, query or "", nil, { who = not O().testOn() and "others" or nil })
 end
 
 function UI.drawPicker()
@@ -1218,7 +1266,7 @@ function UI.recipeMenuItems(data)
     if not data then return items end
     local others = {}
     for _, m in ipairs(data.crafters or {}) do if not m.self then others[#others + 1] = m end end
-    if #others > 0 then
+    if #others > 0 or (data.mine and O().testOn()) then
         items[#items + 1] = { text = "下單", fn = function()
             local pick = UI.pendingCrafter
         UI.pendingCrafter, UI.pendingMark = nil, nil
@@ -1344,6 +1392,12 @@ function UI.updateBadge()
         b.ordersBadge = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         b.ordersBadge:SetPoint("TOPRIGHT", b, "TOPRIGHT", 2, 2)
         b.ordersBadge:SetTextColor(1, 0.82, 0)
+        -- GF-UI-B (GF-UI-A §2.12): a 1 px black outline, so it does not blur into the map.
+        local fs = b.ordersBadge
+        if fs.GetFont and fs.SetFont then
+            local path, size = fs:GetFont()
+            if path then pcall(fs.SetFont, fs, path, size, "OUTLINE") end
+        end
     end
     local n = ns.guildState() == "target" and O().attentionCount() or 0
     b.ordersBadge:SetText(n > 0 and tostring(n) or "")

@@ -190,6 +190,70 @@ end
 -- template's close button inside the frame. Safe to call twice.
 ns.OPAQUE_COLOR = { 0.05, 0.07, 0.06, 0.97 }
 ns.BORDER_COLOR = { 0.32, 0.52, 0.42, 1 }
+
+-- GF-UI-B (GF-UI-A §1.8): the toolkit's colours, in one place. Pages use
+-- these names instead of their own numbers.
+ns.COLOR = {
+    gold = { 1, 0.82, 0 },            -- field names, titles, the chosen name, today
+    white = { 1, 1, 1 },              -- content
+    muted = { 0.72, 0.72, 0.72 },     -- not chosen, secondary professions
+    disabled = { 0.5, 0.5, 0.5 },     -- cannot be used, ended, offline
+    good = { 0.25, 1, 0.35 },         -- online, 成行, I signed up
+    formed = { 0.3, 0.9, 0.85 },      -- 成團
+    warn = { 1, 0.55, 0.15 },         -- 未成行, 待驗收 ?, test orders
+    bad = { 1, 0.25, 0.25 },          -- errors, too high a level
+    brand = { 0.13, 0.37, 0.30 },     -- only the column header bar and the module list
+    frame = ns.OPAQUE_COLOR,          -- window background
+    stripe = { 1, 1, 1, 0.04 },       -- every second list row
+}
+function ns.setTextColor(fs, name)
+    local c = ns.COLOR[name] or ns.COLOR.white
+    if fs and fs.SetTextColor then fs:SetTextColor(c[1], c[2], c[3]) end
+end
+
+-- The zebra background of list row i (GF-UI-A §1.5: one look on every page).
+function ns.stripe(tex, i)
+    local c = ns.COLOR.stripe
+    tex:SetColorTexture(c[1], c[2], c[3], (i or 1) % 2 == 0 and c[4] or 0)
+end
+
+-- GF-UI-B (GF-UI-A §1.5): the chosen list row. The quest log's title glow in
+-- gold (ADD) and a 3 px gold bar on the left; never a flat yellow block.
+-- Both are textures of the row itself, in its BACKGROUND layer above the
+-- stripe, so the row's text stays on top. Returns { glow, bar } with
+-- Show() / Hide() / IsShown().
+ns.ROW_SELECT_ALPHA, ns.ROW_SELECT_BAR = 0.55, 3
+function ns.rowSelect(row)
+    if row.gfRowSelect then return row.gfRowSelect end
+    local gold = ns.COLOR.gold
+    local glow = row:CreateTexture(nil, "BACKGROUND", nil, 2)
+    glow:SetAllPoints(row)
+    local hasGlow = ns.GameIcons and ns.GameIcons.set(glow, "row_select")
+    if hasGlow then
+        if glow.SetBlendMode then glow:SetBlendMode("ADD") end
+        if glow.SetVertexColor then glow:SetVertexColor(gold[1], gold[2], gold[3]) end
+        glow:SetAlpha(ns.ROW_SELECT_ALPHA)
+    end
+    local bar = row:CreateTexture(nil, "BACKGROUND", nil, 3)
+    bar:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
+    bar:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
+    bar:SetWidth(ns.ROW_SELECT_BAR)
+    bar:SetColorTexture(gold[1], gold[2], gold[3], 1)
+    local sel = { glow = glow, bar = bar, shown = false }
+    function sel.Show(self)
+        self.shown = true
+        if hasGlow then glow:Show() else glow:Hide() end
+        bar:Show()
+    end
+    function sel.Hide(self)
+        self.shown = false
+        glow:Hide(); bar:Hide()
+    end
+    function sel.IsShown(self) return self.shown end
+    sel:Hide()
+    row.gfRowSelect = sel
+    return sel
+end
 function ns.makeOpaque(f, inset)
     if not f or f.gfOpaque then return f end
     inset = inset or 2
@@ -290,6 +354,15 @@ function ns.measure(fs)
     local w = ns.num((fs:GetStringWidth())) or 0
     if w > 0 then return w end
     return ns.labelWidth(fs:GetText())
+end
+-- GF-UI-B: the height a wrapped FontString takes at width w (what the
+-- client measures; an estimate of 20 px a line when it cannot yet).
+function ns.textHeight(fs, w)
+    if not fs then return 0 end
+    local h = ns.num((fs.GetStringHeight and fs:GetStringHeight()))
+    if h and h > 0 then return h end
+    local lines = math.max(1, math.ceil(ns.labelWidth(fs:GetText()) / math.max(1, w or 1)))
+    return lines * 20
 end
 -- A text that sizes itself to its content: no width, one line.
 function ns.freeText(fs)

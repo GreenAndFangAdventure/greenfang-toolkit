@@ -159,3 +159,35 @@ function G.levelColor(id, level)
     if level < d.min - ns.AdventureData.LEVEL_SLACK then return 1, 0.3, 0.3 end
     return 1, 1, 1
 end
+
+-- GF-UI-B (GF-UI-A §1.4, §1.5, §2.2, §2.11; 0.13.1): art for the roster, the
+-- lists, the drop-downs, 同步與診斷 and the order test mode. Each with a
+-- fallback; the last one is a file every 1.x client ships. None of the first
+-- choices is verified on 16001: tests/addon/MANUAL.md「GF-UI-B 圖示與版面」.
+local UIB = {
+    -- The chosen list row: the quest log's title glow (gold, ADD).
+    row_select = { { "Interface\\QuestFrame\\UI-QuestLogTitleHighlight" }, { "Interface\\QuestFrame\\UI-QuestTitleHighlight" } },
+    -- Sort arrows on the column headers, the drop-down arrow on choice buttons.
+    sort_up = { { "Interface\\Buttons\\Arrow-Up-Up" }, { "Interface\\Buttons\\UI-ScrollBar-ScrollUpButton-Up" } },
+    sort_down = { { "Interface\\Buttons\\Arrow-Down-Up" }, { "Interface\\Buttons\\UI-ScrollBar-ScrollDownButton-Up" } },
+    dropdown = { { "Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up" }, { "Interface\\Buttons\\UI-ScrollBar-ScrollDownButton-Up" } },
+    -- Multi-select lists: a ticked and an empty box, both always drawn.
+    check_on = { { "Interface\\Common\\UI-DropDownRadioChecks", box = { 0, 32, 0, 32 } }, { "Interface\\Buttons\\UI-CheckBox-Check" } },
+    check_off = { { "Interface\\Common\\UI-DropDownRadioChecks", box = { 32, 64, 0, 32 } }, { "Interface\\Buttons\\UI-CheckBox-Up" } },
+    -- Online / offline (the friends list).
+    online = { { "Interface\\FriendsFrame\\StatusIcon-Online" }, { "Interface\\RaidFrame\\ReadyCheck-Ready" } },
+    offline = { { "Interface\\FriendsFrame\\StatusIcon-Offline" }, { "Interface\\RaidFrame\\ReadyCheck-NotReady" } },
+    -- Roster states in the middle of the list.
+    loading = { { "Interface\\RaidFrame\\ReadyCheck-Waiting" }, { "Interface\\Icons\\INV_Misc_PocketWatch_01" } },
+    noguild = { { "Interface\\RaidFrame\\ReadyCheck-NotReady" }, { "Interface\\Icons\\INV_Misc_QuestionMark" } },
+    tabard = { { "Interface\\Icons\\INV_Shirt_GuildTabard_01" }, { "Interface\\Icons\\INV_Misc_QuestionMark" } },
+    refresh = { { "Interface\\Buttons\\UI-RefreshButton" }, { "Interface\\Icons\\Spell_Nature_Reincarnation" } },
+    -- 診斷 (a gear), 匯出 (a scroll), 小地圖 (the tracking dot), 測試 (a gizmo).
+    diag = { { "Interface\\Icons\\Trade_Engineering" }, { "Interface\\Icons\\INV_Misc_Gear_01" }, { "Interface\\Icons\\INV_Misc_QuestionMark" } },
+    export = { { "Interface\\Icons\\INV_Scroll_03" }, { "Interface\\Icons\\INV_Misc_Note_01" } },
+    minimap = { { "Interface\\Minimap\\Tracking\\None" }, { "Interface\\Icons\\INV_Misc_Map_01" } },
+    test = { { "Interface\\Icons\\INV_Misc_EngGizmos_01" }, { "Interface\\Icons\\INV_Misc_Gear_02" }, { "Interface\\Icons\\INV_Misc_QuestionMark" } },
+    invite = { { "Interface\\Icons\\Spell_Holy_PrayerOfSpirit" }, { "Interface\\Icons\\INV_Misc_GroupNeedMore" } },
+    guildinfo = { { "Interface\\Icons\\INV_Misc_Note_06" }, { "Interface\\Icons\\INV_Misc_Note_01" } },
+}
+for k, v in pairs(UIB) do if not G.ART[k] then G.ART[k] = v end end
