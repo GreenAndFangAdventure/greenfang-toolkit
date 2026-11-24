@@ -51,7 +51,7 @@ UI.GAME = { t = "role_t", h = "role_h", d = "role_d", any = "person", now = "now
     -- GF-002-E: icons that match their meaning (MANUAL §3z).
     adjust = "adjust", direct = "direct", consent = "consent",
     -- GF-002-I: 邀請 (a group prayer; the letter stays for orders), 退回, 規則.
-    invite = "invite", back = "back", rules = "rules",
+    invite = "invite", back = "back", rules = "rules", elite = "elite",
     tag_quest = "tag_quest", tag_farm = "tag_farm", tag_slow = "tag_slow", tag_fast = "tag_fast", tag_voice = "tag_voice" }
 local function tex(key, size)
     local g = UI.GAME[key]
@@ -2093,7 +2093,10 @@ function UI.drawWorker()
         fs:ClearAllPoints(); fs:SetPoint("TOPLEFT", f, "TOPLEFT", O.FIELD_X, yy - 8)
         if ctl then ctl:ClearAllPoints(); ctl:SetPoint("TOPLEFT", f, "TOPLEFT", X, yy) end
     end
-    place(f.questField, f.quests, y); y = y - O.ROW_STEP
+    place(f.questField, f.quests, y)
+    -- GF-002-I (R-17.19): 自動 (group / elite quests I accept join this ticket), after 選擇任務.
+    O.setSelected(f.autoAdd, A().autoAddOn())
+    y = y - O.ROW_STEP
     place(f.mainField, nil, y); O.flow(f, f.mainList, X, y, 40); y = y - O.ROW_STEP
     place(f.altField, nil, y); O.flow(f, f.altList, X, y, 40); y = y - O.ROW_STEP
     -- GF-002-H: 時段 chips (1-5), each with its picker; the window grows with them.
@@ -2112,6 +2115,8 @@ function UI.drawWorker()
     f.quests:SetText(qText)
     f.quests.gfWidth = ns.labelWidth(qText) + 28
     f.quests:SetSize(f.quests.gfWidth, ns.BUTTON_H)
+    f.autoAdd:ClearAllPoints()
+    f.autoAdd:SetPoint("LEFT", f.quests, "RIGHT", 16, 0)
     UI.drawWorkerTitle()
 end
 local drawWorker = function() UI.drawWorker() end
@@ -2134,6 +2139,7 @@ function UI.openWorker(mode)
         f.addDungeon = O.textButton(f, "＋地城", function(self) UI.pickWorkerDungeons(self) end)
         f.questField = field(f, "任務", FX, 0)
         f.quests = O.textButton(f, "選擇任務", function(self) UI.pickWorkerQuests(self) end)
+        f.autoAdd = iconButton(f, ns.ICON, "elite", "團體／精英任務", function() UI.toggleAutoAdd() end, "自動")
         f.mainField = field(f, "職責", FX, 0)
         f.altField = field(f, "副職責", FX, 0)
         f.mainRoles, f.altRoles, f.mainList, f.altList = {}, {}, {}, {}
@@ -2176,6 +2182,13 @@ function UI.saveWorker(d)
     if wpopup then wpopup:Hide() end
     UI.refresh()
     return ok
+end
+
+-- GF-002-I (R-17.19): the toggle is kept per character at once (not with 登記).
+function UI.toggleAutoAdd()
+    A().setAutoAdd(not A().autoAddOn())
+    if wpopup and wpopup.autoAdd then ns.OrdersUI.setSelected(wpopup.autoAdd, A().autoAddOn()) end
+    return A().autoAddOn()
 end
 
 function UI.toggleWorkerDungeon(id)

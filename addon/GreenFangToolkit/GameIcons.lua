@@ -104,6 +104,9 @@ G.ART = {
     -- 邀請 (design review §1.4: the letter stays for orders): a group prayer.
     invite = { { "Interface\\Icons\\Spell_Holy_PrayerOfSpirit" }, { "Interface\\Icons\\INV_Letter_15" } },
     raid = { { "Interface\\Icons\\INV_Misc_Head_Dragon_01" }, { "Interface\\Icons\\INV_Misc_Key_03" } },
+    -- GF-002-I (R-17.19): 自動 (group / elite quests): an elite's black dragon head.
+    elite = { { "Interface\\Icons\\INV_Misc_Head_Dragon_Black" }, { "Interface\\Icons\\Ability_Warrior_Rampage" },
+        { "Interface\\Icons\\INV_Misc_QuestionMark" } },
 }
 
 -- Group finder dungeon art (LFGIcon-<name>), the key when the client has none.

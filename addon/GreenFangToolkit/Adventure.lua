@@ -1211,13 +1211,79 @@ function Adv.editWorker(change)
 end
 
 -- R-5.2: quests that left my log (done, abandoned) are removed from my worker ticket.
+-- GF-002-I (R-17.18, spec §17.6): so are quests whose objectives are complete (ready to turn in).
 function Adv.syncQuests(logSet)
     local w = Adv.myWorker()
     if not w or w.allQuests or w.closed then return false end
     local kept, changed = {}, false
-    for _, q in ipairs(w.quests) do if logSet[q] then kept[#kept + 1] = q else changed = true end end
+    for _, q in ipairs(w.quests) do
+        local info = logSet[q]
+        if info and not (type(info) == "table" and info.complete) then kept[#kept + 1] = q else changed = true end
+    end
     if not changed then return false end
     return Adv.editWorker(function(x) x.quests = kept end)
+end
+
+---------------------------------------------------------------------------
+-- GF-002-I (R-17.19, spec §17.6): 自動加入團體／精英任務. Off by default, kept per
+-- character. When on, a group or elite quest I accept joins my open worker ticket
+-- (up to MAX_QUESTS). Group / elite from whatever the client gives (16001 not
+-- verified): C_QuestLog.GetInfo suggestedGroup > 1, C_QuestLog.GetQuestTagInfo
+-- (isElite, tag ID group / dungeon / raid, or the tag name), GetQuestLogTitle's
+-- suggestedGroup / questTag, GetQuestTagInfo. Without any of these: nothing happens.
+---------------------------------------------------------------------------
+
+Adv.GROUP_TAG_IDS = { [1] = true, [62] = true, [81] = true } -- group, raid, dungeon
+Adv.GROUP_TAG_NAMES = { Elite = true, Group = true, Dungeon = true, Raid = true,
+    ["精英"] = true, ["菁英"] = true, ["團體"] = true, ["團隊"] = true, ["地城"] = true, ["副本"] = true }
+
+function Adv.autoAddOn()
+    local a = me()
+    local o = Adv.local_()
+    return a ~= nil and type(o.autoAdd) == "table" and o.autoAdd[a] == true
+end
+function Adv.setAutoAdd(on)
+    local a = me()
+    if not a then return false end
+    local o = Adv.local_()
+    if type(o.autoAdd) ~= "table" then o.autoAdd = {} end
+    o.autoAdd[a] = on and true or nil
+    return true
+end
+
+-- Is this a group or elite quest? info = my quest log's entry (Adv.questLog()).
+function Adv.isGroupQuest(questID, info)
+    info = info or {}
+    if (ns.num(info.suggestedGroup) or 0) > 1 then return true end
+    if info.tag and Adv.GROUP_TAG_NAMES[info.tag] then return true end
+    local function tagged(tagID, tagName, elite)
+        if elite == true then return true end
+        if ns.num(tagID) and Adv.GROUP_TAG_IDS[ns.num(tagID)] then return true end
+        return type(tagName) == "string" and Adv.GROUP_TAG_NAMES[tagName] == true
+    end
+    if type(C_QuestLog) == "table" and type(C_QuestLog.GetQuestTagInfo) == "function" then
+        local t = ns.call(C_QuestLog.GetQuestTagInfo, questID)
+        if type(t) == "table" and tagged(t.tagID, t.tagName, t.isElite) then return true end
+    end
+    if type(GetQuestTagInfo) == "function" then
+        local tagID, tagName = ns.call(GetQuestTagInfo, questID)
+        if tagged(tagID, tagName) then return true end
+    end
+    return false
+end
+
+-- QUEST_ACCEPTED: returns true when the quest joined my worker ticket.
+function Adv.onQuestAccepted(questID)
+    questID = ns.num(questID)
+    if not questID or not Adv.autoAddOn() then return false end
+    local w = Adv.myWorker()
+    if not w or w.closed or w.allQuests then return false end
+    for _, q in ipairs(w.quests) do if q == questID then return false end end
+    if #w.quests >= Adv.MAX_QUESTS then return false end
+    local log = Adv.questLog()
+    local info = log and log[questID]
+    if not info or info.complete or not Adv.isGroupQuest(questID, info) then return false end
+    return Adv.editWorker(function(x) x.quests[#x.quests + 1] = questID end) == true
 end
 
 ---------------------------------------------------------------------------
@@ -1532,17 +1598,28 @@ function Adv.questLog()
             if type(info) == "table" and (info.isHeader == true or not qid or qid <= 0) then
                 if str(info.title) ~= "" then zone = info.title end
             elseif qid and qid > 0 then
+                -- GF-002-I (R-17.18 / R-17.19): objectives complete; the group size it suggests.
                 set[qid] = { title = info.title, level = ns.num(info.level) or ns.num(info.difficultyLevel),
-                    scaling = info.isScaling == true, zone = zone, order = i }
+                    scaling = info.isScaling == true, zone = zone, order = i,
+                    complete = info.isComplete == true or info.isComplete == 1
+                        or (type(C_QuestLog.IsComplete) == "function" and ns.call(C_QuestLog.IsComplete, qid) == true) or nil,
+                    suggestedGroup = ns.num(info.suggestedGroup), tag = type(info.questTag) == "string" and info.questTag or nil }
                 found = true
             end
         end
     elseif type(GetNumQuestLogEntries) == "function" and type(GetQuestLogTitle) == "function" then
         local n = ns.num((ns.call(GetNumQuestLogEntries))) or 0
         for i = 1, n do
-            local title, level, _, isHeader, _, _, _, questID = ns.call(GetQuestLogTitle, i)
+            -- Classic: title, level, suggestedGroup, isHeader, isCollapsed, isComplete, frequency, questID;
+            -- 1.12: title, level, questTag ("Elite" / "Group" / "Dungeon"), suggestedGroup, isHeader, isCollapsed, isComplete.
+            local title, level, third, isHeader, _, isComplete, _, questID = ns.call(GetQuestLogTitle, i)
             if isHeader then zone = title
-            elseif ns.num(questID) and questID > 0 then set[questID] = { title = title, level = level, zone = zone, order = i }; found = true end
+            elseif ns.num(questID) and questID > 0 then
+                set[questID] = { title = title, level = level, zone = zone, order = i,
+                    complete = isComplete == 1 or isComplete == true or nil,
+                    suggestedGroup = type(third) == "number" and third or nil, tag = type(third) == "string" and third or nil }
+                found = true
+            end
         end
     else
         return nil

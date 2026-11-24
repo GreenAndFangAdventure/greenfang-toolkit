@@ -734,4 +734,102 @@ return function(T)
         wow.state.now = wow.state.now + 2 * H; Adv.refresh(); Adv.maintain()
         eq(Adv.listOf(A, "W")[1].st, "x", "st x")
     end)
+
+    ---------------------------------------------------------------------------
+    -- v1.2a §17.6: R-17.18 / R-17.19
+    ---------------------------------------------------------------------------
+
+    -- A quest log through C_QuestLog (rows like GetInfo's), optional tag info.
+    local function questLogRows(rows, tags)
+        C_QuestLog = { GetNumQuestLogEntries = function() return #rows, 0 end, GetInfo = function(i) return rows[i] end }
+        if tags then C_QuestLog.GetQuestTagInfo = function(id) return tags[id] end end
+    end
+
+    test("GF-002-I R-17.18 objectives complete, turned in or abandoned: off my worker ticket by itself", function()
+        local ns = login()
+        local Adv = ns.Adventure
+        local rows = { { isHeader = true, title = "貧瘠之地" },
+            { questID = 850, title = "測試任務：草原之心", level = 16 },
+            { questID = 851, title = "測試任務：綠洲", level = 22 },
+            { questID = 852, title = "測試任務：甲蟲", level = 20 } }
+        questLogRows(rows)
+        Adv.setWorker({ dungeons = { "smg" }, quests = { 850, 851, 852 }, main = "h", slots = { { now = true } } })
+        eq(Adv.syncQuests(Adv.questLog()), false, "nothing done yet: unchanged")
+        rows[2].isComplete = true -- 850: ready to turn in
+        table.remove(rows, 4)    -- 852: abandoned (or turned in)
+        ok(Adv.syncQuests(Adv.questLog()), "changed")
+        eq(table.concat(Adv.myWorker().quests, ","), "851", "only 851 is left")
+        -- The same on the classic GetQuestLogTitle (isComplete = 1, the 6th value) and through the event.
+        C_QuestLog = nil
+        GetNumQuestLogEntries = function() return 2, 0 end
+        GetQuestLogTitle = function(i)
+            if i == 1 then return "貧瘠之地", 0, nil, true end
+            return "測試任務：綠洲", 22, 0, false, false, 1, 0, 851
+        end
+        ns.adventureStarted = true
+        wow.fire("QUEST_LOG_UPDATE")
+        wow.advance(3)
+        eq(#Adv.myWorker().quests, 0, "851 complete: gone too (QUEST_LOG_UPDATE)")
+        GetNumQuestLogEntries, GetQuestLogTitle = nil, nil
+    end)
+
+    test("GF-002-I R-17.19 自動: off by default, per character; group / elite quests I accept join my worker ticket (up to 5)", function()
+        local ns = login()
+        local Adv, U = ns.Adventure, ns.AdventureUI
+        local rows = { { isHeader = true, title = "貧瘠之地" },
+            { questID = 900, title = "測試任務：獨行", level = 20 },
+            { questID = 901, title = "測試任務：三人", level = 22, suggestedGroup = 3 },
+            { questID = 902, title = "測試任務：精英", level = 24 },
+            { questID = 903, title = "測試任務：地城", level = 25 } }
+        questLogRows(rows, { [902] = { tagID = 0, tagName = "", isElite = true }, [903] = { tagID = 81, tagName = "地城" } })
+        Adv.setWorker({ dungeons = { "smg" }, quests = {}, main = "h", slots = { { now = true } } })
+        eq(Adv.autoAddOn(), false, "off by default")
+        eq(Adv.onQuestAccepted(901), false, "off: nothing joins")
+        -- The toggle in the worker window: 2 characters and an icon, kept per character at once.
+        U.openWorker()
+        local wf = _G[U.WORKER_NAME]
+        eq(wf.autoAdd.label._text, "自動", "named 自動"); eq(wf.autoAdd.tip, "團體／精英任務", "the tooltip")
+        ok(not wf.autoAdd.selected, "not chosen")
+        wow.click(wf.autoAdd)
+        ok(Adv.autoAddOn() and wf.autoAdd.selected, "on, and it glows")
+        eq(Adv.local_().autoAdd[A], true, "kept for this character only")
+        eq(Adv.local_().autoAdd[B], nil, "not for another")
+        wf:Hide()
+        -- Through the event (classic: questLogIndex, questID), after a second.
+        ns.adventureStarted = true
+        wow.fire("QUEST_ACCEPTED", 2, 900)
+        wow.advance(2)
+        eq(#Adv.myWorker().quests, 0, "a solo quest: not added")
+        wow.fire("QUEST_ACCEPTED", 3, 901)
+        wow.advance(2)
+        eq(table.concat(Adv.myWorker().quests, ","), "901", "suggestedGroup 3: added")
+        ok(Adv.onQuestAccepted(902), "isElite (C_QuestLog.GetQuestTagInfo): added")
+        ok(Adv.onQuestAccepted(903), "tag ID 81 (dungeon): added")
+        eq(Adv.onQuestAccepted(903), false, "once")
+        -- The older GetQuestTagInfo with a tag name.
+        rows[#rows + 1] = { questID = 904, title = "測試任務：團體", level = 25 }
+        GetQuestTagInfo = function(id) if id == 904 then return 1, "Group" end end
+        ok(Adv.onQuestAccepted(904), "GetQuestTagInfo Group: added")
+        rows[#rows + 1] = { questID = 905, title = "測試任務：五", level = 25, suggestedGroup = 5 }
+        rows[#rows + 1] = { questID = 906, title = "測試任務：六", level = 25, suggestedGroup = 5 }
+        ok(Adv.onQuestAccepted(905), "the fifth")
+        eq(Adv.onQuestAccepted(906), false, "the cap: " .. Adv.MAX_QUESTS)
+        eq(#Adv.myWorker().quests, 5, "five")
+        GetQuestTagInfo = nil
+        -- No group information at all on the client: nothing happens, no error.
+        Adv.setWorker({ dungeons = { "smg" }, quests = {}, main = "h", slots = { { now = true } } })
+        questLogRows({ { questID = 950, title = "測試任務：未知", level = 20 } })
+        eq(Adv.isGroupQuest(950, Adv.questLog()[950]), false, "nothing to tell: not a group quest")
+        eq(Adv.onQuestAccepted(950), false, "nothing joins")
+        -- Not added to a closed or a 日誌全部 worker ticket, nor without one.
+        questLogRows(rows, {})
+        Adv.setWorker({ dungeons = {}, allQuests = true, main = "h", slots = { { now = true } } })
+        eq(Adv.onQuestAccepted(901), false, "日誌全部: already all")
+        Adv.removeWorker()
+        eq(Adv.onQuestAccepted(901), false, "no worker ticket")
+        -- Off again.
+        U.toggleAutoAdd()
+        eq(Adv.autoAddOn(), false, "off")
+        C_QuestLog = nil
+    end)
 end
