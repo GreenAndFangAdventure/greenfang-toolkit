@@ -227,6 +227,17 @@ return function(T)
         eq(N.open(N.find("supply", "h")), "none", "unknown page: nothing")
     end))
 
+    -- 0.16.1 integration: the orders and adventure pages hand Notify their GF-016 focus(id).
+    test("GF-014 + GF-016: orders and adventure register focus(id); a missing record opens the page only", done(function()
+        local ns = login()
+        for _, page in ipairs({ "orders", "adventure" }) do
+            local def = ns.Framework.get(page)
+            ok(def and type(def.focus) == "function", page .. " has focus")
+            local okCall, res = pcall(def.focus, "no-such-id")
+            ok(okCall, page .. " focus does not error"); eq(res, false, page .. " missing record: false")
+        end
+    end))
+
     ---------------------------------------------------------------------------
     -- The bell (NotifyUI)
     ---------------------------------------------------------------------------

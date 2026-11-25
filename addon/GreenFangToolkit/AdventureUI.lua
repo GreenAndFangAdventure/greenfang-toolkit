@@ -1211,6 +1211,8 @@ ns.Framework.register({
     available = function() return ns.guildState() == "target" end,
     create = build,
     show = function() UI.focusId = nil; A().markSeen(); UI.refresh() end,
+    -- GF-014 / GF-016: 業務通知 opens this page, then focus(id) finds the row.
+    focus = function(id) return UI.focus(id) end,
 })
 
 ---------------------------------------------------------------------------
