@@ -94,6 +94,21 @@ function L.itemFromText(text)
     return nil
 end
 
+-- GF-UI-I: what the player put into the form's item box: a chat item link,
+-- "item:123", or an ItemID typed as digits (only in that box; itemFromText
+-- above stays strict for everything else). Returns itemID, "link" / "id",
+-- or nil, "empty" / "bad".
+L.ITEM_ID_MAX = 10000000
+function L.parseItemInput(text)
+    text = str(text):gsub("^%s+", ""):gsub("%s+$", "")
+    if text == "" then return nil, "empty" end
+    local id = L.itemFromText(text)
+    if id then return id, "link" end
+    local n = tonumber(text:match("^#?(%d+)$"))
+    if n and n > 0 and n <= L.ITEM_ID_MAX then return n, "id" end
+    return nil, "bad"
+end
+
 ---------------------------------------------------------------------------
 -- Wire value of group L
 ---------------------------------------------------------------------------
@@ -255,6 +270,28 @@ function L.itemInfo(itemID, noRequest)
         typeName = type(typeName) == "string" and typeName ~= "" and typeName or nil,
         subTypeName = type(subTypeName) == "string" and subTypeName ~= "" and subTypeName or nil,
         bindType = tonumber(bindType) }
+end
+
+-- GF-UI-I: the form's preview of an ItemID: "ready" (name, type), "loading"
+-- (asked the server; GET_ITEM_INFO_RECEIVED redraws), "missing" (the client
+-- says no such item, or no answer within LOAD_WAIT seconds) or "blocked"
+-- (cannot be traded).
+L.LOAD_WAIT = 5
+function L.itemExists(itemID)
+    if type(C_Item) == "table" and type(C_Item.DoesItemExistByID) == "function" then
+        local okCall, yes = pcall(C_Item.DoesItemExistByID, itemID)
+        if okCall and yes == false then return false end
+    end
+    return true
+end
+function L.preview(itemID, waited)
+    local info, why = L.itemInfo(itemID)
+    if info then
+        return { itemID = itemID, state = L.tradeable(info) and "ready" or "blocked", info = info, name = info.name,
+            typeText = L.typeText(info) }
+    end
+    if why == "loading" and L.itemExists(itemID) and not waited then return { itemID = itemID, state = "loading" } end
+    return { itemID = itemID, state = "missing" }
 end
 
 -- GF-UI-H: 拾取綁定 (1) and quest items (4) can never be traded: never listed,

@@ -310,7 +310,8 @@ return function(T)
             end
         end
         for _, b in ipairs(boxes) do
-            ok(b.r <= F.PANEL_WIDTH - 40, b.name .. " keeps a margin to the right edge (" .. b.r .. ")")
+            -- GF-UI-I: ＋刊登 sits at the list's right edge (the same 22 px margin as the left).
+            ok(b.r <= F.PANEL_WIDTH - UI.LIST_X, b.name .. " keeps a margin to the right edge (" .. b.r .. ")")
             ok(b.b <= -UI.HEAD_Y, b.name .. " above the column header")
         end
         -- The tabs end before 刊登 with a real gap (they touched before).

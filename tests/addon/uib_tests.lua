@@ -166,8 +166,7 @@ return function(T)
         eq(table.concat(small, ","), "", "no text under 16 px on the roster page")
         -- 種族 is in the member tooltip.
         ns.UI.showRowTooltip(row, nil)
-        local tip = {}
-        for _, l in ipairs(GameTooltip._lines) do tip[#tip + 1] = l.text end
+        local tip = { ns.UI.rosterCardText() } -- GF-UI-I: the member card
         ok(table.concat(tip, "\n"):find("獸人", 1, true), "race in the tooltip: " .. table.concat(tip, " / "))
         ok(table.concat(tip, "\n"):find("60", 1, true), "level in the tooltip")
     end)

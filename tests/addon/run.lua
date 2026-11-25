@@ -1535,9 +1535,7 @@ test("roster: rows show class icon/colour, rank column, profession names; rank s
     ok(named, "a row with names only")
     ok(not profCell(named):find(":", 1, true), "no points for names only: " .. profCell(named))
     named._scripts.OnEnter(named)
-    local tip = {}
-    for _, l in ipairs(GameTooltip._lines) do tip[#tip + 1] = l.text end
-    tip = table.concat(tip, "\n")
+    local tip = ns.UI.rosterCardText() -- GF-UI-I: the member card
     ok(tip:find(named.rosterNames[1], 1, true), "tooltip names the profession")
     ok(not tip:find("技能點數未知", 1, true), "no explanation line (D19)")
 end)
@@ -1950,9 +1948,7 @@ test("D18 roster: icon + skill points, primary then secondary, － without data"
     eq(rowTexts(rowFor(ns, "測試丁-測試伺服器")), "－", "no data: a faint dash")
     eq(rowFor(ns, "測試丁-測試伺服器").profSlots[1].label._color[1], 0.42, "the dash is faint")
     peer._scripts.OnEnter(peer)
-    local lines = {}
-    for _, l in ipairs(GameTooltip._lines) do lines[#lines + 1] = l.text end
-    local tip = table.concat(lines, "\n")
+    local tip = ns.UI.rosterCardText() -- GF-UI-I: the member card
     for _, want in ipairs({ "採礦 300 / 300", "鍛造 280 / 300", "釣魚 150 / 225", "烹飪 90 / 150", "急救 75 / 150" }) do
         ok(tip:find(want, 1, true), "tooltip has " .. want)
     end
@@ -2636,9 +2632,7 @@ test("D10 roster: tooltip shows recipe counts; clicking a member opens their rec
     local row = rowFor(ns, PEER)
     ok(row, "row")
     row._scripts.OnEnter(row)
-    local list = {}
-    for _, l in ipairs(GameTooltip._lines) do list[#list + 1] = l.text end
-    local lines = table.concat(list, "\n")
+    local lines = ns.UI.rosterCardText() -- GF-UI-I: the member card
     ok(has(lines, "配方 2 個"), "recipe count in tooltip: " .. lines)
     ok(not has(lines, "小時前"), "no age (D19)")
     ok(not has(lines, "點一下看他的配方"), "no click hint (D19)")
@@ -3810,7 +3804,7 @@ test("D19 roster tooltips: one profession over its icon, short member tooltip el
     ns.UI.showRowTooltip(peer, peer.profSlots[3])
     eq(tipText(), "釣魚\n150 / 225", "fishing: name and rank / max")
     ns.UI.showRowTooltip(peer, nil)
-    local tip = tipText()
+    local tip = ns.UI.rosterCardText() -- GF-UI-I: the member tooltip is a card
     ok(tip:find("鍛造 280 / 300　配方 2 個", 1, true), "member tooltip: " .. tip)
     for _, gone in ipairs({ "更新時間", "本人", "分享", "點", "前", "技能點數未知" }) do
         ok(not tip:find(gone, 1, true), "no " .. gone)
@@ -4193,7 +4187,10 @@ test("D21 tooltips: recipe tooltip next to the row's name; roster icon tooltip o
     ns.UI.showRowTooltip(peer, slot)
     eq(GameTooltip._points[1][4], slot.x0, "icon tooltip over that icon")
     ns.UI.showRowTooltip(peer, nil)
-    eq(GameTooltip._anchor, "ANCHOR_TOP", "member tooltip above the row's middle")
+    -- GF-UI-I: the member card, above the row's middle (was GameTooltip ANCHOR_TOP).
+    local cp = ns.UI.rosterCard()._points[1]
+    eq(cp[1] .. ">" .. cp[3], "BOTTOM>TOP", "member card above the row's middle")
+    eq(cp[2], peer, "on the row")
 end)
 
 test("D21 recipe icons: crafted item, else spell icon, else the profession's; cached", function()
@@ -4675,6 +4672,9 @@ assert(loadfile(ROOT .. "/tests/addon/bank_tests.lua"))()({ test = test, eq = eq
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 -- GF-UI-H: 調貨所 item finder, untradeable items, 刪除, top rows, coin icons (tests/addon/supply_h_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/supply_h_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-UI-I: 調貨所 width / divider / ＋刊登, 臨時黑箱 top, roster card, item box input (tests/addon/uii_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/uii_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 -- GF-UI-G: the 冒險業務 sample page: palette, icons, the slot editor in the form (tests/addon/uig_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/uig_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,

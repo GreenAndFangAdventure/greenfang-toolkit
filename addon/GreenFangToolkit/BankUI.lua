@@ -15,7 +15,11 @@ ns.BankUI = UI
 UI.ID = "bank"
 UI.ROWS, UI.ROW_H, UI.ROW_W = 8, 40, 660
 UI.X, UI.RIGHT_X = 20, 720
-UI.Y = { title = -16, status = -48, listHead = -84, rows = -116, scopeHead = -84, stockHead = -500, stock = -530 }
+-- GF-UI-I (owner 0.16.2: 標題和右邊的字壓到上面的分頁列): the sub-tab row's
+-- line ends 29 px into the page, so everything starts UI.TOP below it.
+UI.TOP = 40
+UI.Y = { title = -UI.TOP, status = -UI.TOP - 32, listHead = -UI.TOP - 68, rows = -UI.TOP - 100, scopeHead = -UI.TOP - 68,
+    stockHead = -UI.TOP - 484, stock = -UI.TOP - 514 }
 UI.RESULT = {
     ["no-authority"] = "只有會長可以管理", ["not-found"] = "找不到這位成員", full = "保管人已達上限",
     same = "沒有變更", invalid = "格式不對", ["last-kind"] = "至少留一種，否則請撤銷", ok = "已更新",
