@@ -4676,6 +4676,9 @@ assert(loadfile(ROOT .. "/tests/addon/bank_tests.lua"))()({ test = test, eq = eq
 -- GF-UI-H: 調貨所 item finder, untradeable items, 刪除, top rows, coin icons (tests/addon/supply_h_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/supply_h_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-UI-G: the 冒險業務 sample page: palette, icons, the slot editor in the form (tests/addon/uig_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/uig_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------
 

@@ -22,23 +22,45 @@ ns.Theme = T
 -- Colours (one table). r, g, b[, a].
 ---------------------------------------------------------------------------
 
+-- GF-UI-G (0.16.x, the 冒險業務 sample page): deep olive grey, warm grey brown and
+-- a muted brass gold. Every colour of the toolkit is here (hex in the comment);
+-- gold only for what is chosen, section headers and the main action; red stays
+-- for removing. The fills are the game's white square tinted (T.color).
+local function rgb(hex, a)
+    local r, g, b = tonumber(hex:sub(1, 2), 16), tonumber(hex:sub(3, 4), 16), tonumber(hex:sub(5, 6), 16)
+    return { r / 255, g / 255, b / 255, a or 1 }
+end
+T.rgb = rgb
 T.C = {
-    bg = { 0.055, 0.055, 0.065, 0.97 },   -- windows, menus, popups: near black, never see-through
-    panel = { 1, 1, 1, 0.025 },           -- a panel inside a window (the module list)
-    line = { 0.27, 0.27, 0.29, 1 },       -- 1 px borders and separators
-    lineHover = { 0.58, 0.58, 0.6, 1 },   -- the border under the mouse
-    gold = { 1, 0.82, 0, 1 },             -- chosen / active, section headers
-    goldFill = { 1, 0.82, 0, 0.12 },      -- the faint fill of a chosen tab or toggle
-    goldLine = { 1, 0.82, 0, 0.55 },      -- the line under a section header, a focused box
+    bg = rgb("22251E", 0.97),             -- windows, menus, popups: never see-through
+    main = rgb("22251E", 0.99),           -- the main window: more opaque still
+    side = rgb("2B3225"),                 -- the module list on the left
+    panel = rgb("2B3225", 0.55),          -- a panel inside a window
+    rowA = rgb("272822"), rowB = rgb("2E2D25"), -- list rows, one after the other
+    form = rgb("303329"),                 -- forms and drop-down lists: opaque, nothing shows through
+    selFill = rgb("3B4630"),              -- the chosen row / tab / item
+    selLine = rgb("B49B63"),              -- its 1 px frame
+    title = rgb("CFB77E"),                -- titles and section headers
+    line = rgb("535144"),                 -- 1 px borders and separators
+    lineHover = rgb("8A8470"),            -- the border under the mouse
+    gold = rgb("CFB77E"),                 -- chosen / active, section headers (the title colour)
+    goldFill = rgb("3B4630"),             -- the fill of a chosen tab or toggle (selFill)
+    goldLine = rgb("B49B63", 0.85),       -- the line under a section header, a focused box
     fill = { 1, 1, 1, 0.03 },             -- a button's own fill (almost transparent)
-    hover = { 1, 1, 1, 0.07 },            -- a button / row under the mouse
-    head = { 1, 1, 1, 0.05 },             -- table header bar
-    input = { 0, 0, 0, 0.55 },            -- edit boxes, check boxes
-    text = { 0.88, 0.88, 0.88 },          -- button text
-    muted = { 0.62, 0.62, 0.64 },         -- the X, not chosen
+    hover = rgb("E5DDC8", 0.08),          -- a button / row under the mouse: a little lighter
+    head = rgb("2B3225"),                 -- table header bar
+    input = rgb("303329"),                -- edit boxes, check boxes (the form colour, opaque)
+    text = rgb("E5DDC8"),                 -- normal text and button text
+    sub = rgb("BEB5A0"),                  -- secondary text
+    muted = rgb("BEB5A0"),                -- the X, not chosen
+    disabled = rgb("BEB5A0", 0.45),       -- what cannot be pressed: dimmer
     good = { 0.25, 1, 0.35 }, bad = { 1, 0.3, 0.3 },
     coinGold = { 1, 0.82, 0 }, coinSilver = { 0.8, 0.8, 0.84 }, coinCopper = { 0.93, 0.62, 0.36 },
 }
+-- GF-UI-G: list row i (1, 2, 3 ...): the two warm row colours one after the other.
+function T.stripe(tex, i)
+    return T.color(tex, (i or 1) % 2 == 0 and T.C.rowB or T.C.rowA)
+end
 
 -- Game textures (each with a fallback; MANUAL「GF-UI-D 外觀」).
 T.TEX = {
@@ -87,8 +109,10 @@ end
 T.FONT = {
     button = font("GreenFangToolkitButton16", "GameFontHighlight", 16, T.C.text) or ns.LABEL_FONT,
     hover = font("GreenFangToolkitButtonHover16", "GameFontHighlight", 16, { 1, 1, 1 }) or ns.LABEL_FONT,
-    chosen = ns.FIELD_FONT, -- gold
-    header = font("GreenFangToolkitHeader16", "GameFontNormal", 16, T.C.gold) or ns.FIELD_FONT,
+    chosen = font("GreenFangToolkitChosen16", "GameFontNormal", 16, T.C.title) or ns.FIELD_FONT, -- GF-UI-G: brass gold
+    header = font("GreenFangToolkitHeader16", "GameFontNormal", 16, T.C.title) or ns.FIELD_FONT,
+    sub = font("GreenFangToolkitSub16", "GameFontHighlight", 16, T.C.sub) or ns.LABEL_FONT, -- GF-UI-G: secondary text
+    off = font("GreenFangToolkitOff16", "GameFontHighlight", 16, { 0.52, 0.5, 0.45 }) or ns.DISABLED_FONT, -- GF-UI-G: disabled
     close = font("GreenFangToolkitClose18", "GameFontHighlight", 18, T.C.muted) or ns.TITLE_FONT,
     closeHover = font("GreenFangToolkitCloseHover18", "GameFontNormal", 18, T.C.gold) or ns.TITLE_FONT,
     number = font("GreenFangToolkitNumber16", "NumberFontNormal", 16) or ns.LABEL_FONT,
@@ -129,6 +153,16 @@ function T.fill(f, c, layer, sub)
     t:SetAllPoints(f)
     T.color(t, c)
     return t
+end
+
+-- GF-UI-G: a form (冒險單, 職工單) or a drop-down list: the opaque form colour
+-- (#303329, alpha 1), so nothing behind it shows through its words and buttons.
+function T.formPanel(f)
+    if not f then return f end
+    T.panel(f)
+    T.color(f.gfOpaque, T.C.form, 1)
+    f.gfForm = true
+    return f
 end
 
 -- The window / menu look: the near-black fill and a 1 px grey line. f.gfOpaque is
@@ -319,8 +353,8 @@ end
 function T.refresh(b)
     if not b or not b.gfEdges then return end
     if b.gfSelected then
-        b.gfEdges.set(T.C.gold)
-        T.color(b.gfFill, T.C.goldFill)
+        b.gfEdges.set(T.C.selLine) -- GF-UI-G: brass frame on the olive fill
+        T.color(b.gfFill, T.C.selFill)
     elseif not enabled(b) then
         b.gfEdges.set({ T.C.line[1], T.C.line[2], T.C.line[3], 0.55 })
         T.color(b.gfFill, T.C.fill, 0)
@@ -351,7 +385,7 @@ function T.button(parent, text, w, h, name)
     end
     if b.SetNormalFontObject then pcall(b.SetNormalFontObject, b, T.FONT.button) end
     if b.SetHighlightFontObject then pcall(b.SetHighlightFontObject, b, T.FONT.hover) end
-    if b.SetDisabledFontObject then pcall(b.SetDisabledFontObject, b, ns.DISABLED_FONT) end
+    if b.SetDisabledFontObject then pcall(b.SetDisabledFontObject, b, T.FONT.off) end
     if b.SetPushedTextOffset then pcall(b.SetPushedTextOffset, b, 1, -1) end
     if b.HookScript then
         b:HookScript("OnEnable", T.refresh)
@@ -372,7 +406,7 @@ function T.setSelected(b, on)
     local f = on and T.FONT.chosen or T.FONT.button
     if b.SetNormalFontObject then pcall(b.SetNormalFontObject, b, f) end
     if b.SetHighlightFontObject then pcall(b.SetHighlightFontObject, b, on and T.FONT.chosen or T.FONT.hover) end
-    if b.SetDisabledFontObject then pcall(b.SetDisabledFontObject, b, on and T.FONT.chosen or ns.DISABLED_FONT) end
+    if b.SetDisabledFontObject then pcall(b.SetDisabledFontObject, b, on and T.FONT.chosen or T.FONT.off) end
     T.refresh(b)
 end
 

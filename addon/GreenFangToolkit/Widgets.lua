@@ -699,3 +699,187 @@ function W.subTabs(parent, items, x, y, onSelect)
     strip.layout()
     return strip
 end
+
+---------------------------------------------------------------------------
+-- GF-UI-G: a drop-down inside a form (時段的日期、開始時間、預計長度). The
+-- button shows the chosen item and the game's drop-down arrow; a click opens
+-- an opaque list (the form colour) of at most W.DROP_ROWS lines that scrolls
+-- with the mouse wheel or its ▲ ▼; it opens upwards when there is no room
+-- below (near the bottom of the screen) and is kept on the screen. ESC, a
+-- click outside, a pick, or hiding the form close it. A disabled item is
+-- dimmer and never lights up.
+--
+--   local dd = ns.Widgets.dropdown(parent, 140, function(value) ... end)
+--   dd.setItems({ { value = 0, text = "今天 11/25" }, { value = 1, text = "明天 11/26", disabled = true } })
+--   dd.setValue(1)           -- the button text follows the items
+--   dd.open() / dd.close() / dd.isOpen() / dd.choose(value) / dd.scroll(n)
+--   dd.shownTexts()          -- the lines in view (scripts and tests)
+---------------------------------------------------------------------------
+
+W.DROP_ROW, W.DROP_ROWS, W.DROP_PAD, W.DROP_BAR = 28, 8, 4, 22
+
+local function dropScale(b)
+    local s = ns.num((b.GetEffectiveScale and b:GetEffectiveScale())) or 1
+    local u = ns.num((UIParent and UIParent.GetEffectiveScale and UIParent:GetEffectiveScale())) or 1
+    if s <= 0 or u <= 0 then return 1 end
+    return s / u
+end
+
+function W.dropdown(parent, w, onChoose)
+    local T = ns.Theme
+    local b = T.button(parent, nil, w, ns.BUTTON_H)
+    b.gfWidget = "dropdown"
+    b.gfWidth = w
+    if ns.dropArrow then ns.dropArrow(b) end
+    local dd = b
+    dd.items, dd.value, dd.offset, dd.onChoose = {}, nil, 0, onChoose
+
+    local list = CreateFrame("Frame", nil, UIParent)
+    list:SetFrameStrata("TOOLTIP") -- above the click-outside blocker and the form
+    if list.SetFrameLevel then list:SetFrameLevel(110) end
+    T.formPanel(list)
+    list:EnableMouse(true)
+    if list.EnableMouseWheel then list:EnableMouseWheel(true) end
+    if list.SetClampedToScreen then list:SetClampedToScreen(true) end
+    list:Hide()
+    list.rows = {}
+    list.gfDropdown = dd
+    dd.list = list
+    ns.escRegister(list, ns.ESC_LEVEL.menu)
+
+    local function row(i)
+        local r = list.rows[i]
+        if r then return r end
+        r = CreateFrame("Button", nil, list)
+        r:SetHeight(W.DROP_ROW)
+        r:SetPoint("TOPLEFT", list, "TOPLEFT", W.DROP_PAD, -W.DROP_PAD - (i - 1) * W.DROP_ROW)
+        r.sel = T.fill(r, T.C.selFill, "BACKGROUND")
+        r.selBar = r:CreateTexture(nil, "BORDER")
+        r.selBar:SetPoint("TOPLEFT", r, "TOPLEFT", 0, 0)
+        r.selBar:SetPoint("BOTTOMLEFT", r, "BOTTOMLEFT", 0, 0)
+        r.selBar:SetWidth(3)
+        T.color(r.selBar, T.C.selLine)
+        r.gfHover = T.fill(r, T.C.hover, "HIGHLIGHT")
+        r.text = ns.freeText(r:CreateFontString(nil, "ARTWORK", T.FONT.button))
+        r.text:SetPoint("LEFT", r, "LEFT", 10, 0)
+        r.text:SetJustifyH("LEFT")
+        r:SetScript("OnClick", function(self) if self.item then dd.choose(self.item.value) end end)
+        T.guardHover(r)
+        list.rows[i] = r
+        return r
+    end
+    local function arrowButton(key, name, step)
+        local a = T.button(list, nil, W.DROP_BAR, W.DROP_BAR)
+        a.tex = a:CreateTexture(nil, "ARTWORK"); a.tex:SetAllPoints()
+        G().set(a.tex, key)
+        a.fieldNamed = name
+        a:SetScript("OnClick", function() dd.scroll(step) end)
+        return a
+    end
+    list.up = arrowButton("sort_up", "上", -(W.DROP_ROWS - 1))
+    list.down = arrowButton("sort_down", "下", W.DROP_ROWS - 1)
+    list:SetScript("OnMouseWheel", function(_, delta) dd.scroll(-(tonumber(delta) or 0) * 3) end)
+
+    local function indexOf(value)
+        for i, it in ipairs(dd.items) do if it.value == value then return i end end
+        return nil
+    end
+    function dd.textFor(value)
+        local i = indexOf(value)
+        return i and dd.items[i].text or (dd.emptyText or "")
+    end
+    function dd.refreshText() b:SetText(dd.textFor(dd.value)) end
+    function dd.setItems(items)
+        dd.items = items or {}
+        dd.refreshText()
+        if list:IsShown() then dd.draw() end
+    end
+    function dd.setValue(value)
+        dd.value = value
+        dd.refreshText()
+        if list:IsShown() then dd.draw() end
+    end
+    function dd.maxOffset() return math.max(0, #dd.items - W.DROP_ROWS) end
+    function dd.scroll(n)
+        dd.offset = math.max(0, math.min(dd.maxOffset(), dd.offset + (n or 0)))
+        dd.draw()
+        return dd.offset
+    end
+    -- The rows in view, the chosen one marked; ▲ ▼ only when the list is longer.
+    function dd.draw()
+        local n = math.min(#dd.items, W.DROP_ROWS)
+        local long = #dd.items > W.DROP_ROWS
+        local rowW = w
+        for _, it in ipairs(dd.items) do rowW = math.max(rowW, ns.labelWidth(it.text) + 24) end
+        for i = 1, n do
+            local it = dd.items[dd.offset + i]
+            local r = row(i)
+            r.item = it
+            r:SetWidth(rowW)
+            r.text:SetText(it.text)
+            local chosen = it.value == dd.value
+            r.chosen = chosen
+            if chosen then r.sel:Show(); r.selBar:Show() else r.sel:Hide(); r.selBar:Hide() end
+            r.text:SetFontObject(it.disabled and T.FONT.off or (chosen and T.FONT.chosen or T.FONT.button))
+            r.disabled = it.disabled == true
+            if r.SetEnabled then r:SetEnabled(not it.disabled) end
+            r:Show()
+        end
+        for i = n + 1, #list.rows do list.rows[i]:Hide(); list.rows[i].item = nil end
+        if long then
+            list.up:ClearAllPoints(); list.up:SetPoint("TOPRIGHT", list, "TOPRIGHT", -W.DROP_PAD, -W.DROP_PAD)
+            list.down:ClearAllPoints(); list.down:SetPoint("BOTTOMRIGHT", list, "BOTTOMRIGHT", -W.DROP_PAD, W.DROP_PAD)
+            list.up:Show(); list.down:Show()
+            list.up:SetEnabled(dd.offset > 0)
+            list.down:SetEnabled(dd.offset < dd.maxOffset())
+        else
+            list.up:Hide(); list.down:Hide()
+        end
+        list:SetSize(rowW + 2 * W.DROP_PAD + (long and (W.DROP_BAR + 4) or 0), math.max(1, n) * W.DROP_ROW + 2 * W.DROP_PAD)
+    end
+    function dd.isOpen() return list:IsShown() end
+    function dd.close() if list:IsShown() then list:Hide() end end
+    -- Below the button, or above it when the screen ends first (dd.openUp).
+    function dd.place()
+        local h = math.min(#dd.items, W.DROP_ROWS) * W.DROP_ROW + 2 * W.DROP_PAD
+        local scale = dropScale(b)
+        if list.SetScale then list:SetScale(scale) end
+        local bottom = ns.num((b.GetBottom and b:GetBottom()))
+        local top = ns.num((b.GetTop and b:GetTop()))
+        local screenH = ns.num((UIParent and UIParent.GetTop and UIParent:GetTop())) or 0
+        local below = bottom and bottom * scale or nil
+        local above = (top and screenH > 0) and (screenH - top * scale) or nil
+        list:ClearAllPoints()
+        dd.openUp = below ~= nil and below < (h + 8) * scale and (above == nil or above > below)
+        if dd.openUp then list:SetPoint("BOTTOMLEFT", b, "TOPLEFT", 0, 2)
+        else list:SetPoint("TOPLEFT", b, "BOTTOMLEFT", 0, -2) end
+    end
+    function dd.open()
+        if ns.closeMenus then ns.closeMenus() end
+        local i = indexOf(dd.value) or 1
+        dd.offset = math.max(0, math.min(dd.maxOffset(), i - math.floor(W.DROP_ROWS / 2)))
+        dd.draw()
+        dd.place()
+        list:Show()
+        return list
+    end
+    function dd.toggle() if list:IsShown() then dd.close() else dd.open() end end
+    -- A pick: false for a disabled or unknown item (nothing changes).
+    function dd.choose(value)
+        local i = indexOf(value)
+        if not i or dd.items[i].disabled then return false end
+        dd.value = value
+        dd.refreshText()
+        dd.close()
+        if dd.onChoose then dd.onChoose(value) end
+        return true
+    end
+    function dd.shownTexts()
+        local out = {}
+        for _, r in ipairs(list.rows) do if r:IsShown() and r.item then out[#out + 1] = r.item.text end end
+        return out
+    end
+    b:SetScript("OnClick", function() dd.toggle() end)
+    b:HookScript("OnHide", function() dd.close() end)
+    return dd
+end

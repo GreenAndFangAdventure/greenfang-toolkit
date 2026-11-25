@@ -286,7 +286,7 @@ return function(T)
         ok(G.markup("final", 18):find(":5:59:5:59|t", 1, true), "GameIcons markup: cropped")
         ok(not G.markup("yes", 18):find(":5:59", 1, true), "ReadyCheck art: whole")
         local t = tf:CreateTexture()
-        G.set(t, "calendar")
+        G.set(t, "final") -- GF-UI-G: 行事曆 is now the calendar page (not a square icon)
         eq(t._texCoord[1] .. "," .. t._texCoord[4], "0.08,0.92", "a texture: cropped")
         -- Inline icons in text buttons are at most the button height - 8.
         eq(U.BUTTON_ICON <= ns.BUTTON_H - 8, true, "the limit")
