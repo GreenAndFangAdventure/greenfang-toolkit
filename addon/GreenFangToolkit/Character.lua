@@ -163,7 +163,7 @@ end)
 
 ns.Framework.register({
     id = "character",
-    title = "我的角色",
+    title = "職工檔案",
     order = 15,
     create = build,
     show = Character.refresh,

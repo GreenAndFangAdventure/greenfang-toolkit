@@ -27,8 +27,8 @@ return function(env)
     test("GF-UI-E six entries in spec order, 4-character names with the game's icons; empty ones hidden", function()
         local ns = login()
         SlashCmdList.GREENFANGTOOLKIT("")
-        -- 物資調度 has no page yet: hidden (spec §3 未實作入口隱藏).
-        eq(navTexts(ns), "職工檔案,職工名冊,委託業務,冒險業務,冒險指南", "entries")
+        -- 0.16.0: GF-009 調貨所 fills 物資調度; an entry with no page stays hidden (spec §3).
+        eq(navTexts(ns), "職工檔案,職工名冊,委託業務,物資調度,冒險業務,冒險指南", "entries")
         for _, b in ipairs(ns.Framework.navButtons()) do
             if b:IsShown() then
                 ok(b.iconPath and b.iconPath:find("^Interface\\Icons\\"), "game icon on " .. b:GetText())

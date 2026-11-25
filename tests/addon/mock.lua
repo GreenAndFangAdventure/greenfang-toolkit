@@ -5,7 +5,7 @@
 local wow = {}
 
 local TOC_FILES = { "Config.lua", "Core.lua", "Theme.lua", "Data.lua", "Icons.lua", "GameIcons.lua", "Professions.lua", "Roster.lua", "Sync.lua", "Comm.lua", "Share.lua", "Ledger.lua", "Orders.lua", "Prices.lua", "Delivery.lua", "WebOrders.lua", "AdventureData.lua", "Adventure.lua",
-    "Export.lua", "Framework.lua", "UI.lua", "Character.lua", "Recipes.lua", "Diag.lua", "GuildAdmin.lua", "NativeLFG.lua", "OrdersUI.lua", "Widgets.lua", "AdventureUI.lua", "SleepingBagData.lua", "SleepingBag.lua", "Probe.lua", "Init.lua" }
+    "Export.lua", "Framework.lua", "UI.lua", "Character.lua", "Recipes.lua", "Diag.lua", "GuildAdmin.lua", "NativeLFG.lua", "OrdersUI.lua", "Widgets.lua", "AdventureUI.lua", "SleepingBagData.lua", "SleepingBag.lua", "SupplyRules.lua", "Supply.lua", "SupplyListings.lua", "SupplyUI.lua", "Probe.lua", "Init.lua" }
 TOC_FILES[#TOC_FILES + 1] = "Events.lua" -- GF-013 (appended, like the TOC)
 wow.TOC_FILES = TOC_FILES
 

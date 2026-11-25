@@ -158,6 +158,8 @@ local SECTIONS = {
     { title = "功能探測（GF-PROBE）", text = function() return ns.Probe and ns.Probe.diagText() or "" end },
     -- GF-013: the background event record (this computer only; not uploaded yet).
     { title = "背景事件紀錄（本機）", text = function() return ns.Events and ns.Events.diagText() or "" end },
+    -- GF-009: 綠皮調貨所 (automatic collection and manual listings).
+    { title = "物資供需（GF-009）", text = function() return ns.Supply and ns.Supply.diagText() or "" end },
 }
 
 -- GF-UI-B (GF-UI-A §2.11): 16 px text (18 px state line, gold section

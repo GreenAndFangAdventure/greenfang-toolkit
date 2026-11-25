@@ -84,7 +84,7 @@ F.NAMES = {
     -- Sub-tab names of the pages there are today (spec §3 建議子頁).
     page = {
         character = "角色資料", roster = "在籍職工", recipes = "工匠配方", orders = "製作委託",
-        adventure = "業務大廳", sleepingbag = "睡袋指南",
+        adventure = "業務大廳", sleepingbag = "睡袋指南", supply = "調貨所",
     },
     settingsTip = "同步與診斷",
 }
