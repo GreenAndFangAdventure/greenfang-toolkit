@@ -7,6 +7,40 @@
 --
 -- Nothing here knows the rules: the checklist only draws what the caller
 -- hands it (Adventure.whyState for adventure tickets).
+--
+-- GF-UI-E (spec v2.0 §4.2, appendix A §7.3): pieces for the new pages
+-- (GF-009 調貨所, GF-010 職工檔案, GF-012 黑庫). How to use them:
+--
+--   物品列 (an item: the game's icon 36 px + its name + a count)
+--     local row = ns.Widgets.itemRow(parent, 520)        -- width; height W.ITEM_ROW_H
+--     row:SetPoint("TOPLEFT", parent, "TOPLEFT", 20, -80)
+--     row.set(6948, "缺 1", { sub = "可能提供：2 位", stripe = i })
+--     row.set(nil)                                       -- hides the row
+--     -- Not cached yet: the question-mark icon and 「物品資料載入中」; the row
+--     -- redraws itself on GET_ITEM_INFO_RECEIVED (no OnUpdate, no scan).
+--     -- The mouse over it shows the game's item tooltip (or the name only).
+--     -- Clickable only when you give it an OnClick (row:SetScript("OnClick", fn));
+--     -- otherwise it never lights up (GF-UI-D2). row.right is a frame at the
+--     -- row's right end for your buttons (聯絡); the name is cut before it.
+--     -- Reuse rows when scrolling (one row per visible line, never one per member).
+--   ns.Widgets.itemInfo(itemID) -> { id, name, icon, link, loaded }  (pure read)
+--
+--   空／載入／未知／過期／錯誤 (a state in place of a list)
+--     local st = ns.Widgets.statePanel(parent, 600, 120)
+--     st:SetPoint("TOP", parent, "TOP", 0, -140)
+--     st.set("empty", "目前沒有可配對的公會物資")  -- kinds: W.STATE_KINDS; text optional
+--     st.set(nil)                                   -- hides it
+--     -- Always an icon and words; never a colour alone, never an error code.
+--   ns.Widgets.freshness(at, now?, opts?) -> key, text, color
+--     -- 近期 / 稍早 / 過期 / 未知 for list rows; the exact time goes in the tooltip.
+--     -- opts = { recent = seconds, stale = seconds } (default 6 h / 3 days).
+--
+--   子分頁列 (tabs inside a page, e.g. 我缺的 / 我可能有多的)
+--     local tabs = ns.Widgets.subTabs(parent, { { key = "need", text = "我缺的" },
+--         { key = "spare", text = "我可能有多的" } }, 20, -40, function(key) redraw(key) end)
+--     tabs.select("need")          -- the chosen tab is gold and cannot be pressed
+--     tabs.setEnabled("spare", false); tabs.setShown("spare", false)  -- re-laid out
+--   The main window's own entry / sub-tab row is Framework.lua (register entry=...).
 
 local _, ns = ...
 local str = ns.str
@@ -350,3 +384,318 @@ function W.confirm(text, onYes)
     return f
 end
 function W.confirmFrame() return confirm end
+
+---------------------------------------------------------------------------
+-- GF-UI-E: the item row (spec v2.0 §4.2, appendix A §7.3). The game's item
+-- icon, square and cropped, 36 px; the localised name; a count on the right.
+-- Not cached yet: the question mark and 「物品資料載入中」, never a guessed
+-- name or the item ID. Redrawn on GET_ITEM_INFO_RECEIVED only.
+---------------------------------------------------------------------------
+
+W.ITEM_ICON, W.ITEM_ROW_H = 36, 44
+W.ITEM_PLACEHOLDER = { "Interface\\Icons\\INV_Misc_QuestionMark", "Interface\\RaidFrame\\ReadyCheck-Waiting" }
+W.TEXT = {
+    itemLoading = "物品資料載入中",
+    empty = "目前沒有資料", loading = "載入中", unknown = "狀態未知", stale = "資料過期", error = "暫時無法讀取",
+    fresh = { recent = "近期", earlier = "稍早", stale = "過期", unknown = "未知" },
+}
+
+local function fnc(x) return type(x) == "function" end
+local function try(f, ...)
+    if not fnc(f) then return nil end
+    local res = { pcall(f, ...) }
+    if not res[1] then return nil end
+    return unpack(res, 2, 11)
+end
+
+-- What the client knows about an item now. Pure read; asks the client to
+-- load it (C_Item.RequestLoadItemDataByID) when the name is not there yet.
+function W.itemInfo(itemID)
+    local id = tonumber(itemID)
+    local info = { id = id, loaded = false }
+    if not id then return info end
+    local C = type(C_Item) == "table" and C_Item or {}
+    local name, link, quality, _, _, _, _, _, _, icon = try(GetItemInfo, id)
+    name = name or try(C.GetItemNameByID, id)
+    icon = icon or try(C.GetItemIconByID, id) or try(GetItemIcon, id)
+    if type(name) == "string" and name ~= "" then
+        info.name, info.loaded = name, true
+    else
+        try(C.RequestLoadItemDataByID, id)
+    end
+    info.icon = icon
+    info.link = type(link) == "string" and link or nil
+    info.quality = tonumber(quality)
+    return info
+end
+
+local waiting = setmetatable({}, { __mode = "k" }) -- row -> itemID still loading
+local itemEvents = CreateFrame("Frame")
+pcall(itemEvents.RegisterEvent, itemEvents, "GET_ITEM_INFO_RECEIVED")
+itemEvents:SetScript("OnEvent", function(_, _, itemID)
+    local id = tonumber(itemID)
+    local list = {}
+    for row, wanted in pairs(waiting) do
+        if id == nil or wanted == id then list[#list + 1] = row end
+    end
+    for _, row in ipairs(list) do row.redraw() end
+end)
+W.itemEventFrame = itemEvents
+function W.itemsWaiting()
+    local n = 0
+    for _ in pairs(waiting) do n = n + 1 end
+    return n
+end
+
+local function setFirst(tex, list)
+    for _, path in ipairs(list) do
+        if ns.Icons.set(tex, path) then return path end
+    end
+    return nil
+end
+
+function W.itemTooltip(owner, info)
+    if not (owner and info) then return end
+    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+    local shown = false
+    if info.link and fnc(GameTooltip.SetHyperlink) then shown = pcall(GameTooltip.SetHyperlink, GameTooltip, info.link) end
+    if not shown and info.loaded and info.id and fnc(GameTooltip.SetItemByID) then
+        shown = pcall(GameTooltip.SetItemByID, GameTooltip, info.id)
+    end
+    if not shown then GameTooltip:AddLine(info.name or W.TEXT.itemLoading, 1, 1, 1) end
+    GameTooltip:Show()
+end
+
+function W.itemRow(parent, w, h)
+    h = h or W.ITEM_ROW_H
+    local row = CreateFrame("Button", nil, parent)
+    row:SetSize(w, h)
+    row.gfWidget = "itemRow"
+    row.bg = row:CreateTexture(nil, "BACKGROUND")
+    row.bg:SetAllPoints(row)
+    if ns.stripe then ns.stripe(row.bg, 1) end
+    row.gfHover = ns.Theme.fill(row, ns.Theme.C.hover, "HIGHLIGHT")
+    row.icon = row:CreateTexture(nil, "ARTWORK")
+    row.icon:SetSize(W.ITEM_ICON, W.ITEM_ICON)
+    row.icon:SetPoint("LEFT", row, "LEFT", 6, 0)
+    -- A 1 px grey line round the icon (the theme's line colour).
+    local edges = {}
+    local function edge(p1, rel1, x1, y1, p2, rel2, x2, y2, horizontal)
+        local t = row:CreateTexture(nil, "BORDER")
+        t:SetPoint(p1, row.icon, rel1, x1, y1)
+        t:SetPoint(p2, row.icon, rel2, x2, y2)
+        if horizontal then t:SetHeight(1) else t:SetWidth(1) end
+        ns.Theme.color(t, ns.Theme.C.line)
+        edges[#edges + 1] = t
+    end
+    edge("BOTTOMLEFT", "TOPLEFT", -1, 0, "BOTTOMRIGHT", "TOPRIGHT", 1, 0, true)
+    edge("TOPLEFT", "BOTTOMLEFT", -1, 0, "TOPRIGHT", "BOTTOMRIGHT", 1, 0, true)
+    edge("TOPRIGHT", "TOPLEFT", 0, 0, "BOTTOMRIGHT", "BOTTOMLEFT", 0, 0, false)
+    edge("TOPLEFT", "TOPRIGHT", 0, 0, "BOTTOMLEFT", "BOTTOMRIGHT", 0, 0, false)
+    row.iconEdges = edges
+    local textX = 6 + W.ITEM_ICON + 10
+    row.textX = textX
+    row.right = CreateFrame("Frame", nil, row)
+    row.right:SetPoint("TOPRIGHT", row, "TOPRIGHT", -6, 0)
+    row.right:SetSize(1, h)
+    row.rightW = 1 -- kept here: what GetWidth gives depends on the anchors
+    row.count = ns.freeText(row:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
+    row.count:SetPoint("RIGHT", row.right, "LEFT", -10, 0)
+    if row.count.SetJustifyH then row.count:SetJustifyH("RIGHT") end
+    row.name = row:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
+    row.name:SetJustifyH("LEFT")
+    if row.name.SetWordWrap then row.name:SetWordWrap(false) end
+    row.sub = row:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
+    row.sub:SetJustifyH("LEFT")
+    if row.sub.SetWordWrap then row.sub:SetWordWrap(false) end
+    local mc = W.COLOR.muted
+    row.sub:SetTextColor(mc[1], mc[2], mc[3])
+    row.sub:Hide()
+
+    -- The name (and the second line) between the icon and the count / row.right.
+    function row.layout()
+        local rightW = row.rightW or 0
+        local countW = row.count:IsShown() and ns.measure(row.count) or 0
+        local nameW = math.max(40, w - textX - rightW - countW - 26)
+        local two = row.sub:IsShown()
+        row.name:ClearAllPoints()
+        row.name:SetPoint("LEFT", row, "LEFT", textX, two and 9 or 0)
+        row.name:SetWidth(nameW)
+        row.sub:ClearAllPoints()
+        row.sub:SetPoint("LEFT", row, "LEFT", textX, -11)
+        row.sub:SetWidth(nameW)
+        row.nameWidth = nameW
+    end
+    -- Room on the right for the caller's buttons (聯絡); the name is cut before it.
+    function row.setRightWidth(px)
+        row.rightW = math.max(1, px or 1)
+        row.right:SetWidth(row.rightW)
+        row.layout()
+    end
+
+    function row.redraw()
+        local info = W.itemInfo(row.itemID)
+        row.info = info
+        local path = info.icon and ns.Icons.set(row.icon, info.icon) and info.icon or nil
+        row.placeholder = path == nil
+        if row.placeholder then path = setFirst(row.icon, W.ITEM_PLACEHOLDER) end
+        row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        if row.icon.SetDesaturated then row.icon:SetDesaturated(row.placeholder) end
+        row.iconPath = path
+        row.loading = not info.loaded
+        row.name:SetText(info.loaded and info.name or W.TEXT.itemLoading)
+        local col = info.loaded and W.COLOR.white or W.COLOR.muted
+        row.name:SetTextColor(col[1], col[2], col[3])
+        if info.loaded then waiting[row] = nil else waiting[row] = info.id end
+        row.layout()
+    end
+
+    -- itemID, count (a number or a short text such as 「缺 1」), opts:
+    -- { sub = second line, countColor = W.COLOR key, stripe = list index }.
+    function row.set(itemID, count, opts)
+        opts = opts or {}
+        row.itemID = tonumber(itemID)
+        if not row.itemID then waiting[row] = nil; row.info = nil; row:Hide(); return row end
+        if count ~= nil and count ~= "" then
+            row.count:SetText(tostring(count)); row.count:Show()
+            local cc = W.COLOR[opts.countColor or "white"] or W.COLOR.white
+            row.count:SetTextColor(cc[1], cc[2], cc[3])
+        else
+            row.count:SetText(""); row.count:Hide()
+        end
+        if opts.sub and opts.sub ~= "" then row.sub:SetText(opts.sub); row.sub:Show()
+        else row.sub:SetText(""); row.sub:Hide() end
+        if ns.stripe then ns.stripe(row.bg, opts.stripe or 1) end
+        row.redraw()
+        row:Show()
+        return row
+    end
+
+    row:EnableMouse(true)
+    row:SetScript("OnEnter", function(self) W.itemTooltip(self, self.info) end)
+    row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    ns.Theme.guardHover(row) -- lights up only when the caller gives it an OnClick
+    row.layout()
+    return row
+end
+
+---------------------------------------------------------------------------
+-- GF-UI-E: 空／載入／未知／過期／錯誤 in place of a list: the game's icon (32)
+-- and words, the detail line under it in grey. Never a colour alone.
+---------------------------------------------------------------------------
+
+W.STATE_KINDS = { "empty", "loading", "unknown", "stale", "error" }
+W.STATE_ICON = {
+    empty = { "Interface\\Icons\\INV_Misc_Bag_08", "Interface\\Icons\\INV_Box_01" },
+    loading = { "Interface\\RaidFrame\\ReadyCheck-Waiting", "Interface\\Icons\\INV_Misc_PocketWatch_01" },
+    unknown = { "Interface\\Icons\\INV_Misc_QuestionMark" },
+    stale = { "Interface\\Icons\\Spell_Holy_BorrowedTime", "Interface\\Icons\\INV_Misc_PocketWatch_02" },
+    error = { "Interface\\RaidFrame\\ReadyCheck-NotReady", "Interface\\Icons\\INV_Misc_QuestionMark" },
+}
+W.STATE_PANEL_ICON = 32
+
+function W.statePanel(parent, w, h)
+    local f = CreateFrame("Frame", nil, parent)
+    f:SetSize(w or 500, h or 100)
+    f.gfWidget = "statePanel"
+    f.icon = f:CreateTexture(nil, "ARTWORK")
+    f.icon:SetSize(W.STATE_PANEL_ICON, W.STATE_PANEL_ICON)
+    f.icon:SetPoint("TOP", f, "TOP", 0, -8)
+    f.text = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
+    f.text:SetPoint("TOP", f.icon, "BOTTOM", 0, -8)
+    f.detail = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
+    f.detail:SetPoint("TOP", f.text, "BOTTOM", 0, -6)
+    local mc = W.COLOR.muted
+    f.detail:SetTextColor(mc[1], mc[2], mc[3])
+    -- kind: one of W.STATE_KINDS (nil hides it); text: the main words (else
+    -- W.TEXT[kind]); detail: an optional second line.
+    function f.set(kind, text, detail)
+        f.kind = kind
+        if not kind then f:Hide(); return f end
+        f.iconPath = setFirst(f.icon, W.STATE_ICON[kind] or W.STATE_ICON.unknown)
+        local square = f.iconPath and f.iconPath:find("\\Icons\\", 1, true)
+        if square then f.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92) else f.icon:SetTexCoord(0, 1, 0, 1) end
+        f.text:SetText(text or W.TEXT[kind] or W.TEXT.unknown)
+        local col = kind == "error" and W.COLOR.warn or kind == "empty" and W.COLOR.white or W.COLOR.muted
+        f.text:SetTextColor(col[1], col[2], col[3])
+        if detail and detail ~= "" then f.detail:SetText(detail); f.detail:Show() else f.detail:SetText(""); f.detail:Hide() end
+        f:Show()
+        return f
+    end
+    f:Hide()
+    return f
+end
+
+-- 近期 / 稍早 / 過期 / 未知 for a time (spec §4.2: no timestamps in lists).
+W.FRESH_RECENT, W.FRESH_STALE = 6 * 3600, 3 * 86400
+function W.freshness(at, now, opts)
+    opts = opts or {}
+    local t = tonumber(at)
+    now = tonumber(now) or (type(time) == "function" and time()) or 0
+    local key
+    if not t or t <= 0 or t > now + 300 then key = "unknown"
+    elseif now - t <= (opts.recent or W.FRESH_RECENT) then key = "recent"
+    elseif now - t <= (opts.stale or W.FRESH_STALE) then key = "earlier"
+    else key = "stale" end
+    local color = key == "recent" and W.COLOR.good or key == "earlier" and W.COLOR.white or W.COLOR.disabled
+    return key, W.TEXT.fresh[key], color
+end
+
+---------------------------------------------------------------------------
+-- GF-UI-E: a sub-tab row inside a page. items = { { key, text, w? } }. The
+-- chosen tab is gold and cannot be pressed (so it never lights up); a hidden
+-- tab leaves no gap. onSelect(key) after a click.
+---------------------------------------------------------------------------
+
+function W.subTabs(parent, items, x, y, onSelect)
+    local strip = { buttons = {}, key = nil, x = x or 0, y = y or 0 }
+    for _, it in ipairs(items or {}) do
+        local w = it.w or math.max(96, ns.labelWidth(it.text) + 28)
+        local b = ns.Theme.button(parent, it.text, w, ns.BUTTON_H)
+        b.key, b.gfShown, b.gfUsable, b.gfW = it.key, true, true, w
+        local key = it.key
+        b:SetScript("OnClick", function()
+            strip.select(key)
+            if onSelect then onSelect(key) end
+        end)
+        strip.buttons[#strip.buttons + 1] = b
+    end
+    function strip.layout()
+        local cx = strip.x
+        for _, b in ipairs(strip.buttons) do
+            if b.gfShown then
+                b:ClearAllPoints()
+                b:SetPoint("TOPLEFT", parent, "TOPLEFT", cx, strip.y)
+                b:Show()
+                cx = cx + b.gfW + 8
+            else
+                b:Hide()
+            end
+        end
+    end
+    function strip.select(key)
+        strip.key = key
+        for _, b in ipairs(strip.buttons) do
+            local chosen = b.key == key
+            ns.Theme.setSelected(b, chosen)
+            if b.SetEnabled then b:SetEnabled(b.gfUsable and not chosen) end
+        end
+    end
+    function strip.button(key)
+        for _, b in ipairs(strip.buttons) do if b.key == key then return b end end
+    end
+    function strip.setEnabled(key, on)
+        local b = strip.button(key)
+        if not b then return end
+        b.gfUsable = on and true or false
+        strip.select(strip.key)
+    end
+    function strip.setShown(key, on)
+        local b = strip.button(key)
+        if not b then return end
+        b.gfShown = on and true or false
+        strip.layout()
+    end
+    strip.layout()
+    return strip
+end

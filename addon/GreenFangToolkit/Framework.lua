@@ -10,6 +10,18 @@
 --   create    function(panel) builds the module's widgets into panel, once
 --   show      optional function(panel) called every time the module is shown
 --   hide      optional function(panel)
+-- GF-UI-E (spec v2.0 §3), optional, so every older register() still works:
+--   entry     which main entry the page belongs to: "profile" 職工檔案,
+--             "directory" 職工名冊, "crafting" 委託業務, "logistics" 物資調度,
+--             "adventure" 冒險業務, "handbook" 冒險指南, or "settings" 事務設定
+--             (the bottom button). Left out: F.DEFAULT_ENTRY[id]; a page with
+--             neither gets an entry of its own after the six (named def.short or
+--             def.title), so nothing that registered before disappears.
+--   subTitle  the page's name on the sub-tab row (2-4 characters); else
+--             F.NAMES.page[id], def.short, def.title.
+--   subOrder  order among the pages of one entry (smaller first); else order.
+-- An entry with no available page is hidden. The pages of one entry switch on
+-- the sub-tab row at the top of the content area. All names: F.NAMES.
 -- Module settings live in GreenFangToolkitDB.settings.modules[id] (GF Sync ignores
 -- settings). Per-character state lives in .characters[<GUID>] inside that table.
 
@@ -44,10 +56,63 @@ F.WINDOW_NAME = "GreenFangToolkit_MainWindow"
 F.NAV_WIDTH = 160
 -- GF-002-E (owner: 「請調整大一點」): wider and taller, so the names fit on the rows.
 F.PANEL_WIDTH, F.PANEL_HEIGHT = 1100, 680 -- GF-002-F: 36 px rows
+-- GF-UI-E: the sub-tab row above every page. The page keeps its own 680 px
+-- (it is moved down, not squeezed); the window grows by this much.
+F.SUBTAB_H = 40
+F.SUBTAB_Y = -35 -- the row's buttons, from the window's top (under the title line)
 
 local modules, byId = {}, {}
 local window, navButtons, panels, currentId = nil, {}, {}, nil
+local subTabs = {}
+local lastPage = {} -- entry -> the page last open there (this session only; lastModule is saved)
 local minimapButton
+
+---------------------------------------------------------------------------
+-- GF-UI-E: the six entries (spec v2.0 §3), their names and icons. Every name
+-- shown in the navigation is in F.NAMES (also ns.NAMES), so a new name is one
+-- line here. Other files may add their page names (F.NAMES.page[id] = "...").
+---------------------------------------------------------------------------
+
+F.ENTRIES = { "profile", "directory", "crafting", "logistics", "adventure", "handbook" }
+F.SETTINGS_ENTRY = "settings"
+F.NAMES = {
+    entry = {
+        profile = "職工檔案", directory = "職工名冊", crafting = "委託業務",
+        logistics = "物資調度", adventure = "冒險業務", handbook = "冒險指南",
+        settings = "事務設定",
+    },
+    -- Sub-tab names of the pages there are today (spec §3 建議子頁).
+    page = {
+        character = "角色資料", roster = "在籍職工", recipes = "工匠配方", orders = "製作委託",
+        adventure = "業務大廳", sleepingbag = "睡袋指南",
+    },
+    settingsTip = "同步與診斷",
+}
+ns.NAMES = F.NAMES
+
+-- Pages that registered without an entry, by id (the ones of today, and the
+-- ids the first-wave sessions use: GF-010 profile, GF-009 supply, GF-012 bank).
+F.DEFAULT_ENTRY = {
+    character = "profile", profile = "profile",
+    roster = "directory",
+    recipes = "crafting", orders = "crafting",
+    supply = "logistics", bank = "logistics",
+    adventure = "adventure",
+    sleepingbag = "handbook",
+}
+
+-- The game's own icons, each with fallbacks (MANUAL §3uie).
+F.ENTRY_ICON = {
+    profile = { "Interface\\Icons\\INV_Misc_Head_Human_01", "Interface\\Icons\\INV_Misc_Note_01" },
+    directory = { "Interface\\Icons\\INV_Misc_Book_09", "Interface\\Icons\\INV_Misc_Note_02" },
+    crafting = { "Interface\\Icons\\Trade_BlackSmithing", "Interface\\Icons\\INV_Hammer_20" },
+    logistics = { "Interface\\Icons\\INV_Box_01", "Interface\\Icons\\INV_Misc_Bag_08" },
+    adventure = { "Interface\\Icons\\INV_Misc_Map_01", "Interface\\Icons\\INV_Sword_04" },
+    handbook = { "Interface\\Icons\\INV_Misc_Book_11", "Interface\\Icons\\INV_Misc_Book_09" },
+    settings = { "Interface\\Icons\\INV_Misc_Gear_01", "Interface\\Icons\\Trade_Engineering" },
+    page = { "Interface\\Icons\\INV_Misc_Note_01" }, -- an entry of its own (no entry given)
+}
+F.NAV_ICON = 20
 
 ---------------------------------------------------------------------------
 -- Registry
@@ -84,6 +149,79 @@ function F.availableModules()
     return list
 end
 
+-- GF-UI-E: the entry a page belongs to (see the top of this file).
+local function knownEntry(key)
+    return type(key) == "string" and F.NAMES.entry[key] ~= nil
+end
+function F.entryOf(def)
+    if not def then return nil end
+    if knownEntry(def.entry) then return def.entry end
+    local d = F.DEFAULT_ENTRY[def.id]
+    if knownEntry(d) then return d end
+    return "page:" .. def.id
+end
+
+function F.entryName(key)
+    if F.NAMES.entry[key] then return F.NAMES.entry[key] end
+    local id = type(key) == "string" and key:match("^page:(.+)$")
+    local def = id and byId[id]
+    if def then return def.short or F.SHORT_TITLE[def.id] or def.title end
+    return tostring(key or "")
+end
+
+function F.pageTitle(def)
+    if not def then return "" end
+    return def.subTitle or F.NAMES.page[def.id] or def.short or def.title
+end
+
+local function subOrder(def) return def.subOrder or def.order end
+
+-- The available pages of one entry, in sub-tab order.
+function F.pagesOf(key)
+    local list = {}
+    for _, def in ipairs(F.availableModules()) do
+        if F.entryOf(def) == key then list[#list + 1] = def end
+    end
+    table.sort(list, function(a, b)
+        if subOrder(a) ~= subOrder(b) then return subOrder(a) < subOrder(b) end
+        return a.id < b.id
+    end)
+    return list
+end
+
+-- The entries to show, in order: { key, name, pages }. The six first (only
+-- those with a page), then pages with an entry of their own (by order).
+-- 事務設定 is not in this list (it sits at the bottom, F.settingsPages()).
+function F.entries()
+    local out, seen = {}, {}
+    for _, key in ipairs(F.ENTRIES) do
+        local pages = F.pagesOf(key)
+        if #pages > 0 then out[#out + 1] = { key = key, name = F.entryName(key), pages = pages } end
+        seen[key] = true
+    end
+    seen[F.SETTINGS_ENTRY] = true
+    for _, def in ipairs(F.availableModules()) do
+        local key = F.entryOf(def)
+        if not seen[key] then
+            seen[key] = true
+            out[#out + 1] = { key = key, name = F.entryName(key), pages = F.pagesOf(key) }
+        end
+    end
+    return out
+end
+function F.settingsPages() return F.pagesOf(F.SETTINGS_ENTRY) end
+
+-- The page an entry opens: the one last open there, else its first.
+function F.entryPage(key)
+    local pages = F.pagesOf(key)
+    local last = lastPage[key]
+    for _, def in ipairs(pages) do
+        if def.id == last then return def end
+    end
+    return pages[1]
+end
+function F.currentEntry() return currentId and F.entryOf(byId[currentId]) or nil end
+
 ---------------------------------------------------------------------------
 -- Settings helpers
 ---------------------------------------------------------------------------
@@ -119,7 +257,7 @@ end
 local function createWindow()
     if window then return window end
     -- GF-UI-D: the theme's window (dark panel, 1 px line, gold title, the X).
-    local f = ns.Theme.window(F.WINDOW_NAME, UIParent, F.NAV_WIDTH + F.PANEL_WIDTH + 10, F.PANEL_HEIGHT)
+    local f = ns.Theme.window(F.WINDOW_NAME, UIParent, F.NAV_WIDTH + F.PANEL_WIDTH + 10, F.PANEL_HEIGHT + F.SUBTAB_H)
     f:SetPoint("CENTER")
     f:SetFrameStrata("DIALOG")
     f:SetMovable(true)
@@ -131,11 +269,17 @@ local function createWindow()
     ns.escRegister(f, ns.ESC_LEVEL.window) -- GF-002-E: ESC closes the windows above it first
     local nav = CreateFrame("Frame", nil, f)
     nav:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -32)
-    nav:SetSize(F.NAV_WIDTH - 14, F.PANEL_HEIGHT - 44)
+    nav:SetSize(F.NAV_WIDTH - 14, F.PANEL_HEIGHT + F.SUBTAB_H - 44)
     -- GF-UI-D: the module list is a faint panel with a line on its right.
     nav.bg = ns.Theme.fill(nav, ns.Theme.C.panel, "BACKGROUND")
     nav.line = ns.Theme.vline(nav, 0, 0, 0, nil, true)
     f.nav = nav
+    -- GF-UI-E: the sub-tab row over the page, with a thin line under it.
+    local bar = CreateFrame("Frame", nil, f)
+    bar:SetPoint("TOPLEFT", f, "TOPLEFT", F.NAV_WIDTH, F.SUBTAB_Y)
+    bar:SetSize(F.PANEL_WIDTH, ns.BUTTON_H + 2)
+    bar.line = ns.Theme.hline(f, F.SUBTAB_Y - ns.BUTTON_H - 4, F.NAV_WIDTH + 20, 20)
+    f.subBar = bar
     f:Hide()
     window = f
     return f
@@ -165,7 +309,7 @@ F.refreshTitle = function() if currentId then setTitle(byId[currentId]) end end
 local function panelFor(def)
     if panels[def.id] then return panels[def.id] end
     local p = CreateFrame("Frame", nil, window)
-    p:SetPoint("TOPLEFT", window, "TOPLEFT", F.NAV_WIDTH, 0)
+    p:SetPoint("TOPLEFT", window, "TOPLEFT", F.NAV_WIDTH, -F.SUBTAB_H) -- GF-UI-E: under the sub-tab row
     p:SetSize(F.PANEL_WIDTH, F.PANEL_HEIGHT)
     p:Hide()
     panels[def.id] = p
@@ -176,26 +320,113 @@ local function panelFor(def)
     return p
 end
 
--- Rebuild the module list: availability can change (joining a guild, level...).
+-- GF-UI-E: an entry button: the game's icon (20 px) and the 4-character name.
+local function setNavIcon(b, key)
+    local list = F.ENTRY_ICON[key] or F.ENTRY_ICON.page
+    local shown = nil
+    for _, path in ipairs(list) do
+        if ns.Icons.set(b.icon, path) then shown = path; break end
+    end
+    if shown then
+        b.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        b.icon:Show()
+    else
+        b.icon:Hide()
+    end
+    b.iconPath = shown
+end
+
+local function navButton(parent)
+    -- GF-UI-B: 30 px, the toolkit's 16 px font (GF-UI-A §1.3). GF-UI-D: an
+    -- outlined theme button; the open entry is the chosen one (gold).
+    local b = ns.Theme.button(parent, nil, F.NAV_WIDTH - 24, ns.BUTTON_H)
+    b.icon = b:CreateTexture(nil, "ARTWORK")
+    b.icon:SetSize(F.NAV_ICON, F.NAV_ICON)
+    b.icon:SetPoint("LEFT", b, "LEFT", 8, 0)
+    ns.leftText(b, 8 + F.NAV_ICON + 8)
+    return b
+end
+
+-- The bottom button: 事務設定. Its pages when a module registered entry =
+-- "settings"; until then it opens the 同步與診斷 window (Diag.lua).
+local function settingsButton()
+    if window.settingsButton then return window.settingsButton end
+    local b = navButton(window.nav)
+    b:SetPoint("BOTTOMLEFT", window.nav, "BOTTOMLEFT", 5, 8)
+    b.entryKey = F.SETTINGS_ENTRY
+    b:SetText(F.NAMES.entry.settings)
+    setNavIcon(b, F.SETTINGS_ENTRY)
+    b:SetScript("OnClick", function()
+        local def = F.entryPage(F.SETTINGS_ENTRY)
+        if def then F.select(def.id)
+        elseif ns.Diag then ns.Diag.toggle() end
+    end)
+    b:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(F.NAMES.settingsTip)
+        GameTooltip:Show()
+    end)
+    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    window.settingsButton = b
+    return b
+end
+
+-- The sub-tab row: one tab per page of the open entry; the open page is the
+-- chosen one (gold) and cannot be pressed (it does not light up either).
+local function rebuildSubTabs(key)
+    for _, b in ipairs(subTabs) do b:Hide() end
+    local pages = key and F.pagesOf(key) or {}
+    local x = 20
+    for i, def in ipairs(pages) do
+        local b = subTabs[i]
+        if not b then
+            b = ns.Theme.button(window.subBar, nil, 100, ns.BUTTON_H)
+            subTabs[i] = b
+        end
+        local text = F.pageTitle(def)
+        b:SetText(text)
+        local w = math.max(96, ns.labelWidth(text) + 28)
+        b:SetWidth(w)
+        b:ClearAllPoints()
+        b:SetPoint("TOPLEFT", window.subBar, "TOPLEFT", x, 0)
+        x = x + w + 8
+        b.moduleId = def.id
+        local id = def.id
+        b:SetScript("OnClick", function() F.select(id) end)
+        if b.SetEnabled then b:SetEnabled(def.id ~= currentId) end
+        ns.Theme.setSelected(b, def.id == currentId)
+        b:Show()
+    end
+    return pages
+end
+
+-- Rebuild the entry list: availability can change (joining a guild, level...).
 local function rebuildNav()
     for _, b in ipairs(navButtons) do b:Hide() end
-    local list = F.availableModules()
-    for i, def in ipairs(list) do
+    local list = F.entries()
+    local open = F.currentEntry()
+    for i, e in ipairs(list) do
         local b = navButtons[i]
         if not b then
-            -- GF-UI-B: 30 px, the toolkit's 16 px font (GF-UI-A §1.3). GF-UI-D: an
-            -- outlined theme button; the open module is the chosen one (gold).
-            b = ns.Theme.button(window.nav, nil, F.NAV_WIDTH - 24, ns.BUTTON_H)
+            b = navButton(window.nav)
             b:SetPoint("TOPLEFT", window.nav, "TOPLEFT", 5, -6 - (i - 1) * (ns.BUTTON_H + 6))
             navButtons[i] = b
         end
-        b:SetText(F.shortTitle(def))
-        b:SetScript("OnClick", function() F.select(def.id) end)
-        if b.SetEnabled then b:SetEnabled(def.id ~= currentId) end
-        ns.Theme.setSelected(b, def.id == currentId)
-        b.moduleId = def.id
+        local chosen = e.key == open
+        local def = chosen and byId[currentId] or F.entryPage(e.key)
+        b:SetText(e.name)
+        setNavIcon(b, e.key:find("^page:") and "page" or e.key)
+        local id = def and def.id
+        b:SetScript("OnClick", function() F.select(id) end)
+        if b.SetEnabled then b:SetEnabled(not chosen) end
+        ns.Theme.setSelected(b, chosen)
+        b.entryKey = e.key
+        b.moduleId = id -- the page this entry opens (the open one when chosen)
         b:Show()
     end
+    local s = settingsButton()
+    ns.Theme.setSelected(s, open == F.SETTINGS_ENTRY)
+    rebuildSubTabs(open)
     return list
 end
 
@@ -219,6 +450,7 @@ function F.select(id)
     if not def then currentId = nil; rebuildNav(); setTitle(nil); return nil end
     currentId = def.id
     ns.settings().lastModule = def.id
+    lastPage[F.entryOf(def)] = def.id -- GF-UI-E: the entry reopens this page
     local p = panelFor(def)
     p:Show()
     setTitle(def)
@@ -249,6 +481,8 @@ function F.current() return currentId end
 function F.isModuleShown(id) return F.isShown() and currentId == id end
 function F.panel(id) return panels[id] end
 function F.navButtons() return navButtons end
+function F.subTabButtons() return subTabs end -- GF-UI-E: the sub-tab row (pooled; check IsShown)
+function F.settingsButton() return window and window.settingsButton or nil end
 
 ---------------------------------------------------------------------------
 -- Minimap button: the single entry point, sitting on the minimap rim.

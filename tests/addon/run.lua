@@ -517,10 +517,11 @@ end)
 -- GF-000-A framework
 ---------------------------------------------------------------------------
 
+-- GF-UI-E: the entries shown on the left (keys), in order.
 local function shownNav(ns)
     local ids = {}
     for _, b in ipairs(ns.Framework.navButtons()) do
-        if b:IsShown() then ids[#ids + 1] = b.moduleId end
+        if b:IsShown() then ids[#ids + 1] = b.entryKey end
     end
     return table.concat(ids, ",")
 end
@@ -551,7 +552,7 @@ test("framework: unavailable or broken modules are hidden", function()
         create = function() error("build failed") end })
     wow.fire("PLAYER_LOGIN"); wow.advance(10)
     SlashCmdList.GREENFANGTOOLKIT("")
-    eq(shownNav(ns), "roster,recipes,orders,adventure,character,sleepingbag,crash", "only available modules listed")
+    eq(shownNav(ns), "profile,directory,crafting,adventure,handbook,page:crash", "only available modules listed")
     SlashCmdList.GREENFANGTOOLKIT("soon")
     eq(ns.Framework.current(), "roster", "hidden module cannot be opened; falls back")
     eq(built, false, "hidden module never built")
@@ -644,13 +645,13 @@ test("sleepingbag: module visible for Horde, hidden for Alliance", function()
     wow.reset()
     local ns = wow.login(ADDON_DIR)
     SlashCmdList.GREENFANGTOOLKIT("")
-    eq(shownNav(ns), "roster,recipes,orders,adventure,character,sleepingbag", "Horde sees the route")
+    eq(shownNav(ns), "profile,directory,crafting,adventure,handbook", "Horde sees the route")
     local alliance = wow.defaultPlayer()
     alliance.faction = "Alliance"
     wow.reset({ player = alliance })
     ns = wow.login(ADDON_DIR)
     SlashCmdList.GREENFANGTOOLKIT("")
-    eq(shownNav(ns), "roster,recipes,orders,adventure,character", "Alliance has no route yet")
+    eq(shownNav(ns), "profile,directory,crafting,adventure", "Alliance has no route yet (冒險指南 hidden)")
 end)
 
 test("sleepingbag: RPG hides coordinates until revealed; normal shows all", function()
@@ -4647,6 +4648,9 @@ assert(loadfile(ROOT .. "/tests/addon/adventure_fixes_tests.lua"))()({ test = te
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 -- GF-UI-D: the theme (game art only, no red buttons) (tests/addon/theme_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/theme_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-UI-E: six entries, sub-tabs, 事務設定, item row and states (tests/addon/uie_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/uie_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------

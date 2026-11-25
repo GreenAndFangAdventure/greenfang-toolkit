@@ -1274,6 +1274,51 @@ owner 實測 0.12.2 回報：字太小、有些名稱被擠成兩行（「目的
 
 職業、職責（圓形）、物品和專業圖示沒有改，見 §3ui、§3af。
 
+## 3uie. GF-UI-E 六個主入口與子分頁（0.16.0 起）
+
+依據：總規格 v2.0 §3、§4。離線測試在 `tests/addon/uie_tests.lua`；下面每一項都**未實機驗證**。每項截一張圖回報，不對的地方在圖上圈起來。
+
+### 截圖清單
+
+1. □ 主視窗整個畫面：左邊依序「職工檔案、職工名冊、委託業務、冒險業務、冒險指南」，最下面「事務設定」；每個名稱左邊有遊戲圖示
+2. □ 職工名冊（名冊頁）：上面一排只有一個金色分頁「在籍職工」，底下名單沒有被擋住、沒有往下跑出視窗
+3. □ 委託業務：上面兩個分頁「工匠配方」「製作委託」；按另一個分頁會換頁，左邊「委託業務」一直是金色
+4. □ 先到委託業務選「製作委託」，再按職工名冊，再按回委託業務：打開的是「製作委託」
+5. □ 冒險業務：分頁「業務大廳」，冒險單列表、下面的「診斷」按鈕位置跟以前一樣
+6. □ 冒險指南（部落角色）：分頁「睡袋指南」；聯盟角色看不到「冒險指南」
+7. □ 職工檔案：分頁「角色資料」
+8. □ 按「事務設定」：開啟「同步與診斷」視窗；再按一次關掉；滑鼠移上去提示「同步與診斷」
+9. □ `/gftk`、`/綠皮`、`/gftk recipes`、`/gftk orders`、小地圖按鈕：都照常打開
+10. □ 物資調度：GF-009 調貨所還沒合進來時看不到這個入口
+
+### 每張圖都看
+
+- □ 左邊名稱 4 個字一行放得下，不會被切掉；圖示是正方形、沒有黑框
+- □ 選到的入口和選到的分頁是金色細框加淡金色底；選到的那個滑鼠移上去不會亮
+- □ 子分頁那一排下面有一條細灰線，和頁面內容之間有空隙、不重疊
+- □ 視窗比 0.15.x 高 40 px；1080p、UI 縮放 1.0 和 0.8 都整個放得下
+- □ ESC 一樣先關選單、小視窗，最後關主視窗
+
+### 用到的遊戲圖（16001 沒有清單可查，以實機為準）
+
+| 用途 | 遊戲路徑 | 沒有時 |
+|---|---|---|
+| 職工檔案 | `Interface\Icons\INV_Misc_Head_Human_01` | `INV_Misc_Note_01` |
+| 職工名冊 | `Interface\Icons\INV_Misc_Book_09` | `INV_Misc_Note_02` |
+| 委託業務 | `Interface\Icons\Trade_BlackSmithing` | `INV_Hammer_20` |
+| 物資調度 | `Interface\Icons\INV_Box_01` | `INV_Misc_Bag_08` |
+| 冒險業務 | `Interface\Icons\INV_Misc_Map_01` | `INV_Sword_04` |
+| 冒險指南 | `Interface\Icons\INV_Misc_Book_11` | `INV_Misc_Book_09` |
+| 事務設定 | `Interface\Icons\INV_Misc_Gear_01` | `Trade_Engineering` |
+| 物品列佔位（未快取） | `Interface\Icons\INV_Misc_QuestionMark`（灰階）＋「物品資料載入中」 | `Interface\RaidFrame\ReadyCheck-Waiting` |
+| 空狀態 | `Interface\Icons\INV_Misc_Bag_08` | `INV_Box_01` |
+| 載入中 | `Interface\RaidFrame\ReadyCheck-Waiting` | `INV_Misc_PocketWatch_01` |
+| 未知 | `Interface\Icons\INV_Misc_QuestionMark` | 只有文字 |
+| 過期 | `Interface\Icons\Spell_Holy_BorrowedTime` | `INV_Misc_PocketWatch_02` |
+| 錯誤 | `Interface\RaidFrame\ReadyCheck-NotReady` | `INV_Misc_QuestionMark` |
+
+物品列、狀態、子分頁列這三個共用元件要等 GF-009／GF-010 的頁面用上才看得到，截圖跟著那兩頁的清單一起交。
+
 ## 3b. 睡袋路線（GF-008-A，0.6.0 起；部落角色）
 
 - □ 左側清單有「睡袋路線」；聯盟角色看不到這一項
