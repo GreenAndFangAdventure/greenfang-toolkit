@@ -46,6 +46,7 @@ N.TEXT_MAX = 120        -- bytes
 N.MODULES = {
     { key = "supply", text = "調貨所配對", tip = "有人可能有你缺的，或需要你可能有多的" },
     { key = "radar", text = "需求雷達", tip = "背包裡有公會正在徵求的物品（只有你看得到）" },
+    { key = "adventure", text = "職工單配對", tip = "我的職工單符合別人的冒險單（WorkerMatch.lua；各角色自己的設定）" }, -- GF-014-02
 }
 N.MODULE_TEXT = {}
 for _, m in ipairs(N.MODULES) do N.MODULE_TEXT[m.key] = m.text end

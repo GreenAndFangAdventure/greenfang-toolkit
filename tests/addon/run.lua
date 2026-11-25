@@ -4682,6 +4682,9 @@ assert(loadfile(ROOT .. "/tests/addon/uig_tests.lua"))()({ test = test, eq = eq,
 -- GF-UI-J: warm charcoal, the new icons, the worker ticket tooltip (tests/addon/uij_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/uij_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-014-02: 職工單配對 notices and their switches (tests/addon/workermatch_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/workermatch_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------
 

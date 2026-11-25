@@ -168,29 +168,42 @@ end
 
 local function settingsRows()
     local out = {}
-    for _, m in ipairs(N.MODULES) do out[#out + 1] = { key = m.key, text = m.text, tip = m.tip } end
+    for _, m in ipairs(N.MODULES) do
+        -- GF-014-02: a module may bring its own rows (per-character get / set, sub-options indented).
+        if type(m.options) == "table" then
+            for _, o in ipairs(m.options) do
+                out[#out + 1] = { key = m.key .. "." .. o.key, text = o.text, tip = o.tip, get = o.get, set = o.set, sub = o.sub }
+            end
+        else
+            out[#out + 1] = { key = m.key, text = m.text, tip = m.tip }
+        end
+    end
     out[#out + 1] = { key = "\1chat", text = "聊天框提示", tip = "有新通知時在聊天框留一行（最多每分鐘一次）" }
     return out
 end
 
 function UI.buildSettings(parent, x, y)
     local boxes = {}
+    local sync
     for i, m in ipairs(settingsRows()) do
         local c = Th.checkBox(parent, 28)
-        c:SetPoint("TOPLEFT", parent, "TOPLEFT", x or 12, (y or UI.TOP) - (i - 1) * 36)
+        c:SetPoint("TOPLEFT", parent, "TOPLEFT", (x or 12) + (m.sub and 28 or 0), (y or UI.TOP) - (i - 1) * 36)
         c.text = label(parent, m.text, ns.LABEL_FONT)
         c.text:SetPoint("LEFT", c, "RIGHT", 6, 0)
         c.tip = m.tip
         c.key = m.key
+        c.get, c.set, c.sub = m.get, m.set, m.sub
         c:SetScript("OnClick", function(self)
             local on = self:GetChecked() and true or false
-            if self.key == "\1chat" then N.setChat(on) else N.setEnabled(self.key, on) end
+            if self.set then self.set(on); if sync then sync() end
+            elseif self.key == "\1chat" then N.setChat(on) else N.setEnabled(self.key, on) end
         end)
         boxes[#boxes + 1] = c
     end
-    local function sync()
+    sync = function()
         for _, c in ipairs(boxes) do
-            if c.key == "\1chat" then c.gfOn = N.chatOn() else c.gfOn = N.enabled(c.key) end
+            if c.get then c.gfOn = c.get()
+            elseif c.key == "\1chat" then c.gfOn = N.chatOn() else c.gfOn = N.enabled(c.key) end
             c:SetChecked(c.gfOn)
         end
     end
