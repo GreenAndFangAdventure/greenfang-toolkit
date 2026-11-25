@@ -16,14 +16,17 @@ return function(T)
         return ns
     end
     local function plain(t) return (tostring(t or ""):gsub("|T.-|t", ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")) end
-    -- A login at local hh:mm today (whatever the machine's time zone).
+    -- The game's local clock as the mock has it (tests/addon/mock.lua: date() is
+    -- fixed to UTC+8), never the machine's zone (GF-UI-G2: CI runs in UTC).
+    local function gameDate(f, t) return os.date("!" .. f, t + 8 * 3600) end
+    -- A login at the game's local hh:mm today.
     local function loginAt(hh, mm)
         local base = 1763370000
-        local d = os.date("*t", base)
+        local d = gameDate("*t", base)
         local mid = base - (d.hour * 3600 + d.min * 60 + d.sec)
         return login({ now = mid + hh * 3600 + mm * 60 })
     end
-    local function hhmm(t) return os.date("%H:%M", t) end
+    local function hhmm(t) return gameDate("%H:%M", t) end
     local function ticket(ns) return _G[ns.AdventureUI.TICKET_NAME] end
     local function worker(ns) return _G[ns.AdventureUI.WORKER_NAME] end
     local function texts(items)
@@ -186,7 +189,7 @@ return function(T)
         ok(days[2].text:find("^明天 %d+/%d+$"), "明天 with the date: " .. days[2].text)
         ok(days[3].text:find("（.-）$"), "later days with the weekday")
         eq(#days, ns.Adventure.FUTURE_DAYS + 1, "today to FUTURE_DAYS")
-        local tm = os.date("*t", ns.Share.serverNow() + 86400)
+        local tm = gameDate("*t", ns.Share.serverNow() + 86400)
         eq(days[2].text, "明天 " .. tm.month .. "/" .. tm.day, "明天 is the real next day")
         ok(not days[1].disabled, "today is open at 14:07")
     end)
@@ -325,7 +328,7 @@ return function(T)
         U.openSlotEditor(f, 2)
         local e = f.slotEdit
         eq(e.day.value, 2, "日期: the day after tomorrow")
-        local md = os.date("*t", t0)
+        local md = gameDate("*t", t0)
         ok(e.day:GetText():find("^" .. md.month .. "/" .. md.day .. "（"), "日期 text: " .. e.day:GetText())
         eq(e.time:GetText(), "20:10", "時間 keeps 20:10 (listed although off the quarter)")
         eq(e.len:GetText(), "2 小時", "90 minutes rounds to 2 hours (as before)")
