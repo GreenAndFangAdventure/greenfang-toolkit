@@ -4664,6 +4664,9 @@ assert(loadfile(ROOT .. "/tests/addon/supply_tests.lua"))()({ test = test, eq = 
 -- GF-010: role positioning and the personnel file (tests/addon/profile_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/profile_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-014: 業務通知, the bell and the local radar (tests/addon/notify_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/notify_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------
 

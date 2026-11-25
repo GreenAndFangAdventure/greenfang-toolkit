@@ -49,3 +49,6 @@ SupplyUI.lua
 Probe.lua
 Init.lua
 Events.lua
+Notify.lua
+NotifyUI.lua
+SupplyRadar.lua
