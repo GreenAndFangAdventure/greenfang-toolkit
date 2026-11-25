@@ -183,7 +183,19 @@ function Share.decodeIDs(s)
 end
 
 -- Value of a group <-> its wire string.
+-- GF-010: groups other modules add (Share.defineGroup): { encode, decode,
+-- tomb = true when the author may withdraw it }. Checked after the built-in ones.
+Share.GROUPS = {}
+function Share.defineGroup(g, def)
+    assert(type(g) == "string" and g:match("^[A-Z][A-Za-z0-9]*$") and not g:match("^[BPZR]"), "group name")
+    assert(type(def) == "table" and type(def.encode) == "function" and type(def.decode) == "function", "group codec")
+    Share.GROUPS[g] = def
+    return def
+end
+
 function Share.encodeValue(g, d)
+    local def = Share.GROUPS[g]
+    if def then return def.encode(d) end
     if g == "B" then
         if type(d.level) ~= "number" then return nil end
         return tostring(math.floor(d.level)) .. "." .. esc(d.classToken or "")
@@ -209,6 +221,8 @@ end
 
 function Share.decodeValue(g, v)
     if type(v) ~= "string" then return nil end
+    local def = Share.GROUPS[g]
+    if def then return def.decode(v) end
     if g == "B" then
         local level, class = v:match("^(%d+)%.(.*)$")
         level = tonumber(level)
@@ -237,6 +251,7 @@ end
 
 local function validGroup(g)
     return g == "B" or g == "P" or g == "Z" or (type(g) == "string" and g:match("^R%d+$") ~= nil)
+        or Share.GROUPS[g] ~= nil -- GF-010
 end
 
 function Share.authorOf(guid)
@@ -575,7 +590,8 @@ function Share.applyTomb(a, g, t)
     local s = store()
     if not s or type(a) ~= "string" or type(t) ~= "number" then return false end
     -- D-015: only "a profession was given up" (R<id>); no privacy withdrawals.
-    if type(g) ~= "string" or not g:match("^R%d+$") then return false end
+    -- GF-010 (spec v2.0 §5.2, §11): a group defined with tomb = true may be withdrawn.
+    if type(g) ~= "string" or not (g:match("^R%d+$") or (Share.GROUPS[g] and Share.GROUPS[g].tomb)) then return false end
     if t > Share.serverNow() + Share.FUTURE or t < Share.EPOCH then return false end
     s.tomb[a] = s.tomb[a] or {}
     local old = s.tomb[a][g]
@@ -623,6 +639,19 @@ function Share.observeOwn()
     if ns.Sync.shareLocation() then
         local loc = ns.Data.location()
         if loc then put("Z", Share.encodeValue("Z", loc)) end
+    end
+    -- GF-010: defined groups with an own() value (nil = not shared). A
+    -- withdrawable group that is no longer shared gets a tombstone.
+    for g, def in pairs(Share.GROUPS) do
+        if type(def.own) == "function" then
+            local v = def.own()
+            if v then
+                put(g, v)
+            elseif def.tomb and s.rec[a] and s.rec[a][g] then
+                Share.applyTomb(a, g, now)
+                out[#out + 1] = g
+            end
+        end
     end
     -- A profession given up: withdraw its recipes (only when the list is known).
     if #profs > 0 then

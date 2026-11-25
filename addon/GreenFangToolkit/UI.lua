@@ -27,7 +27,7 @@ local manualScan = false
 
 UI.sortKey, UI.sortAscending = "name", true
 UI.SORT_KEYS = { name = true, rank = true, race = true, class = true, professions = true,
-    level = true, zone = true, online = true }
+    level = true, zone = true, online = true, roles = true }
 -- Professions cell (GF-001-D18, was text since D8): one line, the
 -- profession's built-in icon and its skill points ("[icon]300"), primary
 -- first. Cooking / first aid / fishing follow only while they fit whole;
@@ -42,6 +42,7 @@ local LIST_SLOTS, LIST_GAP, GROUP_GAP = 6, 8, 6
 local ICON_SIZE, ICON_GAP, MORE_WIDTH = ns.ROW_ICON, 2, 24
 local CLASS_ICON, BADGE_SIZE, STATUS_ICON = 24, 16, 16
 UI.ICON_SIZE, UI.CLASS_ICON, UI.BADGE_SIZE, UI.STATUS_ICON = ICON_SIZE, CLASS_ICON, BADGE_SIZE, STATUS_ICON
+UI.ROLE_MAIN, UI.ROLE_CAN = 24, 16 -- GF-010
 local NO_DATA = "－"
 local SECONDARY_COLOR, NAMES_COLOR, TEXT_COLOR = { 0.72, 0.8, 0.74 }, { 0.6, 0.6, 0.6 }, { 1, 1, 1 }
 local NO_DATA_COLOR = { 0.42, 0.42, 0.42 }
@@ -56,13 +57,16 @@ local RANK_COLOR = { 0.85, 0.82, 0.65 }
 -- the tooltip. 4 px between columns; the notes share the last 124 px when
 -- the officer column is shown (each 60), else 公會註記 takes all of it.
 local columns = {
-    { name = "角色", key = "name", x = 4, w = 160 },
-    { name = "會階", key = "rank", x = 168, w = 80 },
-    { name = "職業", key = "class", x = 252, w = 120, icon = true },
-    { name = "專業", key = "professions", x = 376, w = 300 },
-    { name = "等級", key = "level", x = 680, w = 44, firstDescending = true, center = true },
-    { name = "位置", key = "zone", x = 728, w = 110 },
-    { name = "狀態", key = "online", x = 842, w = 70, firstDescending = true, status = true },
+    -- GF-010: 職責 (round role icons) between 職業 and 專業; 角色, 會階, 職業,
+    -- 位置 and 狀態 gave the room (專業 keeps 300 for five icons with points).
+    { name = "角色", key = "name", x = 4, w = 140 },
+    { name = "會階", key = "rank", x = 148, w = 72 },
+    { name = "職業", key = "class", x = 224, w = 104, icon = true },
+    { name = "職責", key = "roles", x = 332, w = 64, roles = true },
+    { name = "專業", key = "professions", x = 400, w = 300 },
+    { name = "等級", key = "level", x = 704, w = 44, firstDescending = true, center = true },
+    { name = "位置", key = "zone", x = 752, w = 90 },
+    { name = "狀態", key = "online", x = 846, w = 66, firstDescending = true, status = true },
     { name = "公會註記", key = "note", x = 916, w = 124, noSort = true, wSplit = 60 },
     { name = "幹部註記", key = "officerNote", x = 980, w = 60, noSort = true, officer = true },
 }
@@ -81,6 +85,10 @@ local function sortValue(m, key)
     if key == "level" then return type(m.level) == "number" and m.level or 0 end
     if key == "online" then return m.online == true and 1 or 0 end
     if key == "rank" then return type(m.rankIndex) == "number" and m.rankIndex or nil end
+    if key == "roles" then -- GF-010: by main role (坦克, 治療, 輸出), 未設定 / 未知 last
+        local main = ns.Profile and ns.Profile.roles(m.guid).main
+        return main and ({ t = 1, h = 2, d = 3 })[main] or nil
+    end
     if key == "professions" then
         if type(m.professions) ~= "table" or #m.professions == 0 then return nil end
         return keyName(table.concat(m.professions, "、"))
@@ -124,13 +132,15 @@ end
 -- online (true = only online), minLevel (number). All optional.
 -- GF-UI-C (owner): 專業 and 職業 are multi-select lists: skills / classes are
 -- sets { [value] = true } (nil = everything; an empty set = nothing).
-UI.filters = { skill = nil, class = nil, skills = nil, classes = nil, online = false, minLevel = nil, active = false }
+-- GF-010: roles = { t, h, d, unknown } (nil = everything): anyone who can fill a ticked role.
+UI.filters = { skill = nil, class = nil, skills = nil, classes = nil, roles = nil, online = false, minLevel = nil, active = false }
 
 local function passes(m, f)
     if not f then return true end
     if f.online and m.online ~= true then return false end
     if f.class and m.classToken ~= f.class then return false end
     if f.classes and not f.classes[str(m.classToken)] then return false end
+    if f.roles and not (ns.Profile and ns.Profile.matches(m.guid, f.roles)) then return false end
     if f.minLevel and (type(m.level) ~= "number" or m.level < f.minLevel) then return false end
     if f.skill and not UI.memberSkills(m)[f.skill] then return false end
     if f.skills then
@@ -285,6 +295,21 @@ local function newRow(i)
             row.classIcon:SetPoint("LEFT", row, "LEFT", col.x, 0)
             x, w = col.x + CLASS_ICON + 4, col.w - CLASS_ICON - 4
         end
+        if col.roles then
+            -- GF-010: the main role 24 px, then the others it can fill 16 px.
+            row.roleMain = row:CreateTexture(nil, "ARTWORK")
+            row.roleMain:SetSize(UI.ROLE_MAIN, UI.ROLE_MAIN)
+            row.roleMain:SetPoint("LEFT", row, "LEFT", col.x, 0)
+            row.roleMain:Hide()
+            row.roleCan = {}
+            for k = 1, 2 do
+                local t = row:CreateTexture(nil, "ARTWORK")
+                t:SetSize(UI.ROLE_CAN, UI.ROLE_CAN)
+                t:SetPoint("LEFT", row, "LEFT", col.x + UI.ROLE_MAIN + 4 + (k - 1) * (UI.ROLE_CAN + 2), 0)
+                t:Hide()
+                row.roleCan[k] = t
+            end
+        end
         if col.status then
             row.statusIcon = row:CreateTexture(nil, "ARTWORK")
             row.statusIcon:SetSize(STATUS_ICON, STATUS_ICON)
@@ -337,7 +362,10 @@ local function newRow(i)
         self.hoverSlot = nil
         GameTooltip:Hide()
     end)
-    row:SetScript("OnMouseUp", function(self, mouse) UI.rowClick(self, mouse, UI.slotAt(self, UI.cursorX(self))) end)
+    row:SetScript("OnMouseUp", function(self, mouse)
+        local x = UI.cursorX(self)
+        UI.rowClick(self, mouse, UI.slotAt(self, x), x)
+    end)
     rowWidgets[i] = row
     return row
 end
@@ -347,7 +375,18 @@ end
 -- a left click anywhere else selects the member. Right-click is unchanged:
 -- on a profession 「下單給〈名字〉」, elsewhere the member menu.
 -- A plain frame, nothing secure. Returns what it did (offline tests).
-function UI.rowClick(row, mouse, slot)
+-- GF-010: a left click on the 職責 cell opens the member's read-only card
+-- (職工檔案); x is the cursor from the row's left edge.
+function UI.onRolesCell(x)
+    local col = columns[UI.CELL.roles]
+    return type(x) == "number" and col ~= nil and x >= col.x and x < col.x + col.w
+end
+function UI.rowClick(row, mouse, slot, x)
+    if mouse ~= "RightButton" and UI.onRolesCell(x) and row.member and ns.ProfileUI then
+        UI.select(row.member)
+        ns.ProfileUI.openCard(row.member)
+        return "profile"
+    end
     local id = slot and slot.entry and slot.entry.prof and ns.Professions.skillLineOf(slot.entry.prof)
     if mouse == "RightButton" and id and ns.OrdersUI then
         local m = { guid = row.memberGuid, name = row.memberName }
@@ -412,6 +451,13 @@ function UI.showRowTooltip(row, slot)
     if str(m.class) ~= "" then facts[#facts + 1] = m.class end
     if str(m.guildRank) ~= "" then facts[#facts + 1] = m.guildRank end
     if #facts > 0 then GameTooltip:AddLine(table.concat(facts, "  "), 0.9, 0.9, 0.9) end
+    -- GF-010: 主職責 / 可支援, and how fresh it is (近期 / 稍早 / 過期).
+    if ns.Profile and ns.ProfileUI then
+        local p = ns.Profile.roles(m.guid)
+        local main, can = ns.ProfileUI.rolesText(p)
+        local age = ns.Profile.ageText(p.at)
+        GameTooltip:AddLine("主職責 " .. main .. "　可支援 " .. can .. (age ~= "" and ("　" .. age) or ""), 0.9, 0.9, 0.9)
+    end
     if detail then
         for _, prof in ipairs(detail.professions) do
             local c = ns.Professions.isSecondary(prof) and SECONDARY_COLOR or { 0.9, 0.9, 0.9 }
@@ -586,6 +632,7 @@ function UI.refresh(resetScroll)
         UI.selected = still
     end
     UI.drawActionBar()
+    UI.drawCensus(s and matching or nil)
     updateSortHeaders()
     rowContent:SetHeight(math.max(1, #matching * ROW_HEIGHT))
     if resetScroll and rowScroll then rowScroll:SetVerticalScroll(0) end
@@ -809,6 +856,95 @@ function UI.officerLayout()
     end
 end
 
+-- GF-010: 職責 cell: main role icon, then the other roles it can fill; a
+-- faint 未設定 / 未知 when there is no main role (spec §5.2).
+function UI.fillRoles(row, m)
+    local cell = row.cell.roles
+    if not (cell and row.roleMain) then return end
+    local p = ns.Profile and ns.Profile.roles(m.guid) or { can = {}, state = "unknown" }
+    row.roles = p
+    for _, t in ipairs(row.roleCan) do t:Hide() end
+    if p.main then
+        ns.GameIcons.set(row.roleMain, "role_" .. p.main)
+        local k = 0
+        for _, r in ipairs(ns.Profile.ROLES) do
+            if r ~= p.main and p.can[r] and k < #row.roleCan then
+                k = k + 1
+                ns.GameIcons.set(row.roleCan[k], "role_" .. r)
+            end
+        end
+        cell:SetText("")
+    else
+        row.roleMain:Hide()
+        cell:SetText(p.state == "unknown" and ns.Profile.UNKNOWN_NAME or ns.Profile.UNSET_NAME)
+        cell:SetTextColor(NO_DATA_COLOR[1], NO_DATA_COLOR[2], NO_DATA_COLOR[3])
+    end
+end
+
+---------------------------------------------------------------------------
+-- GF-010 (spec §5.2): 人力盤點 on the bottom row, left: per role its round
+-- icon with 主 N 可 N (main role / can fill), then 未知 N and 在線 N; the
+-- total is the member count on the tool bar (each member once). Counts are
+-- over the list as filtered. A click on a role (or 未知) filters the list
+-- to members who can fill it, like the profession icons; 清除 resets it.
+---------------------------------------------------------------------------
+UI.CENSUS_ICON, UI.CENSUS_STEP = 24, 128 -- room for 主999 可999
+function UI.toggleRoleFilter(key)
+    local set = UI.filters.roles or {}
+    if set[key] then set[key] = nil else set[key] = true end
+    UI.filters.roles = next(set) and set or nil
+    UI.refresh(true)
+end
+function UI.buildCensus(f)
+    local O = ns.OrdersUI
+    local c = { roles = {} }
+    local x = 20
+    local keys = { "t", "h", "d" }
+    for _, r in ipairs(keys) do
+        local b = O.iconButton(f, UI.CENSUS_ICON, "unknown", nil, function() UI.toggleRoleFilter(r) end, "")
+        ns.GameIcons.set(b.tex, "role_" .. r)
+        b:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", x, UI.BOTTOM_Y + 3)
+        b.role = r
+        c.roles[r] = b
+        x = x + UI.CENSUS_STEP
+    end
+    c.unknown = O.textButton(f, "未知", function() UI.toggleRoleFilter("unknown") end)
+    c.unknown:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", x, UI.BOTTOM_Y)
+    c.unknownX = x
+    c.onlineIcon = f:CreateTexture(nil, "ARTWORK")
+    c.onlineIcon:SetSize(16, 16)
+    ns.GameIcons.set(c.onlineIcon, "online")
+    c.online = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
+    UI.census = c
+end
+function UI.drawCensus(list)
+    local c = UI.census
+    if not (c and ns.Profile) then return end
+    local n = ns.Profile.census(list or {})
+    UI.censusCounts = n
+    local P = ns.Profile
+    local on = UI.filters.roles or {}
+    for _, r in ipairs(P.ROLES) do
+        local b = c.roles[r]
+        ns.OrdersUI.setLabel(b, string.format("主%d 可%d", n.main[r], n.can[r]))
+        ns.OrdersUI.setSelected(b, on[r] == true)
+        b.tip = string.format("%s：主職責 %d 位，可支援 %d 位", P.ROLE_NAME[r], n.main[r], n.can[r])
+        if list then b:Show() else b:Hide() end
+    end
+    local unknown = n.main.unknown + n.main.unset
+    c.unknown:SetText(string.format("未知 %d", unknown))
+    c.unknown.gfWidth = ns.labelWidth(c.unknown:GetText()) + 28
+    c.unknown:SetWidth(c.unknown.gfWidth)
+    c.unknown.tip = string.format("未知 %d 位、未設定 %d 位", n.main.unknown, n.main.unset)
+    ns.Theme.setSelected(c.unknown, on.unknown == true)
+    c.online:SetText(string.format("在線 %d", n.online))
+    local x = c.unknownX + c.unknown.gfWidth + 16
+    c.onlineIcon:ClearAllPoints(); c.onlineIcon:SetPoint("BOTTOMLEFT", UI.census.unknown:GetParent(), "BOTTOMLEFT", x, UI.BOTTOM_Y + 7)
+    c.online:ClearAllPoints(); c.online:SetPoint("BOTTOMLEFT", UI.census.unknown:GetParent(), "BOTTOMLEFT", x + 20, UI.BOTTOM_Y + 7)
+    if list then c.unknown:Show(); c.onlineIcon:Show(); c.online:Show()
+    else c.unknown:Hide(); c.onlineIcon:Hide(); c.online:Hide() end
+end
+
 -- One roster row: class icon and colour, rank, centred level, coloured status.
 function UI.fillRow(row, m)
     local color = Icons.classColor(m.classToken)
@@ -823,6 +959,7 @@ function UI.fillRow(row, m)
     Icons.setClassIcon(row.classIcon, m.classToken)
     cell.class:SetText(str(m.class))
     cell.class:SetTextColor(color[1], color[2], color[3])
+    UI.fillRoles(row, m)
     fillProfessions(row, cell.professions, m)
     cell.level:SetText(tostring(m.level or 0))
     -- GF-UI-B (GF-UI-A §2.2 items 6, 7): a faint "－" for no zone; a 16 px
@@ -1122,8 +1259,9 @@ end
 -- 「清除」: search text and every filter.
 function UI.clearFilters()
     UI.filters.skill, UI.filters.class, UI.filters.online, UI.filters.minLevel = nil, nil, false, nil
-    UI.filters.skills, UI.filters.classes = nil, nil
+    UI.filters.skills, UI.filters.classes, UI.filters.roles = nil, nil, nil
     UI.filters.active = false
+
     if UI.activeCheck then UI.activeCheck.set(false) end
     if UI.skillChoice then UI.skillChoice.selected = nil; UI.skillChoice.refreshText() end
     if UI.classChoice then UI.classChoice.selected = nil; UI.classChoice.refreshText() end
@@ -1308,6 +1446,7 @@ local function build(p)
     -- GF-001-Q, GF-UI-C (owner): 邀請 / 公會, text only (遊戲公會 is gone).
     UI.inviteButton = O.textButton(f, "邀請", function() G.inviteGuild() end)
     UI.infoButton = O.textButton(f, "公會", function() UI.openGuildInfo() end)
+    UI.buildCensus(f)
 end
 
 ns.Framework.register({
