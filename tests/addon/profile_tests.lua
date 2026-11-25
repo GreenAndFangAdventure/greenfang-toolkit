@@ -23,7 +23,7 @@ return function(T)
     end
     -- "S1~V~..." for a role value, as its author (or a relayer) sends it.
     local function vMsg(ns, a, t, v)
-        return "S1~V~" .. a .. "~L~" .. ns.Share.b36(t) .. "~" .. ns.Share.hash(v) .. "~" .. v
+        return "S1~V~" .. a .. "~J~" .. ns.Share.b36(t) .. "~" .. ns.Share.hash(v) .. "~" .. v
     end
     local function from(ns, sender, text) return ns.Share.onMessage("GFTKS", text, "GUILD", sender) end
     local function sentWith(sub)
@@ -55,8 +55,9 @@ return function(T)
             eq(P.decode(bad), nil, "refused: " .. bad)
         end
         -- Share refuses a malformed role record (decode fails = invalid).
-        eq(ns.Share.offer(A_PEER, "L", ns.Share.serverNow(), ns.Share.hash("t.d"), "t.d", true, A_PEER), "invalid", "malformed")
-        eq(ns.Share.offer(A_PEER, "Lx", ns.Share.serverNow(), ns.Share.hash("t.t"), "t.t", true, A_PEER), "invalid", "unknown group")
+        eq(ns.Share.offer(A_PEER, "J", ns.Share.serverNow(), ns.Share.hash("t.d"), "t.d", true, A_PEER), "invalid", "malformed")
+        ok(ns.Share.isLocalGroup("J"), "J is never uploaded by GF Sync (local)")
+        eq(ns.Share.offer(A_PEER, "Jx", ns.Share.serverNow(), ns.Share.hash("t.t"), "t.t", true, A_PEER), "invalid", "unknown group")
     end)
 
     test("GF-010 own roles: unset by default (not 輸出), main in 可支援, main cannot be removed, by GUID", function()
@@ -116,16 +117,16 @@ return function(T)
 
     test("GF-010 sharing: nothing until set; then one L record goes out after the change delay", function()
         local ns = login()
-        ok(not ns.Share.get(A_SELF, "L"), "never set: no record (stays 未知 for others)")
+        ok(not ns.Share.get(A_SELF, "J"), "never set: no record (stays 未知 for others)")
         wow.state.sent = {}
         ns.Profile.setMain("h")
         ns.Profile.setCan("d", true)
-        eq(#sentWith("~L~"), 0, "not at once (clicks are gathered)")
+        eq(#sentWith("~J~"), 0, "not at once (clicks are gathered)")
         wow.advance(35)
-        local v = sentWith("S1~V~" .. A_SELF .. "~L~")
+        local v = sentWith("S1~V~" .. A_SELF .. "~J~")
         eq(#v, 1, "one value message")
         ok(v[1]:find("~h.hd$"), "value h.hd: " .. v[1])
-        eq(ns.Share.get(A_SELF, "L").v, "h.hd", "in our own store (index, relays)")
+        eq(ns.Share.get(A_SELF, "J").v, "h.hd", "in our own store (index, relays)")
     end)
 
     test("GF-010 withdraw: unticking 分享 sends a tombstone at once; others drop it; old copies cannot return", function()
@@ -135,17 +136,17 @@ return function(T)
         wow.state.sent = {}
         ns.Profile.setShare(false)
         wow.advance(2)
-        eq(#sentWith("S1~X~" .. A_SELF .. "~L~"), 1, "X sent at once")
-        ok(not ns.Share.get(A_SELF, "L"), "own record gone")
+        eq(#sentWith("S1~X~" .. A_SELF .. "~J~"), 1, "X sent at once")
+        ok(not ns.Share.get(A_SELF, "J"), "own record gone")
         eq(ns.Profile.roles(SELF_GUID).main, "t", "the setting itself is kept on this computer")
         wow.advance(40)
-        eq(#sentWith("S1~V~" .. A_SELF .. "~L~"), 0, "nothing shared while withdrawn")
+        eq(#sentWith("S1~V~" .. A_SELF .. "~J~"), 0, "nothing shared while withdrawn")
         -- Sharing again: a newer value than the tombstone.
         ns.Profile.setShare(true)
         wow.advance(2)
-        local rec = ns.Share.get(A_SELF, "L")
+        local rec = ns.Share.get(A_SELF, "J")
         ok(rec and rec.v == "t.t", "shared again")
-        ok(rec.t > ns.Share.store().tomb[A_SELF].L, "newer than the withdrawal")
+        ok(rec.t > ns.Share.store().tomb[A_SELF].J, "newer than the withdrawal")
     end)
 
     test("GF-010 receiving: shared roles show; nothing received = 未知; a relayed withdrawal clears; no revival", function()
@@ -160,7 +161,7 @@ return function(T)
         from(ns, PEER, vMsg(ns, A_THIRD, t, "0."))
         eq(P.roles(THIRD_GUID).state, "unset", "未設定")
         -- The author withdraws; a third member relays the X.
-        eq(from(ns, THIRD, "S1~X~" .. A_PEER .. "~L~" .. S.b36(t + 10)), "tomb", "withdrawal applied")
+        eq(from(ns, THIRD, "S1~X~" .. A_PEER .. "~J~" .. S.b36(t + 10)), "tomb", "withdrawal applied")
         eq(P.roles(PEER_GUID).state, "unknown", "gone: 未知")
         -- Someone still holding the old copy sends it: refused.
         from(ns, THIRD, vMsg(ns, A_PEER, t, "h.hd"))
@@ -252,7 +253,7 @@ return function(T)
         local t = S.serverNow() - 10
         for i = 2, 1000 do
             local a = string.format("0000-1%07d", i)
-            S.offer(a, "L", t, S.hash(i % 2 == 0 and "t.td" or "d.d"), i % 2 == 0 and "t.td" or "d.d", true, a)
+            S.offer(a, "J", t, S.hash(i % 2 == 0 and "t.td" or "d.d"), i % 2 == 0 and "t.td" or "d.d", true, a)
         end
         ns.Framework.open("roster")
         ok(#ns.UI.rows() <= ns.UI.visibleRowCount() + 1, "rows " .. #ns.UI.rows())
@@ -320,7 +321,7 @@ return function(T)
         local saved = wow.logout()
         local function walk(t, path)
             for k, v in pairs(t) do
-                ok(k ~= "roles" and k ~= "L" and k ~= "main" and k ~= "can", "outbox key " .. path .. "." .. tostring(k))
+                ok(k ~= "roles" and k ~= "J" and k ~= "main" and k ~= "can", "outbox key " .. path .. "." .. tostring(k))
                 if type(v) == "table" then walk(v, path .. "." .. tostring(k)) end
             end
         end

@@ -5,7 +5,7 @@
 -- always holds the main role). Kept on this computer by character GUID
 -- (GreenFangToolkitDB.profile.chars[guid]), never by name.
 --
--- Shared with the guild through GFTKS (Share.lua) as group "L" (on by
+-- Shared with the guild through GFTKS (Share.lua) as group "J" (on by
 -- default, spec §14) once the character has set anything. Value: "<main>.<can>", main = t / h / d / 0 (未設定),
 -- can = the letters in t, h, d order, e.g. "t.td", "0.", "h.h". Turning
 -- sharing off withdraws it: a tombstone (X) that relays carry, so everyone
@@ -22,7 +22,8 @@ local str = ns.str
 local Profile = {}
 ns.Profile = Profile
 
-Profile.GROUP = "L"
+-- "J" (職責): GF-009's manual listings use "L", its COLLECTION "C<n>".
+Profile.GROUP = "J"
 Profile.ROLES = { "t", "h", "d" }
 Profile.ROLE_NAME = { t = "坦克", h = "治療", d = "輸出" }
 Profile.UNSET_NAME, Profile.UNKNOWN_NAME = "未設定", "未知"
@@ -413,10 +414,15 @@ function Profile.diagText()
     return string.format("%s｜收到職責 %d 位、撤回 %d 位｜職業職責表：%s", mine, got, tombs, Profile.CLASS_ROLES_SOURCE)
 end
 
--- The share group (Share.lua: defined groups).
-ns.Share.defineGroup(Profile.GROUP, {
-    encode = function(d) return Profile.encode(d) end,
-    decode = function(v) return Profile.decode(v) end,
+-- The share group (Share.registerGroup, shared with GF-009). local = true:
+-- GF Sync leaves it out of member.share (not uploaded).
+ns.Share.registerGroup({
+    name = "ROLES",
+    ["local"] = true,
     tomb = true,
+    match = function(g) return g == Profile.GROUP end,
+    encode = function(_, d) return Profile.encode(d) end,
+    decode = function(_, v) return Profile.decode(v) end,
+    ownGroups = { Profile.GROUP },
     own = function() return Profile.ownValue() end,
 })
