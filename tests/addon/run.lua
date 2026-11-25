@@ -4655,6 +4655,9 @@ assert(loadfile(ROOT .. "/tests/addon/uie_tests.lua"))()({ test = test, eq = eq,
 -- GF-PROBE: /gftk probe (tests/addon/probe_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/probe_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-013: the background event record (tests/addon/events_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/events_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------
 

@@ -45,6 +45,12 @@ local function unb36(s) return S().unb36(s) end
 local function now() return S().serverNow() end
 local esc = function(v) return ns.Ledger.esc(v) end
 local unesc = function(v) return ns.Ledger.unesc(v) end
+-- GF-013: tell the background event record (Events.lua) after my writes. Never
+-- changes what happens here; a failure there is swallowed.
+local function events(fn, ...)
+    local E = ns.Events
+    if E and type(E[fn]) == "function" then pcall(E[fn], ...) end
+end
 
 ---------------------------------------------------------------------------
 -- Encoding (pure)
@@ -1014,6 +1020,7 @@ function Adv.open(o)
     mine[#mine + 1] = e
     local ok, why2 = save("T", mine)
     if not ok then return nil, why2 end
+    events("observeId", e.id) -- GF-013
     return e.id
 end
 
@@ -1055,7 +1062,9 @@ function Adv.leader(id, action, arg, extra)
             e.fx, e.fa, e.fp = nil, nil, nil
             e.tm, e.s, e.e = Adv.legacyTime(entrySlots(e), nil, t)
         else return false, "back" end
-        return save("T", mine)
+        local okB, whyB = save("T", mine)
+        if okB then events("observeId", id) end -- GF-013: the step back revokes
+        return okB, whyB
     end
     if e.st == "x" or e.st == "c" then return false, "closed" end
     if action == "cancel" then e.st, e.sa, e.rs = "x", t, arg or "manual"
@@ -1099,7 +1108,9 @@ function Adv.leader(id, action, arg, extra)
         iv[arg] = (action == "invite" and extra and #extra > 0) and Adv.encodeIds(extra) or nil
         e.iv = Adv.encodePairs(iv)
     else return false, "action" end
-    return save("T", mine)
+    local okL, whyL = save("T", mine)
+    if okL then events("observeId", id) end -- GF-013
+    return okL, whyL
 end
 
 -- GF-002-G (owner: 「已建立冒險單要可編輯」): change my open ticket. Admitted
@@ -1179,20 +1190,31 @@ function Adv.worker(id, action, slots)
             local added = false
             for _, i in ipairs(sx) do if before and not before[i] then added = true end end
             e.sx, e.su = Adv.encodeIds(sx), t
-            if not added then return save("A", list) end
+            if not added then
+                local okS, whyS = save("A", list)
+                if okS then events("observeId", id) end -- GF-013
+                return okS, whyS
+            end
         end
     end
     if not e then e = { id = id }; list[#list + 1] = e end
     if code == "ap" or code == "ia" then e.ap, e.ak, e.sx, e.su = t, code, Adv.encodeIds(sx), t
     elseif not (e.ac == "ap" or e.ac == "ia") then e.ap, e.ak = nil, nil end -- nothing to withdraw from
     e.ac, e.at, e.ro, e.rb = code, t, main, alt or ""
-    return save("A", list)
+    local okW, whyW = save("A", list)
+    if okW then events("observeId", id) end -- GF-013
+    return okW, whyW
 end
 
 -- R-5.1 – R-5.4: my worker ticket. o = { dungeons = {ids}, quests = {ids}, allQuests, main, alt, slots, hours }.
 -- GF-002-H: up to 5 slots { id, now, s, d } (sv); sl keeps the 0.12.x shape.
 function Adv.setWorker(o)
-    if not o then return save("W", {}) end
+    local prevW = listOf(me(), "W")[1] -- GF-013: a new worker ticket is a new order
+    if not o then
+        local okN, whyN = save("W", {})
+        if okN then events("onWorkerSaved", prevW, nil) end
+        return okN, whyN
+    end
     local t = now()
     local slots = Adv.cleanSlots({ slots = (o.slots and #o.slots > 0) and o.slots or { { now = true } } }, t)
         or { { id = 1, now = true, s = t } }
@@ -1209,7 +1231,9 @@ function Adv.setWorker(o)
         -- GF-002-J (R-17.21): whole zones, and the zones of the chosen quests (in-game only).
         zs = Adv.encodeZones(o.zones), qz = Adv.encodeZones(Adv.questZones(qs, Adv.questLog())),
         sv = Adv.encodeTimes(slots), ex = t + (o.hours or 24) * 3600, st = "o", sa = t }
-    return save("W", { e })
+    local okW, whyW = save("W", { e })
+    if okW then events("onWorkerSaved", prevW, e) end -- GF-013
+    return okW, whyW
 end
 
 -- R-5.4: removing my worker ticket also withdraws my open applications.
@@ -1218,7 +1242,9 @@ function Adv.removeWorker()
     local t = now()
     for _, e in ipairs(acts) do if e.ac == "ap" or e.ac == "ia" then e.ap, e.ak = e.at, e.ac; e.ac, e.at = "wd", t end end
     save("A", acts)
-    return save("W", {})
+    local okR, whyR = save("W", {})
+    if okR then events("onWorkerSaved", nil, nil) end -- GF-013: the order ends
+    return okR, whyR
 end
 
 -- GF-002-I (R-17.9): is this worker ticket over? 24 hours (ex), or every slot ended
@@ -1429,6 +1455,7 @@ function Adv.forget(id)
     if not e or not (e.st == "x") then return false end
     table.remove(mine, i)
     Adv.local_().reopen[id] = nil
+    events("onReopen", id) -- GF-013: the UI's 重開 put a new ticket up just before
     return save("T", mine)
 end
 
@@ -1541,7 +1568,7 @@ function Adv.onLogin()
             end
         end
     end
-    if n > 0 then save("T", mine) end
+    if n > 0 then save("T", mine); events("observeAll") end -- GF-013
     return n
 end
 
@@ -1553,8 +1580,10 @@ function Adv.reopen(id)
     if not e then return nil, "unknown" end
     local q = {}
     for _, x in ipairs(splitDots(e.qs)) do q[#q + 1] = tonumber(x) or x end
-    return Adv.open({ dungeon = e.ds ~= "" and e.ds or nil, quests = q, timeMode = "n",
+    local newId, why = Adv.open({ dungeon = e.ds ~= "" and e.ds or nil, quests = q, timeMode = "n",
         roles = { t = e.rt, h = e.rh, d = e.rd }, size = e.sz, tags = e.tg, note = e.nt, mode = e.md, leaderRole = e.lr })
+    if newId then events("onReopen", id, newId) end -- GF-013
+    return newId, why
 end
 function Adv.dismissReopen(id) Adv.local_().reopen[id] = nil end
 
@@ -1621,6 +1650,9 @@ function Adv.maintain()
         local id = key:match("^(.-)|")
         if id and id ~= "w" and not views[id] and not id:match("^m") then seen[key] = nil end
     end
+    -- GF-013: the background event record looks at every ticket I lead or joined
+    -- (成團 / 過期 / 未成行 happen by themselves, not by a click).
+    events("observeAll", Adv.all(), t)
 end
 
 ---------------------------------------------------------------------------
@@ -2033,7 +2065,7 @@ function Adv.checkAuto(questId, t)
             local e = findIn(list, v.id)
             if e and (not e.dt or e.dt <= (v.doneBack or 0)) then
                 e.dt = t
-                if save("A", list) then n = n + 1 end
+                if save("A", list) then n = n + 1; events("observeId", v.id) end -- GF-013
             end
         end
     end
