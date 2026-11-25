@@ -90,7 +90,7 @@ end
 local function build(p)
     panel = p
     local X, Y = UI.X, UI.Y
-    c.title = header(p, "公會黑庫", X, Y.title)
+    c.title = header(p, "臨時秘密黑箱", X, Y.title) -- owner 2026-11-25: was 公會黑庫
     c.role = text(p, ns.FIELD_FONT, X + 140, Y.title, 300)
     c.status = text(p, ns.LABEL_FONT, X, Y.status, 1040)
     c.listHead = header(p, "保管人名單", X, Y.listHead)
@@ -227,9 +227,9 @@ ns.Bank.onChanged = function() if panel and panel:IsShown() then UI.refresh() en
 
 ns.Framework.register({
     id = UI.ID,
-    title = "公會黑庫",
-    short = "黑庫",
-    subTitle = "公會黑庫",
+    title = "臨時秘密黑箱",
+    short = "黑箱",
+    subTitle = "臨時黑箱",
     entry = "logistics",
     order = 17,
     create = build,
