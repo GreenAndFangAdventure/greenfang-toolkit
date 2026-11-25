@@ -475,7 +475,7 @@ return function(T)
         local e = notices(ns, "radar")[1]
         ok(e, "hit")
         eq(N.action(e, "view"), "focused", "查看需求")
-        eq(ns.SupplyUI.state.tab, "guild", "公會供需")
+        eq(ns.SupplyUI.state.tab, "guild", "調貨看板")
         eq(ns.SupplyUI.state.items[ns.SupplyUI.state.selected].itemID, SCROLL, "the item chosen")
         local sentBefore = #wow.state.sent
         eq(N.action(e, "post"), "post", "刊登")

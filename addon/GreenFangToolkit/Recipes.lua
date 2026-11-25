@@ -467,6 +467,16 @@ Recipes.FEE_OPTIONS = {
     { value = "max:10000", text = "1 金以內" },
     { value = "max:50000", text = "5 金以內" },
 }
+-- GF-UI-H (owner: 金額一律用金／銀／銅圖示): the amounts with the game's coin
+-- icon, e.g. 「1[金] 以內」 (the plain words stay in FEE_PLAIN for the tests).
+Recipes.FEE_PLAIN = {}
+for _, o in ipairs(Recipes.FEE_OPTIONS) do
+    local max = o.value and tonumber(tostring(o.value):match("^max:(%d+)$"))
+    if max then
+        Recipes.FEE_PLAIN[o.value] = o.text
+        o.text = ns.Theme.coinText(max) .. " 以內"
+    end
+end
 
 -- Rows of several professions in one list, by name (GF-001-D22).
 function Recipes.rowsFor(index, skills, query, onlyGuid, opts)

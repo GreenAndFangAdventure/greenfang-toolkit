@@ -549,7 +549,12 @@ Supply.better = better
 --   mine "offer": what I may have extra, others = who needs it
 --   guild:        everybody else's needs and offers, by item
 function Supply.view(kind)
-    local all = Supply.entries()
+    local all = {}
+    -- GF-UI-H: others' manual listings of untradeable items are left out here.
+    local Lst = ns.SupplyListings
+    for _, e in ipairs(Supply.entries()) do
+        if not (Lst and Lst.shownOnPage) or Lst.shownOnPage(e) then all[#all + 1] = e end
+    end
     local items, order = {}, {}
     local function itemFor(id)
         local it = items[id]

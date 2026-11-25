@@ -53,22 +53,22 @@ local Icons = ns.Icons
 -- Pure helpers (offline tests)
 ---------------------------------------------------------------------------
 
--- 12345 -> "1g 23s 45c" with the game's coin icons (plain letters when the
--- client has no GetCoinTextureString).
-function UI.money(c)
+-- 12345 -> 1[金] 23[銀] 45[銅]: the numbers with the game's coin icons.
+-- GF-UI-H (owner: 金額一律用金／銀／銅圖示): always the icons, also where the
+-- client has no GetCoinTextureString (the Forever client showed "1g 23s 45c");
+-- the icons are plain |T textures (Interface\\MoneyFrame), no client function.
+UI.COIN_TEX = { gold = "Interface\\MoneyFrame\\UI-GoldIcon", silver = "Interface\\MoneyFrame\\UI-SilverIcon",
+    copper = "Interface\\MoneyFrame\\UI-CopperIcon" }
+function UI.money(c, size)
     c = math.floor(tonumber(c) or 0)
-    -- GF-UI-D: where the client has the coin art, the numbers in gold / silver /
-    -- copper with the game's coin icons (Theme.coinText).
-    if type(GetCoinTextureString) == "function" then
-        if ns.Theme then return ns.Theme.coinText(c) end
-        local ok, s = pcall(GetCoinTextureString, c)
-        if ok and type(s) == "string" and s ~= "" then return s end
-    end
+    if ns.Theme and ns.Theme.coinText then return ns.Theme.coinText(c, size) end
     local g, s, cu = math.floor(c / 10000), math.floor(c / 100) % 100, c % 100
+    local n = tostring(size or 0)
     local out = {}
-    if g > 0 then out[#out + 1] = g .. "g" end
-    if s > 0 then out[#out + 1] = s .. "s" end
-    if cu > 0 or #out == 0 then out[#out + 1] = cu .. "c" end
+    local function part(v, tex) out[#out + 1] = v .. "|T" .. tex .. ":" .. n .. ":" .. n .. ":2:0|t" end
+    if g > 0 then part(g, UI.COIN_TEX.gold) end
+    if s > 0 then part(s, UI.COIN_TEX.silver) end
+    if cu > 0 or #out == 0 then part(cu, UI.COIN_TEX.copper) end
     return table.concat(out, " ")
 end
 

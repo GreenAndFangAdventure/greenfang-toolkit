@@ -192,7 +192,8 @@ return function(T)
         GetCoinTextureString = function(c) return tostring(c) end
         eq(ns.OrdersUI.money(12345), s, "UI.money")
         GetCoinTextureString = nil
-        eq(ns.OrdersUI.money(12345), "1g 23s 45c", "plain letters without coin art")
+        -- GF-UI-H (owner: 金額一律用金／銀／銅圖示): the icons without it too, never "1g 23s 45c".
+        eq(ns.OrdersUI.money(12345), s, "coin icons without GetCoinTextureString")
     end)
 
     ---------------------------------------------------------------------------
