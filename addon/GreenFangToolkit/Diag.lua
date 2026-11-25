@@ -155,6 +155,7 @@ local SECTIONS = {
     { title = "公會名冊", text = Diag.rosterText },
     { title = "公會管理（GF-001-Q）", text = function() return ns.GuildAdmin and ns.GuildAdmin.diagText() or "" end },
     { title = "版本", text = Diag.versionText },
+    { title = "功能探測（GF-PROBE）", text = function() return ns.Probe and ns.Probe.diagText() or "" end },
 }
 
 -- GF-UI-B (GF-UI-A §2.11): 16 px text (18 px state line, gold section

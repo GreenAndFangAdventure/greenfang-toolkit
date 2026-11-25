@@ -4648,6 +4648,9 @@ assert(loadfile(ROOT .. "/tests/addon/adventure_fixes_tests.lua"))()({ test = te
 -- GF-UI-D: the theme (game art only, no red buttons) (tests/addon/theme_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/theme_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-PROBE: /gftk probe (tests/addon/probe_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/probe_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------
 
