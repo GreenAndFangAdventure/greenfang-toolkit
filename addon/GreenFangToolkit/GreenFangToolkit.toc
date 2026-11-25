@@ -20,6 +20,7 @@ Roster.lua
 Sync.lua
 Comm.lua
 Share.lua
+Profile.lua
 Ledger.lua
 Orders.lua
 Prices.lua
@@ -31,6 +32,7 @@ Export.lua
 Framework.lua
 UI.lua
 Character.lua
+ProfileUI.lua
 Recipes.lua
 Diag.lua
 GuildAdmin.lua

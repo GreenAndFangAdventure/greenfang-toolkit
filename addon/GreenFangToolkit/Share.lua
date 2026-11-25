@@ -204,6 +204,11 @@ function Share.codecFor(g)
     end
     return nil
 end
+-- GF-010 (v2.0 §5.2, §11): two more optional codec fields. tomb = true: the
+-- author may withdraw the group (a tombstone, like a profession given up).
+-- own = function(g) -> this character's value now, or nil when it is not
+-- shared; read in Share.observeOwn (a withdrawable group whose own value is
+-- nil gets a tombstone). Codecs with own() list their groups in ownGroups.
 -- Groups GF Sync leaves out of member.share (registered with local = true).
 function Share.isLocalGroup(g)
     local c = Share.codecFor(g)
@@ -611,7 +616,9 @@ function Share.applyTomb(a, g, t)
     local s = store()
     if not s or type(a) ~= "string" or type(t) ~= "number" then return false end
     -- D-015: only "a profession was given up" (R<id>); no privacy withdrawals.
-    if type(g) ~= "string" or not g:match("^R%d+$") then return false end
+    -- GF-010 (v2.0 §5.2, §11): a registered group with tomb = true may be withdrawn.
+    local codec = type(g) == "string" and not g:match("^R%d+$") and Share.codecFor(g) or nil
+    if type(g) ~= "string" or not (g:match("^R%d+$") or (codec and codec.tomb)) then return false end
     if t > Share.serverNow() + Share.FUTURE or t < Share.EPOCH then return false end
     s.tomb[a] = s.tomb[a] or {}
     local old = s.tomb[a][g]
@@ -659,6 +666,21 @@ function Share.observeOwn()
     if ns.Sync.shareLocation() then
         local loc = ns.Data.location()
         if loc then put("Z", Share.encodeValue("Z", loc)) end
+    end
+    -- GF-010: registered groups with an own() value (nil = not shared). A
+    -- withdrawable group that is no longer shared gets a tombstone.
+    for _, codec in ipairs(Share.codecs) do
+        if type(codec.own) == "function" then
+            for _, g in ipairs(codec.ownGroups or {}) do
+                local v = codec.own(g)
+                if v then
+                    put(g, v)
+                elseif codec.tomb and s.rec[a] and s.rec[a][g] then
+                    Share.applyTomb(a, g, now)
+                    out[#out + 1] = g
+                end
+            end
+        end
     end
     -- A profession given up: withdraw its recipes (only when the list is known).
     if #profs > 0 then

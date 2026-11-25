@@ -4661,6 +4661,9 @@ assert(loadfile(ROOT .. "/tests/addon/events_tests.lua"))()({ test = test, eq = 
 -- GF-009: 綠皮調貨所, automatic collection and manual listings (tests/addon/supply_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/supply_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-010: role positioning and the personnel file (tests/addon/profile_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/profile_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------
 

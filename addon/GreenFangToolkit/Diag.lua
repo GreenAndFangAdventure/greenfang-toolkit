@@ -154,6 +154,7 @@ local SECTIONS = {
         .. ((ns.Adventure and ns.db and type(ns.db.adventure) == "table") and ("｜成行紀錄：" .. #ns.Adventure.myLog()) or "") end },
     { title = "公會名冊", text = Diag.rosterText },
     { title = "公會管理（GF-001-Q）", text = function() return ns.GuildAdmin and ns.GuildAdmin.diagText() or "" end },
+    { title = "職責定位（GF-010）", text = function() return ns.Profile and ns.Profile.diagText() or "" end },
     { title = "版本", text = Diag.versionText },
     { title = "功能探測（GF-PROBE）", text = function() return ns.Probe and ns.Probe.diagText() or "" end },
     -- GF-013: the background event record (this computer only; not uploaded yet).
