@@ -155,6 +155,8 @@ local SECTIONS = {
     { title = "公會名冊", text = Diag.rosterText },
     { title = "公會管理（GF-001-Q）", text = function() return ns.GuildAdmin and ns.GuildAdmin.diagText() or "" end },
     { title = "版本", text = Diag.versionText },
+    -- GF-009: 綠皮調貨所 (automatic collection and manual listings).
+    { title = "物資供需（GF-009）", text = function() return ns.Supply and ns.Supply.diagText() or "" end },
 }
 
 -- GF-UI-B (GF-UI-A §2.11): 16 px text (18 px state line, gold section

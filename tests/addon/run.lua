@@ -551,7 +551,7 @@ test("framework: unavailable or broken modules are hidden", function()
         create = function() error("build failed") end })
     wow.fire("PLAYER_LOGIN"); wow.advance(10)
     SlashCmdList.GREENFANGTOOLKIT("")
-    eq(shownNav(ns), "roster,recipes,orders,adventure,character,sleepingbag,crash", "only available modules listed")
+    eq(shownNav(ns), "roster,recipes,orders,adventure,character,supply,sleepingbag,crash", "only available modules listed")
     SlashCmdList.GREENFANGTOOLKIT("soon")
     eq(ns.Framework.current(), "roster", "hidden module cannot be opened; falls back")
     eq(built, false, "hidden module never built")
@@ -644,13 +644,13 @@ test("sleepingbag: module visible for Horde, hidden for Alliance", function()
     wow.reset()
     local ns = wow.login(ADDON_DIR)
     SlashCmdList.GREENFANGTOOLKIT("")
-    eq(shownNav(ns), "roster,recipes,orders,adventure,character,sleepingbag", "Horde sees the route")
+    eq(shownNav(ns), "roster,recipes,orders,adventure,character,supply,sleepingbag", "Horde sees the route")
     local alliance = wow.defaultPlayer()
     alliance.faction = "Alliance"
     wow.reset({ player = alliance })
     ns = wow.login(ADDON_DIR)
     SlashCmdList.GREENFANGTOOLKIT("")
-    eq(shownNav(ns), "roster,recipes,orders,adventure,character", "Alliance has no route yet")
+    eq(shownNav(ns), "roster,recipes,orders,adventure,character,supply", "Alliance has no route yet")
 end)
 
 test("sleepingbag: RPG hides coordinates until revealed; normal shows all", function()
@@ -4647,6 +4647,9 @@ assert(loadfile(ROOT .. "/tests/addon/adventure_fixes_tests.lua"))()({ test = te
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 -- GF-UI-D: the theme (game art only, no red buttons) (tests/addon/theme_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/theme_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-009: 綠皮調貨所, automatic collection and manual listings (tests/addon/supply_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/supply_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------

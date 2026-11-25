@@ -40,4 +40,8 @@ Widgets.lua
 AdventureUI.lua
 SleepingBagData.lua
 SleepingBag.lua
+SupplyRules.lua
+Supply.lua
+SupplyListings.lua
+SupplyUI.lua
 Init.lua
