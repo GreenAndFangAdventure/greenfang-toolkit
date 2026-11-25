@@ -155,6 +155,8 @@ local SECTIONS = {
     { title = "公會名冊", text = Diag.rosterText },
     { title = "公會管理（GF-001-Q）", text = function() return ns.GuildAdmin and ns.GuildAdmin.diagText() or "" end },
     { title = "版本", text = Diag.versionText },
+    -- GF-013: the background event record (this computer only; not uploaded yet).
+    { title = "背景事件紀錄（本機）", text = function() return ns.Events and ns.Events.diagText() or "" end },
 }
 
 -- GF-UI-B (GF-UI-A §2.11): 16 px text (18 px state line, gold section

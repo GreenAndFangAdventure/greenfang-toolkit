@@ -41,3 +41,4 @@ AdventureUI.lua
 SleepingBagData.lua
 SleepingBag.lua
 Init.lua
+Events.lua
