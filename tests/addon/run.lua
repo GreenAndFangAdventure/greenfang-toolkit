@@ -131,7 +131,7 @@ test("fresh install creates schema v2 defaults", function()
     local db = GreenFangToolkitDB
     eq(db.schema, "gf.toolkit", "schema")
     eq(db.schemaVersion, 2, "schemaVersion")
-    eq(db.addonVersion, "0.15.1", "addonVersion")
+    eq(db.addonVersion, "0.16.0", "addonVersion")
     eq(db.sync.enabled, true, "sync.enabled default")
     eq(db.sync.noticeShown, false, "noticeShown before login")
     eq(#db.sync.outbox, 0, "outbox empty")
@@ -157,7 +157,7 @@ test("TOC declares the agreed names and loads every file", function()
     ok(toc:find("## Interface: 16001", 1, true), "Interface")
     ok(toc:find("## Title: 綠皮冒險工具箱", 1, true), "Title")
     ok(toc:find("## Author: 綠皮與獠牙冒險事務所", 1, true), "Author")
-    ok(toc:find("## Version: 0.15.1", 1, true), "Version")
+    ok(toc:find("## Version: 0.16.0", 1, true), "Version")
     ok(toc:find("## SavedVariables: GreenFangToolkitDB\r?\n"), "SavedVariables")
     local listed = {}
     for line in toc:gmatch("[^\r\n]+") do
@@ -429,7 +429,7 @@ test("unknown fields in an existing v2 table are preserved", function()
         sync = { enabled = false, noticeShown = true, outbox = {} },
     } })
     eq(GreenFangToolkitDB.futureModule.keep, true, "unknown field kept")
-    eq(GreenFangToolkitDB.addonVersion, "0.15.1", "addonVersion updated")
+    eq(GreenFangToolkitDB.addonVersion, "0.16.0", "addonVersion updated")
     eq(GreenFangToolkitDB.sync.enabled, true, "old off ignored (D-015)")
 end)
 
@@ -479,7 +479,7 @@ test("TSV/JSON export keep the v0.3.1 format", function()
     local s = ns.Roster.current()
     local json = ns.Export.jsonParts(s)
     eq(#json, 1, "one part")
-    ok(json[1]:find('^{"schema":"gfguildroster.report","schemaVersion":1,"addonVersion":"0.15.1"'), "json header")
+    ok(json[1]:find('^{"schema":"gfguildroster.report","schemaVersion":1,"addonVersion":"0.16.0"'), "json header")
     ok(json[1]:find('"part":1,"partCount":1', 1, true), "parts")
     ok(json[1]:find('"onlineAtCapture":true', 1, true), "member online in manual export")
     ok(not json[1]:find('"guid":', 1, true), "no guid in v1 export")
@@ -517,10 +517,11 @@ end)
 -- GF-000-A framework
 ---------------------------------------------------------------------------
 
+-- GF-UI-E: the entries shown on the left (keys), in order.
 local function shownNav(ns)
     local ids = {}
     for _, b in ipairs(ns.Framework.navButtons()) do
-        if b:IsShown() then ids[#ids + 1] = b.moduleId end
+        if b:IsShown() then ids[#ids + 1] = b.entryKey end
     end
     return table.concat(ids, ",")
 end
@@ -551,7 +552,7 @@ test("framework: unavailable or broken modules are hidden", function()
         create = function() error("build failed") end })
     wow.fire("PLAYER_LOGIN"); wow.advance(10)
     SlashCmdList.GREENFANGTOOLKIT("")
-    eq(shownNav(ns), "roster,recipes,orders,adventure,character,sleepingbag,crash", "only available modules listed")
+    eq(shownNav(ns), "profile,directory,crafting,logistics,adventure,handbook,page:crash", "only available modules listed")
     SlashCmdList.GREENFANGTOOLKIT("soon")
     eq(ns.Framework.current(), "roster", "hidden module cannot be opened; falls back")
     eq(built, false, "hidden module never built")
@@ -644,13 +645,13 @@ test("sleepingbag: module visible for Horde, hidden for Alliance", function()
     wow.reset()
     local ns = wow.login(ADDON_DIR)
     SlashCmdList.GREENFANGTOOLKIT("")
-    eq(shownNav(ns), "roster,recipes,orders,adventure,character,sleepingbag", "Horde sees the route")
+    eq(shownNav(ns), "profile,directory,crafting,logistics,adventure,handbook", "Horde sees the route")
     local alliance = wow.defaultPlayer()
     alliance.faction = "Alliance"
     wow.reset({ player = alliance })
     ns = wow.login(ADDON_DIR)
     SlashCmdList.GREENFANGTOOLKIT("")
-    eq(shownNav(ns), "roster,recipes,orders,adventure,character", "Alliance has no route yet")
+    eq(shownNav(ns), "profile,directory,crafting,logistics,adventure", "Alliance has no route yet (冒險指南 hidden)")
 end)
 
 test("sleepingbag: RPG hides coordinates until revealed; normal shows all", function()
@@ -2679,7 +2680,7 @@ test("D10 diag window: sections, sharing stats, export moved here, /gftk sync st
     ok(has(all, "GF Sync 只是補充來源"), "site note")
     ok(has(all, "記錄 ") and has(all, "這次登入：送出"), "sharing statistics")
     ok(has(all, "掃描時間："), "roster scan")
-    ok(has(all, "工具箱 0.15.1"), "version")
+    ok(has(all, "工具箱 0.16.0"), "version")
     wow.click(ns.Diag.exportJSONButton)
     ok(_G.GreenFangToolkit_ExportWindow and _G.GreenFangToolkit_ExportWindow:IsShown(), "export from the window")
     GreenFangToolkitDB.settings.minimapAngle = 10
@@ -4647,6 +4648,21 @@ assert(loadfile(ROOT .. "/tests/addon/adventure_fixes_tests.lua"))()({ test = te
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 -- GF-UI-D: the theme (game art only, no red buttons) (tests/addon/theme_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/theme_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-UI-E: six entries, sub-tabs, 事務設定, item row and states (tests/addon/uie_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/uie_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-PROBE: /gftk probe (tests/addon/probe_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/probe_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-013: the background event record (tests/addon/events_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/events_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-009: 綠皮調貨所, automatic collection and manual listings (tests/addon/supply_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/supply_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-010: role positioning and the personnel file (tests/addon/profile_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/profile_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------

@@ -182,6 +182,39 @@ function Share.decodeIDs(s)
     return ids
 end
 
+-- GF-009 (v2.0 §11): record groups registered by other modules. A group is
+-- one whole snapshot per author, relayed with the same rules as B/P/Z/R
+-- (author and t never change; newest t wins). Clients that do not know a
+-- group ignore it (validGroup). codec = { match = function(g) -> bool,
+-- encode = function(g, d) -> string or nil, decode = function(g, v) -> value
+-- or nil (nil: rejected, never stored or relayed), local = true when GF Sync
+-- must not upload it }. Group names: letters and digits only.
+Share.codecs = {}
+function Share.registerGroup(codec)
+    assert(type(codec) == "table" and type(codec.match) == "function"
+        and type(codec.encode) == "function" and type(codec.decode) == "function", "group codec")
+    Share.codecs[#Share.codecs + 1] = codec
+    return codec
+end
+function Share.codecFor(g)
+    if type(g) ~= "string" or g == "" or g:find("[^%w]") then return nil end
+    if g == "B" or g == "P" or g == "Z" or g:match("^R%d+$") then return nil end
+    for _, c in ipairs(Share.codecs) do
+        if c.match(g) then return c end
+    end
+    return nil
+end
+-- GF-010 (v2.0 §5.2, §11): two more optional codec fields. tomb = true: the
+-- author may withdraw the group (a tombstone, like a profession given up).
+-- own = function(g) -> this character's value now, or nil when it is not
+-- shared; read in Share.observeOwn (a withdrawable group whose own value is
+-- nil gets a tombstone). Codecs with own() list their groups in ownGroups.
+-- Groups GF Sync leaves out of member.share (registered with local = true).
+function Share.isLocalGroup(g)
+    local c = Share.codecFor(g)
+    return c ~= nil and c["local"] == true
+end
+
 -- Value of a group <-> its wire string.
 function Share.encodeValue(g, d)
     if g == "B" then
@@ -204,6 +237,8 @@ function Share.encodeValue(g, d)
     elseif g:match("^R%d+$") then
         return Share.encodeIDs(d)
     end
+    local codec = Share.codecFor(g) -- GF-009: groups other modules registered
+    if codec then return codec.encode(g, d) end
     return nil
 end
 
@@ -232,11 +267,17 @@ function Share.decodeValue(g, v)
     elseif g:match("^R%d+$") then
         return Share.decodeIDs(v)
     end
+    local codec = Share.codecFor(g) -- GF-009
+    if codec then
+        local ok, value = pcall(codec.decode, g, v)
+        if ok then return value end
+    end
     return nil
 end
 
 local function validGroup(g)
     return g == "B" or g == "P" or g == "Z" or (type(g) == "string" and g:match("^R%d+$") ~= nil)
+        or Share.codecFor(g) ~= nil -- GF-009
 end
 
 function Share.authorOf(guid)
@@ -575,7 +616,9 @@ function Share.applyTomb(a, g, t)
     local s = store()
     if not s or type(a) ~= "string" or type(t) ~= "number" then return false end
     -- D-015: only "a profession was given up" (R<id>); no privacy withdrawals.
-    if type(g) ~= "string" or not g:match("^R%d+$") then return false end
+    -- GF-010 (v2.0 §5.2, §11): a registered group with tomb = true may be withdrawn.
+    local codec = type(g) == "string" and not g:match("^R%d+$") and Share.codecFor(g) or nil
+    if type(g) ~= "string" or not (g:match("^R%d+$") or (codec and codec.tomb)) then return false end
     if t > Share.serverNow() + Share.FUTURE or t < Share.EPOCH then return false end
     s.tomb[a] = s.tomb[a] or {}
     local old = s.tomb[a][g]
@@ -623,6 +666,21 @@ function Share.observeOwn()
     if ns.Sync.shareLocation() then
         local loc = ns.Data.location()
         if loc then put("Z", Share.encodeValue("Z", loc)) end
+    end
+    -- GF-010: registered groups with an own() value (nil = not shared). A
+    -- withdrawable group that is no longer shared gets a tombstone.
+    for _, codec in ipairs(Share.codecs) do
+        if type(codec.own) == "function" then
+            for _, g in ipairs(codec.ownGroups or {}) do
+                local v = codec.own(g)
+                if v then
+                    put(g, v)
+                elseif codec.tomb and s.rec[a] and s.rec[a][g] then
+                    Share.applyTomb(a, g, now)
+                    out[#out + 1] = g
+                end
+            end
+        end
     end
     -- A profession given up: withdraw its recipes (only when the list is known).
     if #profs > 0 then

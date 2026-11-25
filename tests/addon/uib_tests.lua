@@ -299,9 +299,10 @@ return function(T)
         ns.Diag.open(); check(ns.Diag.window(), "同步與診斷")
         local names = {}
         for _, b in ipairs(ns.Framework.navButtons()) do
-            if b:IsShown() then names[#names + 1] = b:GetText(); eq(cjk(b:GetText()), 2, "module name: " .. b:GetText()); eq(b._h, 30, "30 px") end
+            -- GF-UI-E (spec v2.0 §3): the six entries have 4-character names (was 2).
+            if b:IsShown() then names[#names + 1] = b:GetText(); eq(cjk(b:GetText()), 4, "entry name: " .. b:GetText()); eq(b._h, 30, "30 px") end
         end
-        ok(table.concat(names, ","):find("名冊,配方,訂單", 1, true), "名冊, 配方, 訂單: " .. table.concat(names, ","))
+        ok(table.concat(names, ","):find("職工名冊,委託業務", 1, true), "職工名冊, 委託業務: " .. table.concat(names, ","))
         ok(ns.Framework.isShown(), "window open")
         eq(_G.GreenFangToolkit_MainWindow.TitleText:GetText(), "綠皮冒險工具箱｜訂單", "the window title keeps the full name")
     end)

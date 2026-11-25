@@ -154,7 +154,13 @@ local SECTIONS = {
         .. ((ns.Adventure and ns.db and type(ns.db.adventure) == "table") and ("｜成行紀錄：" .. #ns.Adventure.myLog()) or "") end },
     { title = "公會名冊", text = Diag.rosterText },
     { title = "公會管理（GF-001-Q）", text = function() return ns.GuildAdmin and ns.GuildAdmin.diagText() or "" end },
+    { title = "職責定位（GF-010）", text = function() return ns.Profile and ns.Profile.diagText() or "" end },
     { title = "版本", text = Diag.versionText },
+    { title = "功能探測（GF-PROBE）", text = function() return ns.Probe and ns.Probe.diagText() or "" end },
+    -- GF-013: the background event record (this computer only; not uploaded yet).
+    { title = "背景事件紀錄（本機）", text = function() return ns.Events and ns.Events.diagText() or "" end },
+    -- GF-009: 綠皮調貨所 (automatic collection and manual listings).
+    { title = "物資供需（GF-009）", text = function() return ns.Supply and ns.Supply.diagText() or "" end },
 }
 
 -- GF-UI-B (GF-UI-A §2.11): 16 px text (18 px state line, gold section

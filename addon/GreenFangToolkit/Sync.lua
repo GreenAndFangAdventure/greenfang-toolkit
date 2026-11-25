@@ -423,8 +423,11 @@ end
 -- What this subject's records look like now: [g] = { t, h } (tombstones h = "x").
 local function fieldState(recs, tombs, a)
     local out = {}
-    for g, r in pairs(recs) do out[g] = { t = r.t, h = r.h } end
-    for g, t in pairs(tombs) do out[g] = { t = t, h = "x" } end
+    -- 0.16.0: groups that stay in the game (Share.isLocalGroup: GF-009 C<n>/L,
+    -- GF-010 J) are not part of member.share, so they never cause a rewrite.
+    local isLocal = ns.Share and ns.Share.isLocalGroup or function() return false end
+    for g, r in pairs(recs) do if not isLocal(g) then out[g] = { t = r.t, h = r.h } end end
+    for g, t in pairs(tombs) do if not isLocal(g) then out[g] = { t = t, h = "x" } end end
     -- GF-006-B: the subject's order records count as fields too.
     if a and ns.Orders then for g, f in pairs(ns.Orders.uploadState(a)) do out[g] = f end end
     if a and ns.Adventure then for g, f in pairs(ns.Adventure.uploadState(a)) do out[g] = f end end
@@ -497,8 +500,9 @@ function Sync.recordShares()
         local recs, tombs = a and s.rec[a] or {}, a and s.tomb[a] or {}
         local orderState = a and ns.Orders and ns.Orders.uploadState(a) or {}
         local advState = a and ns.Adventure and ns.Adventure.uploadState(a) or {}
-        if a and a ~= selfA and (next(recs) or next(tombs) or next(orderState) or next(advState)) then
-            local current = fieldState(recs, tombs, a)
+        local current = a and a ~= selfA and (next(recs) or next(tombs) or next(orderState) or next(advState))
+            and fieldState(recs, tombs, a) or nil
+        if current and next(current) then
             local diff = compareState(current, s.queued[a])
             local old = existing[m.guid]
             if not old and s.queued[a] then diff = "changed" end

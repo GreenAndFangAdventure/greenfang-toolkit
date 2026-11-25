@@ -3,6 +3,10 @@
 -- profession. Uses only built-in textures (Icons.lua). Works in any guild.
 -- GF-001-D8: clicking a profession that has a window opens it (a secure
 -- spell button laid over the row, Professions.lua); not in combat.
+-- GF-010 (spec v2.0 §5.1): the personnel file. The left half stays as it was
+-- (basic data, professions = 專業資歷 with the existing recipe and 我的服務
+-- editors, nothing stored twice); ProfileUI.lua fills the right half (職責定位,
+-- 我的業務, 個人需求 once GF-009 is in).
 
 local _, ns = ...
 local str = ns.str
@@ -121,6 +125,15 @@ function Character.refresh()
     end
     for i = #profs + 1, #profRows do profRows[i]:Hide() end
     ns.Professions.hideFrom("character", math.min(#profs, MAX_ROWS) + 1)
+    -- GF-010: the existing editors (配方 / 我的服務) only where they work here.
+    local inGuild = ns.guildState() == "target"
+    if Character.recipesButton then
+        if inGuild and ns.Recipes and p.guid then Character.recipesButton:Show() else Character.recipesButton:Hide() end
+    end
+    if Character.servicesButton then
+        if inGuild and ns.OrdersUI and ns.OrdersUI.openServices then Character.servicesButton:Show() else Character.servicesButton:Hide() end
+    end
+    if ns.ProfileUI then ns.ProfileUI.refresh() end
 end
 
 local function build(p)
@@ -136,17 +149,26 @@ local function build(p)
     infoLine:SetJustifyH("LEFT")
     guildLine = p:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
     guildLine:SetPoint("TOPLEFT", p, "TOPLEFT", 22, -104)
-    guildLine:SetWidth(900)
+    guildLine:SetWidth(560)
     guildLine:SetJustifyH("LEFT")
     locationLine = p:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
     locationLine:SetPoint("TOPLEFT", p, "TOPLEFT", 22, -124)
-    locationLine:SetWidth(900)
+    locationLine:SetWidth(560)
     locationLine:SetJustifyH("LEFT")
     profTitle = p:CreateFontString(nil, "ARTWORK", ns.Theme.FONT.header) -- GF-UI-D: a gold section header
     profTitle:SetPoint("TOPLEFT", p, "TOPLEFT", 22, -152)
     profTitle:SetText("專業技能")
     emptyLine = p:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
     emptyLine:SetPoint("TOPLEFT", p, "TOPLEFT", 22, -176)
+    -- GF-010 (§5.1 專業資歷與接單設定): the recipe page and 我的服務, reused.
+    Character.recipesButton = ns.OrdersUI.textButton(p, "配方", function()
+        local guid = ns.Data.player().guid
+        if guid and ns.Recipes and ns.Recipes.show then ns.Recipes.show(guid) end
+    end)
+    Character.recipesButton:SetPoint("TOPLEFT", p, "TOPLEFT", 140, -146)
+    Character.servicesButton = ns.OrdersUI.textButton(p, "我的服務", function() ns.OrdersUI.openServices() end)
+    Character.servicesButton:SetPoint("LEFT", Character.recipesButton, "RIGHT", 10, 0)
+    if ns.ProfileUI then ns.ProfileUI.build(p) end
     -- The buttons live on UIParent: hide them with the page (out of combat;
     -- in combat they are already hidden).
     p:HookScript("OnHide", function() ns.Professions.hideFrom("character", 1) end)
@@ -161,9 +183,16 @@ ns.Share.onUpdate(function(a)
     end
 end)
 
+-- GF-010: own role changes redraw the page.
+if ns.Profile then
+    ns.Profile.onChange(function()
+        if panel and ns.Framework.isModuleShown("character") then Character.refresh() end
+    end)
+end
+
 ns.Framework.register({
     id = "character",
-    title = "我的角色",
+    title = "職工檔案",
     order = 15,
     create = build,
     show = Character.refresh,
