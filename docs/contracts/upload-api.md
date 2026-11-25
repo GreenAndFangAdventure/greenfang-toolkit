@@ -1,4 +1,4 @@
-# 契約：GF Sync ↔ 網站上傳 API（v1.5）
+# 契約：GF Sync ↔ 網站上傳 API（v1.6）
 
 - 版本：
   - v1（2026-11-17 claude-pm 依 Q-005 與實作結果定稿）
@@ -14,6 +14,12 @@
     依據：GF Sync 的 `docs/UPDATE_MANIFEST.md` §2
   - **v1.3（2026-11-22 claude-addon，GF-001-D24，AddOn 0.9.8／0.10.0；與 GearBot 議定）**：新增選填欄位 `uploader.fullName`（每一種 kind）與 `member.share`／`member.report` 的 `payload.subject.fullName`：角色全名「名字 姓氏」，和網站名冊（Blizzard API）的寫法一樣。用來修正 `character_not_in_roster`（§3 第 2、6 點）。格式其餘不變
   - **v1.5（2026-11-23 claude-pm，GF-002-B，AddOn 0.12.0）**：`character.self`、`member.share` 的 payload 多一個選填欄位 `adventure`（冒險單、職工單、動作；savedvariables §adventure）。網站規則見 §3 第 11 點。不是新的 kind
+  - **v1.6（2026-11-25 claude-pm，AddOn 0.13.0～0.16.x；GearBot 2026-11-25 回覆第 3～7 段，owner 同日定案政策）**：都是新增，舊的用戶端照舊能用。網站都還沒實作。
+    - `adventure` 的 v1.6 欄位：時段、定案、成團、成行、成行紀錄 `log`（§3 第 11 點）。**第 1 段 GearBot 回覆待收**
+    - 新 kind `adventure.event`（§8）。**第 2 段 GearBot 回覆待收**；工具箱還沒上傳
+    - 逐筆回執規則與 `reason: "stale_revision"`、`"test_data"`（§2、§2b）
+    - 刪除訊號 `removed`、墓碑、網站後台刪除（§4）
+    - 舊資料相容、GUID 保留與查閱權限（§3 第 12、13 點）
   - **v1.4a（2026-11-23 claude-pm，GearBot 與審查的回饋）**：`j` 每位工匠一份；決勝規則；新增 `w.returnedAt`、`j.statusAt`
   - **v1.4（2026-11-23 claude-pm，GF-006-B，AddOn 0.11.0）**：`character.self` 和 `member.share` 的 payload 多一個選填欄位 `crafting`（製作服務與訂單，格式見 savedvariables §crafting）。網站的處理規則見 §3 第 10 點，上線順序見 §5。不是新的 kind，舊的用戶端照舊能用
 - 實作位置：網站 repo `green-and-fang-site`，位於 `functions/api/sync/*`（D-002）。PR 送到 `dev`
@@ -62,6 +68,8 @@
   | `wrong_world`、`wrong_guild`、`wrong_realm` | 驗證失敗（§3 第 1 點） | 記成已回覆，不再送 |
   | `unknown_subject` | `member.share` 的 subject 在網站名冊找不到 | 記成已回覆 |
   | `future` | 時間比伺服器晚 10 分鐘以上 | 記成已回覆 |
+  | **`stale_revision`**（v1.6，和 `duplicate` 一起） | 已經有更高的 `revision` | 記成已回覆（§2b） |
+  | **`test_data`**（v1.6，和 `rejected` 一起） | 帶 `test: true` | 記成已回覆，工具箱停止重送（§4c） |
   | **`unknown_kind`** | 網站還不認得這種 kind（例如舊版網站收到 `member.share`） | **不記成已回覆**，24 小時後再試 |
   | **`addon_too_old`**（v1.2） | 寫出這筆資料的工具箱版本（`client.addonVersion`）比網站接受的最低版本舊 | **不記成已回覆**，24 小時後再試（和 `unknown_kind` 一樣），並提示玩家更新工具箱 |
   | 其他 | 格式錯誤等 | 記成已回覆 |
@@ -129,6 +137,28 @@ Content-Type: application/json; charset=utf-8
   2. 確認大家都更新之後，才開始回 426
   3. 上線順序照舊：網站 → GF Sync → AddOn（§5）
 
+## 2b. 逐筆回執與頻率（v1.6，GearBot 2026-11-25 同意）
+
+- **頻率**：每台裝置每個**固定整點小時** 60 次上傳請求，所有 kind 共用（是請求數，不是筆數）。每次 1～50 筆 items，整個 request body 最多 1,000,000 bytes。超過回 429＋`Retry-After`。沒有另外的每小時事件筆數限制。
+- **GF Sync**：事件和既有資料分批、共用額度；429 遵守 `Retry-After`；網路錯誤、503 退避重試；沒有逐筆確認的資料不清掉。沒收到回執時每 6 小時重送一次，加少量隨機錯開。
+- **網站回應**（有 `revision` 的資料，目前只有 `adventure.event`）：
+
+  | 情況 | status | reason |
+  |---|---|---|
+  | 新的版本，資料和回執都成功寫入後 | `accepted` | |
+  | 同一個版本重送 | `duplicate` | |
+  | 舊版本：身分與格式驗證通過，網站已存同一 `(originGUID, eventID)` 更高的 `revision` | `duplicate` | `stale_revision`（可附，方便診斷） |
+  | 同一個版本、內容不同 | `rejected` | 例如 `revision_conflict` |
+  | 帶 `test: true` | `rejected` | `test_data` |
+
+  - `accepted` 一定要等資料和回執都提交成功才回。
+  - 舊版本回 `duplicate` 的意思是「這版已經被涵蓋，可以清佇列」：不覆寫新版、不重複計數。
+- **工具箱**：
+  - 只清除回執對應的**確切版本**；舊版本的回執不能清掉還沒確認的新版本。
+  - `rejected` 不算成功：保留在佇列並記下原因，等修正。**例外**：`rejected`＋`test_data` 是終止，不再重送，直接清掉。
+  - 回執經 `GreenFangToolkit_Inbox`（D-018）延遲回到遊戲，下次登入時處理。
+  - 佇列每個角色最多 1,000 筆，800 筆時警告，滿了不收新事件，**不丟掉還沒確認的事件**。
+
 ## 3. 伺服器驗證（上傳內容一律視為「待查證」）
 
 1. `game.world == "forever"`，`uploader.guild` 必須完全等於「綠皮與獠牙冒險事務所」，`realm` 必須和網站名冊的伺服器一致，否則回 `rejected`。**每一種 kind 都要有共通欄位**（`capturedAt`、`game`、`uploader`），`recipe.names` 也一樣。
@@ -177,11 +207,65 @@ Content-Type: application/json; charset=utf-8
     - **`note`**：唯一的自由文字。網站一定要自己再檢查長度（40 個字元）、去掉控制字元，並**一律當純文字轉義顯示**；GF Sync 0.1.0 的 `character.self` 不會先過濾。
     - **Discord**（綠皮 BOT）：開單、錄取、遞補（通知被遞補的人和團長）、開始前 60／15 分鐘、取消時通知；事件要去重。
     - 第一版只顯示和通知；網站和 Discord 開單、報名之後另寫（id 開頭 `x`、`y` 先保留）。
+    - **v1.6 欄位**（AddOn 0.13.0 起已在寫；GearBot 第 1 段回覆待收，欄位名稱可能再調）：
+      - `tickets.value[id]`：`times[]`（`{ id, mode, from, length?, to }`，1～5 段；`id` 是時段編號、編輯時不變；沒有 `length` 時 `to = from + 1800`）、`final`、`finalAt`、`formedAt`、`phase`（`open`／`formed`／`done`／`ended`／`unfinished`／`cancel`）、`reason`（`manual`／`offline`／`time`／`unfinished`）、`status` 新增 `unfinished`、`decisions[GUID].slots`。
+      - `actions.value[id].slots`：報名的時段編號；沒有＝全部時段。
+      - `worker.value.times[]`：多 `id`、`length`、`from`，最多 5 段。
+      - `adventure.log`：`{ recordedAt, value: { <冒險單 id>: { dungeon?, quests?, slotStart, formedAt, doneAt?, status: "done"|"unfinished", members: [{ guid, role }], auto? } } }`。依冒險單 `id` 去重、長期保存；來源是 `character.self`（團長電腦最近 30 天／50 筆）和 `member.share`（結束 1 天內還在轉傳的那張單）。
+      - 「成行」只算 `log` 裡 `status = "done"`。`phase = "formed"` 只顯示成團；`unfinished`、`ended`、`cancel` 不算成行。退回以團長最新的 `tickets` 為準重算，不累加。
+      - 舊網站只讀 `time` 時顯示定案的時段（沒定案時是第一段），不會出錯。
+      - 欄位詳見 `docs/research/GF-002-H_adventure-upload-v1.6.md`。
+    - **刪除**：`removed` 見 §4a。
 
-## 4. 撤回
+12. **舊資料相容**（v1.6，GearBot 2026-11-25 同意）：
+    - 0.9.x～0.15.x 的上傳都繼續接受：沒有 `times` 只有 `time`、職工單最多 3 段、`actions` 沒有 `slots`、沒有 `phase`／`final`／`log`、`status` 沒有 `unfinished`、`member.report`（只有 0.8.x～0.9.x 寫過）。
+    - **缺新欄位＝不知道**：不補成 0 或空值，不因此拒收，不加 `addon_too_old`。網站沒有依工具箱版本號擋上傳。
+    - 舊包仍會碰到的既有拒收條件（MAIN #307 程式碼，沒有拿各版樣本驗證）：
+      - 共通：id 無效、未知 kind、world／guild／realm 不符、payload 無效。
+      - 時間：缺有效的 `capturedAtServer`／`capturedAt`、早於 2020 年、超前網站時間 600 秒以上。沒有「太舊」期限。
+      - 身分：uploader 不在名冊；有 GUID 但查不到時不改用名字比對。
+      - `character.self`：角色識別不足或 level 不合法。
+      - `member.share`：subject 查不到或有歧義 → `unknown_subject`。
+      - `member.report`：要有整數 `reportedAt`、`subject.realm` 要明確等於該 realm（**缺 `subject.realm` 會被拒**）、subject 在名冊、通過角色／level 驗證。
+      - `roster.snapshot`：`total` 1～2,000 且等於 `members` 筆數；成員名稱無效或重複會拒收。
 
-- 工具箱 0.9.1 起沒有同步開關（D-015）：裝了就會分享。想停止上傳，就暫停或解除安裝 GF Sync；不想被分享的成員不要安裝工具箱。已上傳的資料依規格 §4 的資料政策處理，屆時另行實作刪除端點。
+13. **不上傳的資料與 GUID**（v1.6，GearBot 2026-11-25 同意）：
+    - 不上傳：職責定位、天賦、物資供需（自動集料、手動刊登）、黑庫、幹部註記、功能探測紀錄、拍賣場價格、任務名稱（只上傳 quest ID）。事件不含角色名稱。網站的天賦資料來自 Blizzard API。
+    - 事件裡的 GUID：成員在會期間保留；**確認離會後 180 天**刪除原始事件和可回溯到個人的關聯。180 天內確認重新入會就取消倒數；刪除後再入會不恢復。
+    - 離會判定：要由成功且完整的名冊同步確認，並記下確認離會的時間；一次 API 失敗、404 或名冊不完整都不能開始倒數。
+    - 查閱：公會成員只看不含個人明細的彙總；原始事件和 GUID 只有網站管理員能查，一般幹部不自動有權限。「和誰一起冒險」第一版不開放給一般成員。
+    - 彙總要不能反查個人：GUID 換成固定雜湊不算匿名。
+
+## 4. 撤回與刪除
+
+- 工具箱 0.9.1 起沒有同步開關（D-015）：裝了就會分享。想停止上傳，就暫停或解除安裝 GF Sync；不想被分享的成員不要安裝工具箱。
 - 在 `/pages/sync-devices` 撤銷裝置：該 token 立即失效。
+
+### 4a. 作者本人刪除：`removed`（v1.6，GearBot 2026-11-25 同意；工具箱、GF Sync、網站都還沒實作）
+
+- `adventure` 和 `crafting` 各加一個選填的 `removed`：`{ recordedAt, value: { "<單 id>": { at, why: "test" | "owner" } } }`。
+- 只有作者能刪自己的單：冒險單是團長、訂單是客人。網站比對作者 GUID 和 uploader（`character.self`）或 subject（`member.share`），不是作者的略過。
+- `removed` 是**累積的**：下一份清單沒帶某個 id，不代表取消刪除，墓碑照留。
+- **刪除範圍**（owner 2026-11-25）：
+  - 刪：那張單本身、它的成行紀錄（`log`）、那位作者這張單的事件。
+  - 不刪：其他角色自己提交的紀錄（例如成員自己的 `participant_done` 事件、報名動作）。
+  - 衍生統計重算，不保留個人明細。
+- **墓碑**（owner 2026-11-25 採 GearBot 建議）：
+  - **長期保留、不自動到期**（舊存檔可能很久以後才重送）。
+  - 內容是最小的防重放標記：資料類別、單 id、刪除時間，加上能比對作者、但**不是明文 GUID** 的值；不能永久保留明文作者 GUID。
+  - 之後再收到同一個 id 的資料一律不採用。同一個 id 永不復用；重開要用新 id（工具箱的重開本來就換 id）。
+  - 舊回執、關聯表、備份還原都要遵守刪除規則，避免資料復活。
+
+### 4b. 幹部刪除別人的資料：網站後台
+
+- 不經過工具箱。網站用自己的資料判斷權限，不信客戶端自稱幹部。
+- 第一版（owner 2026-11-25 同意，之後可能再改）：沿用現有後台的 Discord 登入＋網站設定的 `ADMIN_DISCORD_USER_IDS` 白名單，不看 Discord 身分組或名冊會階。要開放一般幹部時，網站另外加明確的刪除權限。
+
+### 4c. 測試資料
+
+- 工具箱的測試版（版本是 `dev` 或帶 `-`）不分享、不上傳。
+- 網站收到帶 `test: true` 的資料：不進業務資料、不計數，逐筆回 `rejected`＋`reason: "test_data"`（§2b），工具箱看到就停止重送。
+- 0.14 版測試時上傳過的測試訂單和冒險單：MAIN #307 沒有解析或寫入 `crafting`／`adventure`，接收端也不把完整 payload 寫進資料庫或 console log，所以**沒有業務內容要刪**。網站留有上傳回執 metadata（id、裝置、kind、資料時間、接收時間），同一包裡角色、專業等欄位照常儲存。正式環境的其他日誌和備份還沒查。
 
 ## 5. 上線順序（D-014 的新 kind）
 
@@ -217,3 +301,35 @@ AddOn 0.9 的第 1～3 段不寫新 kind，可以先上線。
 - 網站可以**晚一點**才換成新版本（例如分批推送或暫緩），但**不能改內容**。
 - 這個端點不受 426 影響（§2a 只適用 upload 和 device/start）：太舊的 GF Sync 正需要它來找新版。
 - 工具箱的 `addon-manifest.json` 照同樣的原則原樣提供，格式見 `docs/contracts/addon-manifest.md`。
+
+## 8. 新 kind `adventure.event`（v1.6 草案；GearBot 第 2 段回覆待收；工具箱還沒上傳）
+
+工具箱 0.16.0 起在本機記背景事件（`GreenFangToolkitDB.events`），還沒接 GF Sync。這一節是我們的提議，等 GearBot 回第 2 段後再定。
+
+- 一筆一個事件。共通欄位 `id` = `<eventID>.<revision>`，同一版本重送回 `duplicate`（§2b）。
+- 去重：`(originGUID, eventID)`，以 `revision` 大的為準（GearBot 在第 3 段已用這個鍵）。
+
+| 欄位 | 必填 | 說明 |
+|---|---|---|
+| `eventID` | 是 | 穩定 ID，同一件事永遠一樣 |
+| `schemaVersion` | 是 | 目前 1 |
+| `originGUID`、`participantGUID` | 是 | 都是本人；網站要比對上傳者，不能只信客戶端 |
+| `adventureID` | 職工單建立以外 | 冒險單 `id` |
+| `workerOrderID` | 職工單事件 | |
+| `participationPath` | 是 | `leader`／`worker_match`／`direct_signup` |
+| `eventType` | 是 | `adventure_created`／`finalized`／`formed`／`done`／`cancelled`／`expired`／`unfinished`、`worker_order_created`／`matched`、`signup_applied`、`participant_admitted`、`participant_done` |
+| `activityType` | 是 | `dungeon`／`raid`／`quest`／`zone`／`worker`／`other` |
+| `destinationID` | 否 | 地城代碼、`q:<任務 ID>` 或 `z:<區域>` |
+| `role` | 否 | `t`／`h`／`d`／`any` |
+| `observedAt` | 是 | 第一次觀察到的時間，不會改 |
+| `revision` | 是 | |
+| `revisedAt` | 否 | |
+| `status`、`change` | 是 | `active`／`revoked`；`new`／`correction`／`revocation`／`restore` |
+| `revokedReason` | 否 | 目前有 `back`、`no_self_evidence` |
+| `evidence` | 是 | 例如 `leader_done`、`auto`、`self_detected`、`self_party` |
+| `reopenOf` | 否 | 重開時指向舊的冒險單 `id` |
+| `test` | 否 | 工具箱不會送；網站看到 `true` 照 §4c |
+
+- 事件裡沒有任何名字或文字，只有本人的 GUID。成員本人成行要有本人的證據才記，整團 60% 不算個人證據。團本只記建立和報名。
+- 「和誰一起冒險」由網站把同一 `adventureID` 的 `participant_done` 合起來算，工具箱不上傳別人的 GUID；第一版不開放給一般成員（§3 第 13 點）。
+- 上線順序照 §5：網站 → GF Sync → AddOn。`adventure.event`、事件 Inbox 回執、刪除訊號都不在 GF Sync 0.2.0 的範圍，也不擋 0.2.0 發布。
