@@ -882,13 +882,15 @@ function UI.fillRoles(row, m)
 end
 
 ---------------------------------------------------------------------------
--- GF-010 (spec §5.2): 人力盤點 on the bottom row, left: per role its round
+-- GF-010 (spec §5.2): 人力盤點 (GF-UI-F: on its own row between the tool
+-- bar and the column header, at most UI.CENSUS_MAX wide), left: per role its round
 -- icon with 主 N 可 N (main role / can fill), then 未知 N and 在線 N; the
 -- total is the member count on the tool bar (each member once). Counts are
 -- over the list as filtered. A click on a role (or 未知) filters the list
 -- to members who can fill it, like the profession icons; 清除 resets it.
 ---------------------------------------------------------------------------
 UI.CENSUS_ICON, UI.CENSUS_STEP = 24, 128 -- room for 主999 可999
+UI.CENSUS_MAX = 980
 function UI.toggleRoleFilter(key)
     local set = UI.filters.roles or {}
     if set[key] then set[key] = nil else set[key] = true end
@@ -897,19 +899,19 @@ function UI.toggleRoleFilter(key)
 end
 function UI.buildCensus(f)
     local O = ns.OrdersUI
-    local c = { roles = {} }
+    local c = { roles = {}, page = f }
     local x = 20
     local keys = { "t", "h", "d" }
     for _, r in ipairs(keys) do
         local b = O.iconButton(f, UI.CENSUS_ICON, "unknown", nil, function() UI.toggleRoleFilter(r) end, "")
         ns.GameIcons.set(b.tex, "role_" .. r)
-        b:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", x, UI.BOTTOM_Y + 3)
+        b:SetPoint("TOPLEFT", f, "TOPLEFT", x, UI.CENSUS_Y - 3)
         b.role = r
         c.roles[r] = b
         x = x + UI.CENSUS_STEP
     end
     c.unknown = O.textButton(f, "未知", function() UI.toggleRoleFilter("unknown") end)
-    c.unknown:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", x, UI.BOTTOM_Y)
+    c.unknown:SetPoint("TOPLEFT", f, "TOPLEFT", x, UI.CENSUS_Y)
     c.unknownX = x
     c.onlineIcon = f:CreateTexture(nil, "ARTWORK")
     c.onlineIcon:SetSize(16, 16)
@@ -939,8 +941,10 @@ function UI.drawCensus(list)
     ns.Theme.setSelected(c.unknown, on.unknown == true)
     c.online:SetText(string.format("在線 %d", n.online))
     local x = c.unknownX + c.unknown.gfWidth + 16
-    c.onlineIcon:ClearAllPoints(); c.onlineIcon:SetPoint("BOTTOMLEFT", UI.census.unknown:GetParent(), "BOTTOMLEFT", x, UI.BOTTOM_Y + 7)
-    c.online:ClearAllPoints(); c.online:SetPoint("BOTTOMLEFT", UI.census.unknown:GetParent(), "BOTTOMLEFT", x + 20, UI.BOTTOM_Y + 7)
+    local parent = c.page
+    c.onlineIcon:ClearAllPoints(); c.onlineIcon:SetPoint("TOPLEFT", parent, "TOPLEFT", x, UI.CENSUS_Y - 7)
+    c.online:ClearAllPoints(); c.online:SetPoint("TOPLEFT", parent, "TOPLEFT", x + 20, UI.CENSUS_Y - 7)
+    c.right = x + 20 + ns.measure(c.online)
     if list then c.unknown:Show(); c.onlineIcon:Show(); c.online:Show()
     else c.unknown:Hide(); c.onlineIcon:Hide(); c.online:Hide() end
 end
@@ -1274,11 +1278,13 @@ end
 -- GF-UI-B (GF-UI-A §1.2, §2.2): the page from top to bottom:
 --   tool bar (y -36, 30 px controls):
 --     [更新] 搜尋 [box] [專業][職業] [ ]在線 [ ]接單中 等級 [  ] 以上 [清除]   [人頭] 12/80
---   column header (y -76, 28 px, gold, arrow textures)
+--   人力盤點 (y -72, GF-UI-F: moved up from the bottom row)
+--   column header (y -108, 28 px, gold, arrow textures)
 --   the list (36 px rows)
 --   the chosen member's buttons (44 px bar)
 --   bottom row: [邀請] [公會] [遊戲公會] [診斷] on the right
-UI.TOOLBAR_Y, UI.HEADER_Y, UI.HEADER_H, UI.LIST_TOP, UI.LIST_BOTTOM = -36, -76, 28, -106, 100
+UI.TOOLBAR_Y, UI.HEADER_Y, UI.HEADER_H, UI.LIST_TOP, UI.LIST_BOTTOM = -36, -108, 28, -138, 100
+UI.CENSUS_Y = -72
 UI.TOOLBAR_GAP = 8
 UI.EMPTY_ICON = 48
 

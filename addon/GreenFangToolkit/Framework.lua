@@ -104,7 +104,10 @@ F.DEFAULT_ENTRY = {
 -- The game's own icons, each with fallbacks (MANUAL §3uie).
 F.ENTRY_ICON = {
     profile = { "Interface\\Icons\\INV_Misc_Head_Human_01", "Interface\\Icons\\INV_Misc_Note_01" },
-    directory = { "Interface\\Icons\\INV_Misc_Book_09", "Interface\\Icons\\INV_Misc_Note_02" },
+    -- GF-UI-F: a group of people (the game's group-finder icon), then the
+    -- guild tabard; never a book (冒險指南 is the book).
+    directory = { "Interface\\Icons\\INV_Misc_GroupLooking", "Interface\\Icons\\INV_Shirt_GuildTabard_01",
+        "Interface\\Icons\\INV_Misc_Note_02" },
     crafting = { "Interface\\Icons\\Trade_BlackSmithing", "Interface\\Icons\\INV_Hammer_20" },
     logistics = { "Interface\\Icons\\INV_Box_01", "Interface\\Icons\\INV_Misc_Bag_08" },
     adventure = { "Interface\\Icons\\INV_Misc_Map_01", "Interface\\Icons\\INV_Sword_04" },
