@@ -115,7 +115,7 @@ F.ENTRY_ICON = {
     settings = { "Interface\\Icons\\INV_Misc_Gear_01", "Interface\\Icons\\Trade_Engineering" },
     page = { "Interface\\Icons\\INV_Misc_Note_01" }, -- an entry of its own (no entry given)
 }
-F.NAV_ICON = 20
+F.NAV_ICON = 22 -- GF-UI-G: 22 px in the module list (22-24)
 
 ---------------------------------------------------------------------------
 -- Registry
@@ -261,6 +261,7 @@ local function createWindow()
     if window then return window end
     -- GF-UI-D: the theme's window (dark panel, 1 px line, gold title, the X).
     local f = ns.Theme.window(F.WINDOW_NAME, UIParent, F.NAV_WIDTH + F.PANEL_WIDTH + 10, F.PANEL_HEIGHT + F.SUBTAB_H)
+    if ns.Theme.C.main then ns.Theme.color(f.gfOpaque, ns.Theme.C.main) end -- GF-UI-G: the main window, more opaque
     f:SetPoint("CENTER")
     f:SetFrameStrata("DIALOG")
     f:SetMovable(true)
@@ -274,7 +275,7 @@ local function createWindow()
     nav:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -32)
     nav:SetSize(F.NAV_WIDTH - 14, F.PANEL_HEIGHT + F.SUBTAB_H - 44)
     -- GF-UI-D: the module list is a faint panel with a line on its right.
-    nav.bg = ns.Theme.fill(nav, ns.Theme.C.panel, "BACKGROUND")
+    nav.bg = ns.Theme.fill(nav, ns.Theme.C.side or ns.Theme.C.panel, "BACKGROUND") -- GF-UI-G: #2B3225
     nav.line = ns.Theme.vline(nav, 0, 0, 0, nil, true)
     f.nav = nav
     -- GF-UI-E: the sub-tab row over the page, with a thin line under it.

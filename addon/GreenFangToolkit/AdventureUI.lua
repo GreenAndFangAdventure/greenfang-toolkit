@@ -44,7 +44,8 @@ UI.ROLE_NAME = { t = "坦", h = "補", d = "輸出", any = "隊員" }
 UI.TAG_KEYS = { "quest", "farm", "slow", "fast", "voice" }
 
 -- GF-002-C: role, person, time and quest marks use the game's own art (GameIcons, with fallbacks).
-UI.GAME = { t = "role_t", h = "role_h", d = "role_d", any = "person", now = "now", today = "today", future = "future",
+-- GF-UI-G: 現在 and a set time (today, tomorrow, later) share one small clock.
+UI.GAME = { t = "role_t", h = "role_h", d = "role_d", any = "person", now = "clock", today = "clock", future = "clock",
     quest = "quest", dungeon = "key", worker = "worker", yes = "yes", no = "no", adventure = "adventure",
     group = "group", lfg = "lfg", -- GF-002-G: several heads; the game's group finder
     final = "final", calendar = "calendar", -- GF-002-H: 定案 (a sealed scroll), 行事曆 (an agenda)
@@ -690,13 +691,14 @@ local function newRow(i)
     row.delete:SetPoint("LEFT", row, "LEFT", UI.COL.delete, UI.LINE1)
     row.delete.action = "delete"
     row.delete:Hide()
-    row.head = row:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT); row.head:SetPoint("LEFT", row, "LEFT", 6, 0)
-    -- GF-016: the row 我的業務 opened (UI.focus), lit with the quest log's highlight.
-    row.focusMark = row:CreateTexture(nil, "BORDER")
-    row.focusMark:SetAllPoints()
-    Icons.set(row.focusMark, "Interface\QuestFrame\UI-QuestTitleHighlight")
-    if row.focusMark.SetBlendMode then row.focusMark:SetBlendMode("ADD") end
-    row.focusMark:Hide()
+    row.head = row:CreateFontString(nil, "ARTWORK", ns.Theme.FONT.header or ns.FIELD_FONT); row.head:SetPoint("LEFT", row, "LEFT", 6, 0)
+    -- GF-016: the row 我的業務 opened (UI.focus). GF-UI-G: the chosen look (the olive
+    -- fill and the brass 1 px frame); the mouse over a row lightens it a little.
+    row.focusMark = ns.Theme.fill(row, ns.Theme.C.selFill, "BACKGROUND", 1)
+    row.focusEdges = ns.Theme.border(row, ns.Theme.C.selLine, "BORDER")
+    row.focusMark:Hide(); row.focusEdges.show(false)
+    row.hoverFill = ns.Theme.fill(row, ns.Theme.C.hover, "BACKGROUND", 2)
+    row.hoverFill:Hide()
     row:EnableMouse(true)
     if row.RegisterForClicks then row:RegisterForClicks("LeftButtonUp", "RightButtonUp") end
     row:SetScript("OnMouseUp", function(self, mouse)
@@ -715,6 +717,8 @@ local function newRow(i)
         GameTooltip:Show()
     end)
     row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    row:HookScript("OnEnter", function(self) if not self.isHeader then self.hoverFill:Show() end end)
+    row:HookScript("OnLeave", function(self) self.hoverFill:Hide() end)
     rowWidgets[i] = row
     return row
 end
@@ -831,12 +835,44 @@ function UI.why(v) return A().whyState(v) end
 -- The checklist lines (tests and the 完成 button): Widgets.checklistLines with this page's formats.
 function UI.whyLines(why) return ns.Widgets.checklistLines(why, UI.WHY_OPTS) end
 
+-- GF-UI-G (owner trial): 密語 and 申請 in a row are thin outlined text buttons of one
+-- width (UI.ACTION_W), so the action column lines up from row to row.
+UI.TEXT_ACTIONS = { whisper = true, apply = true, lfgApply = true }
+UI.ACTION_W = 76
+function UI.textStyle(b, on)
+    local T = ns.Theme
+    if on then
+        if not b.gfTextEdges then
+            b.gfTextFill = T.fill(b, T.C.fill, "BACKGROUND")
+            b.gfTextEdges = T.border(b, T.C.line, "BORDER")
+            b.gfTextText = ns.freeText(b:CreateFontString(nil, "ARTWORK", T.FONT.button))
+            b.gfTextText:SetPoint("CENTER", b, "CENTER", 0, 0)
+        end
+        b.textStyle = true
+        b.tex:Hide()
+        b:SetSize(UI.ACTION_W, ns.BUTTON_H - 2)
+        b.gfWidth = UI.ACTION_W
+        b.gfTextText:SetText(b.tip or ""); b.gfTextText:Show()
+        b.gfTextFill:Show(); b.gfTextEdges.show(true)
+        if b.label then b.label:SetText(""); b.label:Hide() end
+        b.fieldNamed = b.tip -- its name is the word inside the frame
+    elseif b.textStyle then
+        b.textStyle = false
+        b:SetSize(ns.ROW_ICON, ns.ROW_ICON)
+        b.gfWidth = ns.ROW_ICON
+        b.gfTextText:Hide(); b.gfTextFill:Hide(); b.gfTextEdges.show(false)
+        b.fieldNamed = nil
+    end
+    return b
+end
+
 local function setButtons(row, list)
     for k, b in ipairs(row.buttons) do
         local spec = list[k]
         if spec then
             setButtonIcon(b, spec.icon); b.tip = spec.tip; b.action = spec.action
             ns.OrdersUI.setLabel(b, spec.tip) -- GF-002-D: the name next to the icon
+            UI.textStyle(b, UI.TEXT_ACTIONS[spec.action] == true)
             -- GF-002-H (R-16.16): 完成 glows inside the destination.
             b.glowing = spec.glow == true
             if spec.glow then b.sel:Show(); b.shine:Show() else b.sel:Hide(); b.shine:Hide() end
@@ -864,7 +900,8 @@ local function grey(row, on)
         row.name:SetTextColor(0.5, 0.5, 0.5)
         row.time:SetTextColor(0.5, 0.5, 0.5)
     else
-        row.time:SetTextColor(1, 1, 1)
+        local tc = ns.Theme.C.text
+        row.time:SetTextColor(tc[1], tc[2], tc[3])
     end
 end
 
@@ -887,13 +924,16 @@ end
 
 local function fillRow(row, data, i)
     -- GF-UI-A §1.8: one zebra for every page (Core's ns.stripe, GF-UI-B).
-    if ns.stripe then ns.stripe(row.bg, i) else row.bg:SetColorTexture(1, 1, 1, i % 2 == 0 and 0.04 or 0) end
+    -- GF-UI-G: the warm row pair of the theme (#272822 / #2E2D25).
+    ns.Theme.stripe(row.bg, i)
     local parts = { row.att, row.dest, row.name, row.time, row.roles, row.cls, row.who, row.detail }
     row.view, row.mine, row.lfg, row.worker, row.why = nil, nil, nil, nil, nil
     row.delete:Hide()
     for _, s in ipairs(row.slots) do s:Hide() end
     row.badge:Hide()
+    row.isHeader = data.header ~= nil
     if data.header then
+        row.hoverFill:Hide()
         for _, w in ipairs(parts) do w:Hide() end
         row.off:Hide()
         for _, b in ipairs(row.buttons) do b:Hide() end
@@ -902,7 +942,9 @@ local function fillRow(row, data, i)
     end
     row.head:Hide()
     for _, w in ipairs(parts) do w:Show() end
-    row.name:SetTextColor(1, 0.82, 0)
+    -- GF-UI-G: gold is for the chosen, headers and the main action; names are the main text colour.
+    local tc = ns.Theme.C.text
+    row.name:SetTextColor(tc[1], tc[2], tc[3])
     grey(row, false)
     row.detail:SetText("")
     if data.attention then setIcon(row.att, "attention") else row.att:Hide() end
@@ -1054,7 +1096,9 @@ function UI.layoutRows()
                 row:ClearAllPoints()
                 row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -(i - 1) * ROW_HEIGHT)
                 fillRow(row, data, i)
-                if data.view and UI.focusId ~= nil and data.view.id == UI.focusId then row.focusMark:Show() else row.focusMark:Hide() end
+                local focused = data.view and UI.focusId ~= nil and data.view.id == UI.focusId
+                if focused then row.focusMark:Show() else row.focusMark:Hide() end
+                row.focusEdges.show(focused)
                 row:Show()
             else row:Hide(); row.view = nil; row.mine = nil; row.lfg = nil end
         end
@@ -1564,8 +1608,237 @@ function UI.drawSlotChips(f, list, chips, add, x, y, onChip)
     end
     for i = #list + 1, #chips do chips[i]:Hide() end
     if #list < A().MAX_SLOTS then add:Show(); shown[#shown + 1] = add else add:Hide() end
+    -- GF-UI-G: the chip being edited below is the chosen one.
+    for i = 1, #list do ns.Theme.setSelected(chips[i], f.slotEditIndex == i) end
     return UI.wrapFlow(f, shown, x, y, f.width - 24, UI.CHIP_LINE, 12)
 end
+
+---------------------------------------------------------------------------
+-- GF-UI-G: the time slot editor inside the form (冒險單 and 職工單 share it).
+-- A click on a slot chip opens it under the 時段 row (one slot at a time; a
+-- second click, 完成 or another chip closes / moves it): 開始 現在 or 指定時間,
+-- 日期 (今天 / 明天 / the next days, with the real date), 開始時間 (one HH:MM
+-- list every 15 minutes; today only what is still ahead) and 預計長度 (不填 or
+-- 1-5 hours), and 移除. Everything goes into the form's draft; only the form's
+-- 開單 / 儲存 / 登記 / 更新 saves it (the slot format and upload-api v1.6 times[]
+-- are unchanged: UI.slotData). The date, the time and the chip all read the
+-- same draft slot (sl.start), so they cannot disagree.
+---------------------------------------------------------------------------
+
+UI.SLOT_EDIT_LINE = 40
+UI.SLOT_EDIT_H = 2 * UI.SLOT_EDIT_LINE + 16
+UI.SLOT_DEFAULT_MIN = 20 * 60 -- 20:00 when a slot gets its first set time on another day
+
+-- "11/26"
+local function monthDay(t)
+    local d = date("*t", t - UI.skew())
+    return d.month .. "/" .. d.day, d
+end
+-- The days a slot can start on: today (only while a quarter is still ahead),
+-- tomorrow, then each day up to Adventure.FUTURE_DAYS. value = days from today.
+function UI.slotDayOptions()
+    local out = {}
+    local todayOpen = UI.dayOffset(UI.nextQuarter()) == 0
+    for off = 0, A().FUTURE_DAYS do
+        local md, d = monthDay(UI.dayStart(off) + 43200)
+        local text = off == 0 and ("今天 " .. md) or off == 1 and ("明天 " .. md) or (md .. "（" .. UI.WEEKDAY[d.wday] .. "）")
+        out[#out + 1] = { value = off, text = text, disabled = (off == 0 and not todayOpen) or nil }
+    end
+    return out
+end
+-- Minutes after midnight (player's clock) of a server time.
+function UI.minuteOfDay(t)
+    if not t then return nil end
+    return math.floor((t - UI.dayStart(0, t)) / 60 + 0.5)
+end
+-- The start times of one day as one HH:MM list (every 15 minutes); today only
+-- from the next quarter on. keep = a minute that must be listed (an older slot
+-- at 20:10 shows as 20:10, not as nothing). value = minutes after midnight.
+function UI.slotTimeOptions(dayOff, keep)
+    local out = {}
+    local base = UI.dayStart(dayOff or 0)
+    local first = UI.nextQuarter()
+    local seen = false
+    for q = 0, 24 * 4 - 1 do
+        local m = q * 15
+        if keep and not seen and keep < m and keep % 15 ~= 0 then
+            out[#out + 1] = { value = keep, text = string.format("%02d:%02d", math.floor(keep / 60), keep % 60) }
+            seen = true
+        end
+        if base + m * 60 >= first then
+            out[#out + 1] = { value = m, text = string.format("%02d:%02d", math.floor(m / 60), m % 60) }
+            if m == keep then seen = true end
+        end
+    end
+    if keep and not seen then
+        local item = { value = keep, text = string.format("%02d:%02d", math.floor(keep / 60), keep % 60) }
+        local at = #out + 1
+        for i, it in ipairs(out) do if it.value > keep then at = i; break end end
+        table.insert(out, at, item)
+    end
+    return out
+end
+UI.SLOT_LEN_OPTIONS = { { value = 0, text = "不填" }, { value = 1, text = "1 小時" }, { value = 2, text = "2 小時" },
+    { value = 3, text = "3 小時" }, { value = 4, text = "4 小時" }, { value = 5, text = "5 小時" } }
+
+-- What the editor shows for a draft slot: { now, day, minute, len } (all from sl).
+function UI.slotFields(sl)
+    if not sl then return nil end
+    local out = { now = sl.now == true, len = sl.dur or 0 }
+    if not sl.now and sl.start then
+        out.day = UI.dayOffset(sl.start)
+        out.minute = UI.minuteOfDay(sl.start)
+    end
+    return out
+end
+
+-- Draft changes (pure on the slot; the caller redraws).
+local function setStart(sl, t)
+    local first = UI.nextQuarter()
+    if t < first then t = first end
+    sl.now, sl.start = false, t
+    local off = UI.dayOffset(t)
+    sl.dayOff = off >= 2 and off or nil
+    return sl
+end
+function UI.slotSetNow(sl, on)
+    if on then
+        if sl.start then sl.lastStart = sl.start end
+        sl.now, sl.start, sl.dayOff = true, nil, nil
+    elseif sl.now or not sl.start then
+        local back = sl.lastStart
+        sl.lastStart = nil
+        setStart(sl, (back and back >= UI.nextQuarter()) and back or UI.nextQuarter())
+    end
+    return sl
+end
+function UI.slotSetDay(sl, dayOff)
+    local m = (not sl.now and sl.start) and UI.minuteOfDay(sl.start) or UI.SLOT_DEFAULT_MIN
+    return setStart(sl, UI.dayStart(dayOff) + m * 60)
+end
+function UI.slotSetMinute(sl, m)
+    local off = (not sl.now and sl.start) and UI.dayOffset(sl.start) or 0
+    return setStart(sl, UI.dayStart(off) + m * 60)
+end
+function UI.slotSetLength(sl, h)
+    sl.dur = (h and h > 0) and h or nil
+    return sl
+end
+
+-- The editor of form f: f.slotListFn() gives the draft's slots, f.slotRedraw() redraws the form.
+function UI.slotEditor(f)
+    if f.slotEdit then return f.slotEdit end
+    local O, T = ns.OrdersUI, ns.Theme
+    local e = CreateFrame("Frame", nil, f)
+    e:SetSize(f.width - f.controlX - 24, UI.SLOT_EDIT_H)
+    e.fill = T.fill(e, T.C.rowB, "BACKGROUND")
+    e.edges = T.border(e, T.C.line, "BORDER")
+    e:Hide()
+    local function slot() local list = f.slotListFn(); return list and list[f.slotEditIndex or 0] end
+    local function changed() f.slotRedraw() end
+    local function label(text)
+        local fs = ns.freeText(e:CreateFontString(nil, "ARTWORK", T.FONT.sub))
+        fs:SetText(text)
+        return fs
+    end
+    e.modeLabel, e.dayLabel, e.timeLabel, e.lenLabel = label("開始"), label("日期"), label("時間"), label("長度")
+    e.nowButton = O.textButton(e, tex("now", 18) .. " 現在", function()
+        local sl = slot(); if sl then UI.slotSetNow(sl, true); changed() end
+    end, 96)
+    e.atButton = O.textButton(e, "指定時間", function()
+        local sl = slot(); if sl then UI.slotSetNow(sl, false); changed() end
+    end, 110)
+    e.day = ns.Widgets.dropdown(e, 150, function(off) local sl = slot(); if sl then UI.slotSetDay(sl, off); changed() end end)
+    e.day.fieldNamed = "日期"
+    e.time = ns.Widgets.dropdown(e, 104, function(m) local sl = slot(); if sl then UI.slotSetMinute(sl, m); changed() end end)
+    e.time.fieldNamed = "時間"
+    e.len = ns.Widgets.dropdown(e, 110, function(h) local sl = slot(); if sl then UI.slotSetLength(sl, h); changed() end end)
+    e.len.fieldNamed = "長度"
+    e.remove = O.textButton(e, tex("no", 18) .. " 移除", function() UI.removeEditedSlot(f) end)
+    e.done = O.textButton(e, tex("yes", 18) .. " 完成", function() UI.closeSlotEditor(f) end)
+    local L = UI.SLOT_EDIT_LINE
+    local function at(w, x, y) w:ClearAllPoints(); w:SetPoint("TOPLEFT", e, "TOPLEFT", x, y) end
+    -- Fill and place the fields from the slot (called on every form redraw).
+    function e.draw()
+        local list = f.slotListFn() or {}
+        local sl = list[f.slotEditIndex or 0]
+        if not sl then e:Hide(); return end
+        local v = UI.slotFields(sl)
+        local y1, y2 = -8, -8 - L
+        at(e.modeLabel, 12, y1 - 7); at(e.nowButton, 56, y1)
+        at(e.atButton, 56 + e.nowButton.gfWidth + 8, y1)
+        T.setSelected(e.nowButton, v.now)
+        T.setSelected(e.atButton, not v.now)
+        e.remove:ClearAllPoints(); e.remove:SetPoint("TOPRIGHT", e, "TOPRIGHT", -12 - e.done.gfWidth - 8, y1)
+        e.done:ClearAllPoints(); e.done:SetPoint("TOPRIGHT", e, "TOPRIGHT", -12, y1)
+        if #list > 1 then e.remove:Show() else e.remove:Hide() end
+        local x = 12
+        if v.now then
+            e.dayLabel:Hide(); e.day:Hide(); e.timeLabel:Hide(); e.time:Hide()
+        else
+            e.day.setItems(UI.slotDayOptions()); e.day.setValue(v.day)
+            e.time.setItems(UI.slotTimeOptions(v.day, v.minute)); e.time.setValue(v.minute)
+            at(e.dayLabel, x, y2 - 7); at(e.day, x + 44, y2); x = x + 44 + e.day.gfWidth + 16
+            at(e.timeLabel, x, y2 - 7); at(e.time, x + 44, y2); x = x + 44 + e.time.gfWidth + 16
+            e.dayLabel:Show(); e.day:Show(); e.timeLabel:Show(); e.time:Show()
+        end
+        e.len.setItems(UI.SLOT_LEN_OPTIONS); e.len.setValue(v.len)
+        at(e.lenLabel, x, y2 - 7); at(e.len, x + 44, y2)
+        e:Show()
+    end
+    f.slotEdit = e
+    return e
+end
+
+-- Open slot i's editor in form f (closing the one that was open); i = the open one closes it.
+function UI.openSlotEditor(f, i)
+    if not f then return nil end
+    local e = UI.slotEditor(f)
+    if ns.closeMenus then ns.closeMenus() end
+    f.slotEditIndex = i
+    f.slotRedraw()
+    return e
+end
+function UI.closeSlotEditor(f)
+    if not f then return end
+    if ns.closeMenus then ns.closeMenus() end
+    f.slotEditIndex = nil
+    if f.slotEdit then f.slotEdit:Hide() end
+    if f.slotRedraw then f.slotRedraw() end
+end
+function UI.toggleSlotEditor(f, i)
+    if f.slotEditIndex == i then UI.closeSlotEditor(f) else UI.openSlotEditor(f, i) end
+end
+-- ＋時段 (GF-UI-G): a new slot (as before: a day after the last), its editor open.
+function UI.addSlotInline(f)
+    local list = f.slotListFn()
+    local n = UI.addSlot(list, function() end)
+    if n then UI.openSlotEditor(f, n) end
+    return n
+end
+function UI.removeEditedSlot(f)
+    local list = f.slotListFn()
+    local i = f.slotEditIndex
+    if not (list and i and list[i]) or #list <= 1 then return false end
+    table.remove(list, i)
+    UI.closeSlotEditor(f)
+    return true
+end
+-- Lay the editor out at (x, y) of form f when a slot is open; returns the height it takes (0 when closed).
+function UI.placeSlotEditor(f, x, y)
+    local list = f.slotListFn and f.slotListFn() or {}
+    if not (f.slotEditIndex and list[f.slotEditIndex]) then
+        f.slotEditIndex = nil
+        if f.slotEdit then f.slotEdit:Hide() end
+        return 0
+    end
+    local e = UI.slotEditor(f)
+    e:ClearAllPoints()
+    e:SetPoint("TOPLEFT", f, "TOPLEFT", x, y)
+    e.draw()
+    return UI.SLOT_EDIT_H + 8
+end
+function UI.slotEditFrame(f) return f and f.slotEdit end
 
 -- A draft from my ticket's view (editing).
 function UI.draftFrom(v)
@@ -1699,10 +1972,10 @@ function UI.gridPlace(f, list, x0, y, colW)
     end
 end
 
-local function layoutTicket(f, lines)
+local function layoutTicket(f, lines, extra)
     local O = ns.OrdersUI
     local FX, X = O.FIELD_X, f.controlX
-    local y = f.rowY[2] - lines * UI.CHIP_LINE - 10
+    local y = f.rowY[2] - lines * UI.CHIP_LINE - 10 - (extra or 0) -- GF-UI-G: the open slot editor
     local rows = {}
     for i = 3, 7 do rows[i] = y; y = y - O.ROW_STEP end
     f.rowY[3], f.rowY[4], f.rowY[5], f.rowY[6], f.rowY[7] = rows[3], rows[4], rows[5], rows[6], rows[7]
@@ -1732,10 +2005,13 @@ local function drawTicket()
     elseif f.badField and f.fieldStrings then UI.markField(f, f.badField) end
     f.go:SetText(tex("yes", 20) .. (draft.editId and " 儲存" or " 開單"))
     drawDest(f)
-    -- 時段: one chip per slot (click: its picker), then ＋時段 (R-16.3).
-    local lines = UI.drawSlotChips(f, draft.slots, f.slotChips, f.addSlot, f.controlX, f.rowY[2], function(self, i) UI.pickStart(self, i) end)
+    -- 時段: one chip per slot, then ＋時段 (R-16.3). GF-UI-G: a chip opens its editor
+    -- under the chips (inside the form), not a separate picker.
+    local lines = math.max(1, UI.drawSlotChips(f, draft.slots, f.slotChips, f.addSlot, f.controlX, f.rowY[2],
+        function(self, i) UI.toggleSlotEditor(f, i) end))
     f.startButton = f.slotChips[1]
-    layoutTicket(f, math.max(1, lines))
+    local extra = UI.placeSlotEditor(f, f.controlX, f.rowY[2] - lines * UI.CHIP_LINE - 2)
+    layoutTicket(f, lines, extra)
     -- 人數: each role with its own ＋ － (dungeon), or one number (quests).
     for _, r in ipairs({ "t", "h", "d", "any" }) do
         local g = f.roleGroups[r]
@@ -1783,6 +2059,7 @@ function UI.openTicket(v, mode)
     end
     if not popup then
         local f = ns.popupWindow(UI.TICKET_NAME, 820, 470)
+        ns.Theme.formPanel(f) -- GF-UI-G: the opaque form colour
         f:SetPoint("CENTER", 0, 40)
         f:EnableMouse(true)
         ns.exclusivePopup(f)
@@ -1806,7 +2083,9 @@ function UI.openTicket(v, mode)
         -- 時段 [現在] [明天 20:00～22:00] [＋時段] (GF-002-H, R-16.1 - R-16.3)
         field(f, "時段", FX, y[2] - 8)
         f.slotChips = {}
-        f.addSlot = O.textButton(f, "＋時段", function(self) UI.addSlot(draft.slots, drawTicket, self) end)
+        f.addSlot = O.textButton(f, "＋時段", function() UI.addSlotInline(f) end)
+        f.slotListFn = function() return draft and draft.slots end -- GF-UI-G: the slot editor
+        f.slotRedraw = function() drawTicket() end
         -- 人數: 坦 1 ＋ －  補 1 ＋ －  輸出 3 ＋ － (one 人數 for quests).
         field(f, "人數", FX, y[3] - 8)
         f.roleGroups = {}
@@ -1859,6 +2138,7 @@ function UI.openTicket(v, mode)
     end
     popup.note:SetText(draft.note or "")
     popup.result:SetText("")
+    popup.slotEditIndex = nil -- GF-UI-G: a new form starts with every slot folded
     UI.markField(popup, nil)
     popup:Show()
     drawTicket()
@@ -2536,9 +2816,11 @@ function UI.drawWorker()
     place(f.altField, nil, y); UI.gridPlace(f, f.altList, X, y, UI.ROLE_COL); y = y - O.ROW_STEP
     -- GF-002-H: 時段 chips (1-5), each with its picker; the window grows with them.
     place(f.slotField, nil, y)
-    local slotLines = UI.drawSlotChips(f, wdraft.slots, f.slotChips, f.addSlot, X, y, function(self, i) UI.pickWorkerSlots(self, i) end)
+    local slotLines = math.max(1, UI.drawSlotChips(f, wdraft.slots, f.slotChips, f.addSlot, X, y,
+        function(self, i) UI.toggleSlotEditor(f, i) end)) -- GF-UI-G: the same editor as the adventure ticket
     f.slots = f.slotChips[1]
-    y = y - math.max(1, slotLines) * UI.CHIP_LINE - 10
+    local extra = UI.placeSlotEditor(f, X, y - slotLines * UI.CHIP_LINE - 2)
+    y = y - slotLines * UI.CHIP_LINE - 10 - extra
     f:SetHeight(-y + 70)
     for _, r in ipairs(A().ROLES) do
         O.setSelected(f.mainRoles[r], wdraft.main == r)
@@ -2561,6 +2843,7 @@ function UI.openWorker(mode)
     wdraft = UI.newWorkerDraft(mode)
     if not wpopup then
         local f = ns.popupWindow(UI.WORKER_NAME, 740, 420)
+        ns.Theme.formPanel(f) -- GF-UI-G: the opaque form colour
         f:SetPoint("CENTER", 0, 40)
         f:EnableMouse(true)
         ns.exclusivePopup(f)
@@ -2596,7 +2879,9 @@ function UI.openWorker(mode)
         f.roles = f.mainRoles.t
         f.slotField = field(f, "時段", FX, 0)
         f.slotChips = {}
-        f.addSlot = O.textButton(f, "＋時段", function(self) UI.addSlot(wdraft.slots, drawWorker, self) end)
+        f.addSlot = O.textButton(f, "＋時段", function() UI.addSlotInline(f) end)
+        f.slotListFn = function() return wdraft and wdraft.slots end -- GF-UI-G: the slot editor
+        f.slotRedraw = function() drawWorker() end
         f.remove = iconButton(f, ns.ICON, "no", "移除", function() A().removeWorker(); f:Hide(); UI.refresh() end, "移除")
         f.remove:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", FX, 18)
         f.save = O.textButton(f, tex("yes", 20) .. " 登記", function() UI.saveWorker() end, 120)
@@ -2604,6 +2889,7 @@ function UI.openWorker(mode)
         f:Hide()
         wpopup = f
     end
+    wpopup.slotEditIndex = nil -- GF-UI-G: a new form starts with every slot folded
     wpopup:Show()
     drawWorker()
     return wdraft

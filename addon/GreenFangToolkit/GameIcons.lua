@@ -66,9 +66,12 @@ G.ART = {
     placed = { { "Interface\\Icons\\INV_Misc_Note_02" } },
     -- GF-002-E (owner: 「有些圖示與主題不合」): each picked for its meaning;
     -- the table with the reasons is tests/addon/MANUAL.md §3z.
-    -- 職工單 = "I want to join": a raised open hand.
-    worker = { { "Interface\\Icons\\Spell_Holy_SealOfSalvation" }, { "Interface\\Icons\\INV_Scroll_05" },
-        { "Interface\\Icons\\INV_Misc_Note_01" } },
+    -- 職工單 = "I want to join". GF-UI-G: ＋職工單 and 我的職工單 share the game's
+    -- recruiting sign (the guild charter gossip mark), then a notice, then the raised hand.
+    worker = { { "Interface\\GossipFrame\\PetitionGossipIcon" }, { "Interface\\Icons\\INV_Misc_Note_06" },
+        { "Interface\\Icons\\Spell_Holy_SealOfSalvation" } },
+    -- GF-UI-G: 現在 and a set time share one small brass clock.
+    clock = { { "Interface\\Icons\\INV_Misc_PocketWatch_01" }, { "Interface\\Icons\\Spell_Nature_TimeStop" } },
     -- 冒險單 = going on an adventure: a map.
     adventure = { { "Interface\\Icons\\INV_Misc_Map_01" }, { "Interface\\Icons\\INV_Sword_04" } },
     -- 調整 (the number of people): the group finder's "need more" group.
@@ -88,7 +91,10 @@ G.ART = {
     tag_voice = { { "Interface\\Icons\\Ability_Warrior_BattleShout" }, { "Interface\\Icons\\INV_Misc_Horn_01" } },
     -- GF-002-H: 定案 = the date is sealed: a rolled scroll; 行事曆 = an agenda book.
     final = { { "Interface\\Icons\\INV_Scroll_04" }, { "Interface\\Icons\\INV_Scroll_03" }, { "Interface\\RaidFrame\\ReadyCheck-Ready" } },
-    calendar = { { "Interface\\Icons\\INV_Misc_Book_11" }, { "Interface\\Icons\\INV_Misc_Book_09" }, { "Interface\\Icons\\INV_Misc_PocketWatch_01" } },
+    -- GF-UI-G: 行事曆 is the game's calendar page (the minimap calendar button, its
+    -- first frame), never a book (冒險指南 is the book) nor people (職工名冊).
+    calendar = { { "Interface\\Calendar\\UI-Calendar-Button", box = { 0, 25, 0, 50 } }, { "Interface\\Icons\\INV_Misc_Note_04" },
+        { "Interface\\Icons\\INV_Misc_PocketWatch_02" } },
     -- 我的服務 (crafter settings): the smith's hammer.
     services = { { "Interface\\Icons\\Trade_BlackSmithing" }, { "Interface\\Icons\\INV_Hammer_20" } },
     -- ＋下單 (place an order): a letter (an order sent to a crafter).
@@ -112,7 +118,8 @@ G.ART = {
         { "Interface\\Icons\\INV_Misc_Note_01" } },
     -- 退回 = a step back (Feint), then the page-back arrow.
     back = { { "Interface\\Icons\\Ability_Rogue_Feint" }, { "Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Up" } },
-    rules = { { "Interface\\Icons\\INV_Misc_QuestionMark" } },
+    -- GF-UI-G: 規則 = a small round "i" (the game's information mark), then the question mark.
+    rules = { { "Interface\\FriendsFrame\\InformationIcon" }, { "Interface\\Icons\\INV_Misc_QuestionMark" } },
     -- 重開 (the same as the row button, AdventureUI.ICON.reopen) for the rules card.
     reopen = { { "Interface\\Buttons\\UI-RefreshButton" }, { "Interface\\Icons\\Spell_Nature_Reincarnation" } },
     arrow = { { "Interface\\ChatFrame\\ChatFrameExpandArrow" }, { "Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up" } },

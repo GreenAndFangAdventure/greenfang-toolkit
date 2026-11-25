@@ -99,9 +99,10 @@ return function(T)
         eq(b.gfHover._layer, "HIGHLIGHT", "hover drawn by the client under the mouse")
         ok(b.gfFill._color[4] < 0.1, "see-through fill")
         Th.setSelected(b, true)
-        eq(table.concat(b.gfEdges[1]._color, ",", 1, 3), "1,0.82,0", "gold line")
-        ok(b.gfFill._color[4] > 0 and b.gfFill._color[4] < 0.2, "faint gold fill, never a flat yellow block")
-        eq(b.gfFill._color[1] .. "," .. b.gfFill._color[2], "1,0.82", "gold tint")
+        -- GF-UI-G: chosen = the olive fill #3B4630 and the brass line #B49B63 (never a flat yellow block).
+        eq(table.concat(b.gfEdges[1]._color, ",", 1, 3), table.concat(Th.C.selLine, ",", 1, 3), "brass line")
+        eq(table.concat(b.gfFill._color, ",", 1, 3), table.concat(Th.C.selFill, ",", 1, 3), "olive fill")
+        ok(b.gfFill._color[1] < 0.3 and b.gfFill._color[2] < 0.3, "dark, not yellow")
         Th.setSelected(b, false)
         eq(b.gfEdges[1]._color[1], Th.C.line[1], "grey again")
         -- Pages that lock the highlight of a chosen tab get the chosen look.
