@@ -723,4 +723,50 @@ return function(T)
         eq(ns.db.supply.junk, nil, "old data gone")
         eq(ns.settings().lastModule ~= nil, true, "other settings kept")
     end))
+
+    -- GF-016 (GPT review, v2.0 §7.2 last paragraph): one character, one item,
+    -- an automatic bag candidate and a manual offer: both source details kept,
+    -- one provider, the quantity is the larger one (never the sum).
+    test("GF-016 §7.2 same character, same item: auto candidate + manual offer = one provider, both sources, max not sum", done(function()
+        local ns = login({ quests = { [339] = "active" }, items = itemsWith() })
+        ns.Supply.scanNow()
+        local t = T0() - 60
+        from(ns, PEER_B, vMsg(ns, A_B, "C1", t, cval(ns, nil, { [page(1)] = 2 })))
+        from(ns, PEER_B, vMsg(ns, A_B, "L", t, ns.SupplyListings.encode({ { id = 1, direction = "offer", category = "quest",
+            itemID = page(1), quantity = 3, createdAt = t, expiresAt = t + 86400, rev = 1, note = "" } })))
+        local function need()
+            for _, it in ipairs(ns.Supply.view("need")) do if it.itemID == page(1) then return it end end
+        end
+        local it = need()
+        ok(it, "my gap of page 1")
+        eq(#it.others, 1, "可能提供者: B once")
+        local b = it.others[1]
+        eq(b.a, A_B, "B"); eq(b.qty, 3, "the larger of 2 and 3, not 5")
+        eq(b.auto, 2, "the automatic detail kept (2)")
+        ok(b.manual and b.manual.quantity == 3, "the manual detail kept (3)")
+        eq(#b.manuals, 1, "one manual listing")
+        eq(ns.SupplyUI.sourceText(b), "自動＋手動", "both sources named")
+        -- The same in the guild view: one offer of B for page 1.
+        local g
+        for _, x in ipairs(ns.Supply.view("guild")) do if x.itemID == page(1) then g = x end end
+        eq(#g.offers, 1, "guild view: B once"); eq(g.offers[1].qty, 3, "guild view: 3")
+        -- C offers it by hand only: two providers now, B still once.
+        from(ns, PEER_C, vMsg(ns, A_C, "L", t, ns.SupplyListings.encode({ { id = 1, direction = "offer", category = "quest",
+            itemID = page(1), quantity = 1, createdAt = t, expiresAt = t + 86400, rev = 1, note = "" } })))
+        it = need()
+        eq(#it.others, 2, "B and C")
+        local byA = {}
+        for _, e in ipairs(it.others) do byA[e.a] = (byA[e.a] or 0) + 1 end
+        eq(byA[A_B], 1, "B counted once"); eq(byA[A_C], 1, "C once")
+        -- B's automatic candidate goes away (gave it away): the manual one stays alone.
+        from(ns, PEER_B, vMsg(ns, A_B, "C1", t + 30, cval(ns, nil, {})))
+        it = need()
+        for _, e in ipairs(it.others) do
+            if e.a == A_B then eq(e.auto, nil, "no automatic part"); eq(e.qty, 3, "the manual 3") end
+        end
+        -- My own side: automatic gap 1 and a manual need of 1: one gap of 1 (not 2), both sources.
+        ok(ns.SupplyListings.create(lform({ itemID = page(1), quantity = 1, category = "quest" })), "manual need")
+        it = need()
+        eq(it.qty, 1, "one gap"); ok(it.mine.auto and it.mine.manual, "both sources on mine")
+    end))
 end

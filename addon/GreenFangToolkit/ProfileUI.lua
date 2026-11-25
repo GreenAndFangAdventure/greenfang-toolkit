@@ -35,11 +35,29 @@ local function roleButton(parent, r, onClick)
     local b = O.iconButton(parent, ProfileUI.ROLE_ICON, "unknown", P().ROLE_NAME[r], onClick, P().ROLE_NAME[r])
     ns.GameIcons.set(b.tex, ProfileUI.GAME[r])
     b.role = r
+    -- GF-016: the role's name, and 「此職業通常不擔任」 when the class does not usually take it.
+    b:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine(P().ROLE_NAME[self.role])
+        if self.gfSuggested == false then GameTooltip:AddLine(ProfileUI.notSuggestedText(), 1, 0.5, 0.25) end
+        GameTooltip:Show()
+    end)
     return b
 end
 
--- On / off look; a role the class cannot take is disabled and never lights.
-local function drawRole(b, on, enabled)
+-- The game's own words when the client has them (CLASS_ROLE_NOT_RECOMMENDED), else ours.
+function ProfileUI.notSuggestedText()
+    local g = rawget(_G, "CLASS_ROLE_NOT_RECOMMENDED")
+    if type(g) == "string" and g ~= "" then return g end
+    return P().NOT_SUGGESTED_TIP
+end
+
+-- A role the class does not usually take: the icon dimmer, still a switch (GF-016).
+ProfileUI.NOT_SUGGESTED_ALPHA = 0.45
+
+-- On / off look. enabled = false only before the character is known.
+-- suggested = false: dimmer icon and name, the tooltip says so; it may still be chosen.
+local function drawRole(b, on, enabled, suggested)
     ns.OrdersUI.setSelected(b, on)
     if enabled then
         if b.Enable then b:Enable() end
@@ -49,6 +67,11 @@ local function drawRole(b, on, enabled)
         if b.tex.SetDesaturated then b.tex:SetDesaturated(true) end
         b.sel:Hide(); b.shine:Hide()
         if b.label then b.label:SetTextColor(0.5, 0.5, 0.5) end
+    end
+    b.gfSuggested = suggested ~= false
+    if not b.gfSuggested and not on then
+        b.tex:SetAlpha(ProfileUI.NOT_SUGGESTED_ALPHA)
+        if b.label then b.label:SetAlpha(0.7) end
     end
     b.gfEnabled = enabled
 end
@@ -87,14 +110,26 @@ local function bizRow(p, i)
     row.title = text(120, 240)
     row.state = text(366, 100, ns.LABEL_FONT, "RIGHT")
     if row.SetHighlightTexture then row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD") end
-    row:SetScript("OnClick", function(self) if self.item then P().openBusiness(self.item) end end)
-    row:SetScript("OnEnter", function(self)
+    -- GF-016: a click opens the record itself; when its page no longer lists
+    -- it, the personnel file stays and the tooltip says so.
+    local function tip(self)
         if not self.item then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:AddLine(self.item.title)
         GameTooltip:AddLine(ProfileUI.KIND[self.item.kind].name .. "｜" .. self.item.role .. "｜" .. self.item.stateName, 0.85, 0.85, 0.85)
+        if self.missing == self.item.id then
+            GameTooltip:AddLine(P().MISSING_TIP, 1, 0.82, 0)
+            GameTooltip:AddLine(P().MISSING_DETAIL, 0.85, 0.85, 0.85)
+        end
         GameTooltip:Show()
+    end
+    row:SetScript("OnClick", function(self)
+        if not self.item then return end
+        local opened, why = P().openBusiness(self.item)
+        self.missing = (not opened and why == "missing") and self.item.id or nil
+        if self.missing then tip(self) end
     end)
+    row:SetScript("OnEnter", tip)
     row:SetScript("OnLeave", function() GameTooltip:Hide() end)
     return row
 end
@@ -145,13 +180,14 @@ function ProfileUI.refresh()
     if not panel then return end
     local Pr = P()
     local own = Pr.own()
-    local class = str(ns.Sync.player().classToken)
+    local class = Pr.ownClass()
     for _, r in ipairs(Pr.ROLES) do
-        local allowed = Pr.allowed(class, r) and own ~= nil
-        drawRole(controls.main[r], own ~= nil and own.main == r, allowed)
+        local enabled = own ~= nil
+        local suggested = Pr.suggested(class, r, true)
+        drawRole(controls.main[r], own ~= nil and own.main == r, enabled, suggested)
         -- The main role is always in 可支援: shown on, not a switch.
         local isMain = own ~= nil and own.main == r
-        drawRole(controls.can[r], own ~= nil and (own.can[r] == true or isMain), allowed and not isMain)
+        drawRole(controls.can[r], own ~= nil and (own.can[r] == true or isMain), enabled and not isMain, suggested)
         if isMain then ns.OrdersUI.setSelected(controls.can[r], true) end
     end
     if own and own.main == nil then controls.unset:Disable() else controls.unset:Enable() end

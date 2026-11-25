@@ -433,4 +433,105 @@ return function(T)
         ok(d:read("*a"):find("ns.Events.diagText", 1, true), "the diagnostics section"); d:close()
         ok(E.diagText():find("尚未接 GF Sync", 1, true), "says it is not uploaded")
     end)
+
+    ---------------------------------------------------------------------------
+    -- GF-016 (GPT review): personal 成行 needs my own evidence; the group's
+    -- 60% signal alone is unknown (not counted), for members and for the leader.
+    ---------------------------------------------------------------------------
+
+    test("GF-016 §9.1 member: the ticket is done by another member's detection (60%); without my own proof I am unknown", function()
+        local ns = login()
+        local Adv, E = ns.Adventure, ns.Events
+        local t = ns.Share.serverNow()
+        ticket(ns, B, "g1", t, { rt = 0, rh = 1, rd = 2 })
+        ok(Adv.worker("g1", "apply"), "I apply")
+        offer(ns, C, "A", { { id = "g1", ac = "ap", at = t + 1, ap = t + 1, ak = "ap", ro = "d", rb = "" } }, t + 1)
+        one(ns, "g1", "participant_admitted")
+        local v = Adv.get("g1")
+        ok(v.final and v.slot, "one slot: finalized")
+        -- C saw it done inside the window (with enough people): the ticket is 成行 (auto).
+        offer(ns, C, "A", { { id = "g1", ac = "ap", at = t + 1, ap = t + 1, ak = "ap", ro = "d", rb = "", dt = t + 10 * MIN } }, t + 2)
+        v = Adv.get("g1")
+        eq(v.state, "done", "成行 for the ticket"); eq(v.auto, true, "from the group's detection")
+        Adv.maintain()
+        eq(#events(ns, "g1", "participant_done"), 0, "no own proof: no 成行 for me (unknown)")
+        eq(E.queueStats().noEvidence, 1, "counted once as 無證據")
+        eq(E.summary().participations, 0, "nothing counted")
+        -- My own detection later: counted (once).
+        setMine(ns, "g1", { dt = t + 12 * MIN })
+        Adv.maintain()
+        eq(one(ns, "g1", "participant_done").evidence, "self_detected", "my own detection counts")
+        eq(E.summary().participations, 1, "one")
+    end)
+
+    test("GF-016 §9.1 leader: a member's auto 成行 while I was away is not my 成行; my own detection or party is", function()
+        local ns = login()
+        local Adv, E = ns.Adventure, ns.Events
+        local t = ns.Share.serverNow()
+        local id = Adv.open({ dungeon = "smg", roles = { t = 1, h = 0, d = 1 }, leaderRole = "d" })
+        apply(ns, B, id, t + 1, "t")
+        Adv.maintain()
+        local v = Adv.get(id)
+        ok(v.final and v.slot, "finalized")
+        -- B detects it done in the window; I (the leader) saw nothing myself.
+        offer(ns, B, "A", { { id = id, ac = "ap", at = t + 1, ap = t + 1, ak = "ap", ro = "t", rb = "", dt = t + 5 * MIN } }, t + 2)
+        eq(Adv.get(id).state, "done", "成行 (auto)")
+        Adv.maintain() -- copies the 成行 into my part (R-16.24)
+        eq(one(ns, id, "adventure_done").evidence, "auto", "the ticket's 成行 is recorded")
+        eq(#events(ns, id, "participant_done"), 0, "but not my own 成行: no proof of mine")
+        eq(E.summary().leader.done, 1, "開單成行 1 (a fact of the ticket)"); eq(E.summary().participations, 0, "my participations 0")
+        -- With my party seen together after 定案 (fp on my ticket): counted.
+        local list = Adv.listOf(A, "T")
+        for _, e in ipairs(list) do if e.id == id then e.fp = (v.finalAt or t) + 60 end end
+        Adv.ledger:put("T", Adv.encodeList(list)); Adv.refresh()
+        Adv.maintain()
+        eq(one(ns, id, "participant_done").evidence, "self_party", "my party evidence")
+        -- My own detection (Adventure.leader "auto"): self_detected at once.
+        local id2 = Adv.open({ dungeon = "sfk", roles = { t = 1, h = 0, d = 1 }, leaderRole = "d" })
+        apply(ns, C, id2, t + 3, "t")
+        Adv.maintain()
+        ok(Adv.leader(id2, "auto"), "I saw it done here")
+        eq(one(ns, id2, "participant_done").evidence, "self_detected", "seen by me")
+        -- 完成 pressed by me is my own act: leader_done (unchanged).
+        local id3 = Adv.open({ dungeon = "dm", roles = { t = 1, h = 0, d = 1 }, leaderRole = "d" })
+        apply(ns, D, id3, t + 4, "t")
+        Adv.maintain()
+        ok(Adv.leader(id3, "done"), "完成")
+        eq(one(ns, id3, "participant_done").evidence, "leader_done", "my 完成")
+    end)
+
+    test("GF-016 §9.1 a 0.16.0 leader 成行 taken from the group's signal is revoked with a new revision", function()
+        local ns = login()
+        local Adv, E = ns.Adventure, ns.Events
+        local t = ns.Share.serverNow()
+        local id = Adv.open({ dungeon = "smg", roles = { t = 1, h = 0, d = 1 }, leaderRole = "d" })
+        apply(ns, B, id, t + 1, "t")
+        Adv.maintain()
+        -- What 0.16.0 wrote: my participant_done with evidence "auto".
+        local k = id .. "|participant_done|" .. A
+        local ev = E.ensure(k, { adventureID = id, eventType = "participant_done", participationPath = "leader",
+            role = "d", evidence = "auto", activityType = "dungeon", destinationID = "smg" }, t)
+        eq(ev.revision, 1, "old record")
+        offer(ns, B, "A", { { id = id, ac = "ap", at = t + 1, ap = t + 1, ak = "ap", ro = "t", rb = "", dt = t + 5 * MIN } }, t + 2)
+        Adv.maintain()
+        eq(ev.status, "revoked", "revoked"); eq(ev.revokedReason, "no_self_evidence", "why"); eq(ev.revision, 2, "a new revision")
+        eq(E.summary().participations, 0, "not counted")
+    end)
+
+    test("GF-016 §9.1 共同冒險: activity, destination and this time's role on every event, also the match", function()
+        local ns = login()
+        local Adv = ns.Adventure
+        local t = ns.Share.serverNow()
+        ok(Adv.setWorker({ dungeons = { "smg" }, main = "h" }), "my worker ticket")
+        ticket(ns, B, "g4", t, { dc = Adv.encodeDecisions({ { a = A, k = "i", t = t + 1 } }) })
+        Adv.maintain()
+        local m = one(ns, "g4", "worker_order_matched")
+        eq(m.role, "h", "the match carries the role my worker ticket offers")
+        eq(m.activityType, "dungeon", "activity"); eq(m.destinationID, "smg", "destination")
+        wow.state.now = wow.state.now + MIN
+        ok(Adv.worker("g4", "accept"), "I accept")
+        local adm = one(ns, "g4", "participant_admitted")
+        ok(adm.role ~= nil, "admitted with a role")
+        for _, f in ipairs(ns.Events.FIELDS) do ok(f ~= "companions" and f ~= "memberGUIDs", "no co-member GUIDs in the export: " .. f) end
+    end)
 end
