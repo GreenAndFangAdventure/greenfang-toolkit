@@ -4664,6 +4664,9 @@ assert(loadfile(ROOT .. "/tests/addon/supply_tests.lua"))()({ test = test, eq = 
 -- GF-010: role positioning and the personnel file (tests/addon/profile_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/profile_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-012: 公會黑庫 phase 1, guild master, custodian list, scope (tests/addon/bank_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/bank_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------
 

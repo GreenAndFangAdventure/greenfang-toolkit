@@ -161,6 +161,8 @@ local SECTIONS = {
     { title = "背景事件紀錄（本機）", text = function() return ns.Events and ns.Events.diagText() or "" end },
     -- GF-009: 綠皮調貨所 (automatic collection and manual listings).
     { title = "物資供需（GF-009）", text = function() return ns.Supply and ns.Supply.diagText() or "" end },
+    -- GF-012: 公會黑庫 phase 1 (who is guild master, the custodian list; no stock yet).
+    { title = "公會黑庫（GF-012）", text = function() return ns.Bank and ns.Bank.diagText() or "" end },
 }
 
 -- GF-UI-B (GF-UI-A §2.11): 16 px text (18 px state line, gold section
