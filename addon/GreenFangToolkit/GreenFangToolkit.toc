@@ -40,4 +40,5 @@ Widgets.lua
 AdventureUI.lua
 SleepingBagData.lua
 SleepingBag.lua
+Probe.lua
 Init.lua

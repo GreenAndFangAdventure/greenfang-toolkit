@@ -107,6 +107,7 @@ local function handleSlash(msg)
         local id, copper = rest:match("^fake%s+(%d+)%s+(%d+)")
         Prices.fake(id, copper)
         ns.Diag.open()
+    elseif cmd == "probe" and ns.Probe then ns.Probe.command(rest) -- GF-PROBE
     elseif ns.Framework.get(cmd) then
         ns.Framework.open(cmd)
     else

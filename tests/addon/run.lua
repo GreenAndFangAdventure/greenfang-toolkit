@@ -4652,6 +4652,9 @@ assert(loadfile(ROOT .. "/tests/addon/theme_tests.lua"))()({ test = test, eq = e
 -- GF-UI-E: six entries, sub-tabs, 事務設定, item row and states (tests/addon/uie_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/uie_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-PROBE: /gftk probe (tests/addon/probe_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/probe_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------
 
