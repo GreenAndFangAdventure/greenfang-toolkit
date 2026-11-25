@@ -187,7 +187,7 @@ return function(T)
         eq(UI.header.cells[2].gfAlign, "RIGHT", "數量 header right-aligned")
         local r = UI.rows and UI.rows() or nil
         UI.setTab("offer"); eq(heads(), "物品,數量,需要,時效", "我可能有多的")
-        UI.setTab("guild"); eq(heads(), "物品,徵求／供應,在線,時效", "公會供需")
+        UI.setTab("guild"); eq(heads(), "物品,徵求／供應,在線,時效", "調貨看板")
         UI.setTab("mine"); eq(heads(), "物品,數量,狀態,時效", "我的刊登")
         UI.setTab("need")
         local texts = pageTexts(supplyPage(ns))

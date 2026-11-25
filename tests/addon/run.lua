@@ -4673,6 +4673,9 @@ assert(loadfile(ROOT .. "/tests/addon/notify_tests.lua"))()({ test = test, eq = 
 -- GF-012: 公會黑庫 phase 1, guild master, custodian list, scope (tests/addon/bank_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/bank_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-UI-H: 調貨所 item finder, untradeable items, 刪除, top rows, coin icons (tests/addon/supply_h_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/supply_h_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------
 
