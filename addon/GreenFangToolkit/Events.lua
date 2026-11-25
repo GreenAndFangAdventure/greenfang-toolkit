@@ -62,7 +62,8 @@ local function now() return S().serverNow() end
 ---------------------------------------------------------------------------
 -- Storage: GreenFangToolkitDB.events = { schemaVersion, chars = { [author] = state } }
 -- state = { events = { [eventID] = ev }, n, queue = { [eventID] = { rev, at, sent, tries } },
---           workerOrder = { id, at }, skipped = { [adventureID] = at }, stats = { overflow, noEvidence } }
+--           workerOrder = { id, at }, skipped = { [adventureID] = at }, stats = { overflow, noEvidence },
+--           selfDone = { [adventureID] = at } (GF-016: the leader saw the auto 成行 here) }
 -- Created only when the first event is written (no empty tables in the save file).
 ---------------------------------------------------------------------------
 
@@ -92,7 +93,7 @@ function Events.state(create, a)
         s = {}
         r.chars[a] = s
     end
-    for _, k in ipairs({ "events", "queue", "skipped", "stats" }) do if type(s[k]) ~= "table" then s[k] = {} end end
+    for _, k in ipairs({ "events", "queue", "skipped", "stats", "selfDone" }) do if type(s[k]) ~= "table" then s[k] = {} end end
     s.stats.overflow = s.stats.overflow or 0
     s.stats.noEvidence = s.stats.noEvidence or 0
     if type(s.n) ~= "number" then
@@ -250,14 +251,75 @@ end
 -- (dt), or I saw enough accepted people with me in the party once it was
 -- finalized (fp). Triggers from before a step back do not count. Nothing else
 -- (a full roster, the leader's 完成, 60% of the group) proves that I was there.
+-- When the ticket was finalized. GF-016: a closed one-slot ticket keeps its
+-- slot (fx) but the view no longer gives finalAt; the first admission is the
+-- same moment (Adventure.view: "finalized by its first member").
+function Events.finalAt(v)
+    if v.finalAt then return v.finalAt end
+    if not v.final then return nil end
+    local first
+    for _, m in ipairs(v.members or {}) do if m.at and (not first or m.at < first) then first = m.at end end
+    return first
+end
+
 function Events.memberEvidence(v, e)
     if not e then return nil end
     if e.dt and e.dt > (v.doneBack or 0) and v.slot then
         local from, to = A().autoWindow(v.slot)
         if e.dt >= from and e.dt <= to then return "self_detected" end
     end
-    if e.fp and v.finalAt and e.fp >= v.finalAt and e.fp > (v.formedBack or 0) then return "self_party" end
+    local fin = Events.finalAt(v)
+    if e.fp and fin and e.fp >= fin and e.fp > (v.formedBack or 0) then return "self_party" end
     return nil
+end
+
+-- GF-016: the leader's own proof. 完成 pressed by the leader is the leader's
+-- own act (leader_done). An automatic 成行 (v.auto) may come from a member's
+-- detection with 60% of the group while the leader was away (Adventure.
+-- maintain copies it into the leader's part): that alone is not the leader's
+-- evidence. It counts only when this computer saw it (markSelfDone, written
+-- by Adventure.leader "auto") or the leader saw the party together after 定案
+-- (fp on the leader's ticket). Otherwise nil = unknown, not counted.
+Events.MAX_SELF_DONE = 50
+function Events.markSelfDone(id, t)
+    local s = Events.state(true)
+    if not (s and id) then return end
+    t = t or now()
+    s.selfDone[id] = t
+    local list = {}
+    for k, at in pairs(s.selfDone) do list[#list + 1] = { id = k, at = at } end
+    if #list > Events.MAX_SELF_DONE then
+        table.sort(list, function(x, y) return x.at < y.at end)
+        for i = 1, #list - Events.MAX_SELF_DONE do s.selfDone[list[i].id] = nil end
+    end
+end
+
+function Events.leaderEvidence(v)
+    if v.state ~= "done" then return nil end
+    if not v.auto then return "leader_done" end
+    local s = Events.state(false)
+    local at = s and s.selfDone and s.selfDone[v.id]
+    if at and at > (v.doneBack or 0) then return "self_detected" end
+    local my = Events.me()
+    local fin = Events.finalAt(v)
+    for _, e in ipairs(my and A().listOf(my, "T") or {}) do
+        if e.id == v.id and e.fp and fin and e.fp >= fin and e.fp > (v.formedBack or 0) then return "self_party" end
+    end
+    return nil
+end
+
+-- Unknown is not counted (spec §9.1); counted once per ticket for the diagnostics.
+local function noEvidence(id, t)
+    local st = Events.state(true)
+    if not st or st.skipped[id] then return end
+    st.stats.noEvidence = st.stats.noEvidence + 1
+    st.skipped[id] = t
+    local list = {}
+    for k, at in pairs(st.skipped) do list[#list + 1] = { id = k, at = at } end
+    if #list > Events.MAX_SKIPPED then
+        table.sort(list, function(x, y) return x.at < y.at end)
+        for i = 1, #list - Events.MAX_SKIPPED do st.skipped[list[i].id] = nil end
+    end
 end
 
 local function key(...) return table.concat({ ... }, "|") end
@@ -295,11 +357,22 @@ function Events.observe(v, t)
             Events.revoke(key(v.id, "adventure_formed"), "back", t)
         end
         if v.state == "done" then
+            -- The ticket's 成行 (a fact of the ticket I lead) ...
             local ev = v.auto and "auto" or "leader_done"
             Events.ensure(key(v.id, "adventure_done"), with({ eventType = "adventure_done",
                 participationPath = "leader", role = role, observedAt = v.closedAt or t, evidence = ev }), t)
-            Events.ensure(key(v.id, "participant_done", my), with({ eventType = "participant_done",
-                participationPath = "leader", role = role, observedAt = v.closedAt or t, evidence = ev }), t)
+            -- ... and mine only with my own evidence (GF-016); unknown is not 成行.
+            local pk = key(v.id, "participant_done", my)
+            local pe = Events.leaderEvidence(v)
+            if pe then
+                Events.ensure(pk, with({ eventType = "participant_done",
+                    participationPath = "leader", role = role, observedAt = v.closedAt or t, evidence = pe }), t)
+            else
+                local cur = Events.get(pk)
+                -- 0.16.0 recorded it from the group's signal: a versioned revocation, not a silent delete.
+                if cur and cur.status == "active" then Events.revoke(pk, "no_self_evidence", t) end
+                noEvidence(v.id, t)
+            end
         else
             Events.revoke(key(v.id, "adventure_done"), "back", t)
             Events.revoke(key(v.id, "participant_done", my), "back", t)
@@ -324,9 +397,15 @@ function Events.observe(v, t)
     local s = Events.state(false)
     local order = s and s.workerOrder
     if order and order.id and (invited or path == "worker_match") then
+        -- GF-016 (共同冒險 當次職責): the role I take on it, else the role my worker ticket offered.
+        local wr = (member and member.role) or (e and e.ro)
+        if not wr then
+            local c = Events.get(key(order.id, "worker_order_created"))
+            wr = c and c.role or nil
+        end
         Events.ensure(key(order.id, v.id, "worker_order_matched"), with({ eventType = "worker_order_matched",
-            workerOrderID = order.id, participationPath = "worker_match", observedAt = (invited and invited.at) or (e and e.ap) or t,
-            evidence = "invited" }), t)
+            workerOrderID = order.id, participationPath = "worker_match", role = wr,
+            observedAt = (invited and invited.at) or (e and e.ap) or t, evidence = "invited" }), t)
     end
     if member then
         local role = member.role or (e and e.ro)
@@ -345,18 +424,7 @@ function Events.observe(v, t)
             if adm and adm.workerOrderID then f.workerOrderID = adm.workerOrderID end
             Events.ensure(doneKey, f, t)
         elseif not Events.get(doneKey) then
-            -- Unknown is not counted (spec §9.1); counted once per ticket for the diagnostics.
-            local st = Events.state(true)
-            if st and not st.skipped[v.id] then
-                st.stats.noEvidence = st.stats.noEvidence + 1
-                st.skipped[v.id] = t
-                local list = {}
-                for id, at in pairs(st.skipped) do list[#list + 1] = { id = id, at = at } end
-                if #list > Events.MAX_SKIPPED then
-                    table.sort(list, function(x, y) return x.at < y.at end)
-                    for i = 1, #list - Events.MAX_SKIPPED do st.skipped[list[i].id] = nil end
-                end
-            end
+            noEvidence(v.id, t)
         end
     elseif v.state ~= "done" then
         Events.revoke(doneKey, "back", t)

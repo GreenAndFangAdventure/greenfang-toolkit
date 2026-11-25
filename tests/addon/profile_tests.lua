@@ -96,27 +96,61 @@ return function(T)
         eq(ns2.Profile.roles(SELF_GUID).main, "d", "kept after login")
     end)
 
-    test("GF-010 class table: a mage cannot tank or heal; the page greys those and they never light", function()
+    -- GF-016: no verified Forever table, so the class list only suggests (never blocks).
+    test("GF-010 class table: a mage tanking is only a hint (dimmer, tooltip); it can still be chosen", function()
         local ns = login({ player = player({ class = "法師", classToken = "MAGE" }) })
         local P = ns.Profile
-        eq(P.allowed("MAGE", "t"), false, "mage tank"); eq(P.allowed("MAGE", "d"), true, "mage dps")
-        eq(P.allowed("PALADIN", "t"), true, "paladin tank"); eq(P.allowed("NEWCLASS", "h"), true, "unknown class: not blocked")
+        eq(P.allowed("MAGE", "t"), true, "mage tank not blocked"); eq(P.allowed("MAGE", "x"), false, "not a role")
+        eq(P.suggested("MAGE", "t"), false, "mage tank not suggested"); eq(P.suggested("MAGE", "d"), true, "mage dps")
+        eq(P.suggested("PALADIN", "t"), true, "paladin tank"); eq(P.suggested("NEWCLASS", "h"), true, "unknown class: nothing against")
         for token, row in pairs(P.CLASS_ROLES) do eq(row.verified, false, token .. " marked unverified") end
         ok(P.CLASS_ROLES_SOURCE:find("未經", 1, true), "source names it unverified")
-        local okSet, why = P.setMain("t")
-        eq(okSet, false, "refused"); eq(why, "class", "reason")
-        eq(select(2, P.setCan("h", true)), "class", "可支援 refused too")
+        ok(P.CLASS_ROLES_SOURCE:find("不擋", 1, true), "source says it does not block")
         ns.Framework.open("character")
         local c = ns.ProfileUI.controls
-        eq(c.main.t.gfEnabled, false, "坦克 disabled"); eq(c.main.d.gfEnabled, true, "輸出 enabled")
-        ok(not c.main.t.sel:IsShown(), "a disabled role does not light")
+        eq(c.main.t.gfEnabled, true, "坦克 can be pressed"); eq(c.main.t.gfSuggested, false, "坦克 not suggested")
+        eq(c.main.t.tex._alpha, ns.ProfileUI.NOT_SUGGESTED_ALPHA, "坦克 icon dimmer")
+        eq(c.main.d.gfSuggested, true, "輸出 suggested"); eq(c.main.d.tex._alpha, 1, "輸出 full")
+        c.main.t:GetScript("OnEnter")(c.main.t)
+        local lines = {}
+        for _, l in ipairs(GameTooltip._lines) do lines[#lines + 1] = type(l) == "table" and l.text or l end
+        ok(table.concat(lines, "|"):find("此職業通常不擔任", 1, true), "tooltip: 此職業通常不擔任")
+        c.main.d:GetScript("OnEnter")(c.main.d)
+        lines = {}
+        for _, l in ipairs(GameTooltip._lines) do lines[#lines + 1] = type(l) == "table" and l.text or l end
+        ok(not table.concat(lines, "|"):find("此職業通常不擔任", 1, true), "no hint on 輸出")
         wow.click(c.main.t)
-        eq(P.roles(SELF_GUID).main, nil, "clicking a disabled role does nothing")
+        eq(P.roles(SELF_GUID).main, "t", "a mage may still choose 坦克")
+        ok(c.main.t.sel:IsShown(), "chosen lights")
+        eq(c.main.t.tex._alpha, 1, "chosen: full brightness")
+        ok(P.setCan("h", true), "可支援 治療 too")
+        ok(P.ownValue():find("^t%.th"), "both are shared (nothing filtered out)")
         wow.click(c.main.d)
         eq(P.roles(SELF_GUID).main, "d", "輸出 chosen")
-        ok(c.main.d.sel:IsShown(), "chosen lights")
         ok(c.can.d.selected, "可支援 shows the main role on")
         eq(c.can.d.gfEnabled, false, "and it is not a switch")
+    end)
+
+    test("GF-016 class hint: the game's own UnitGetAvailableRoles wins for this character; errors fall back to the table", function()
+        local ns = login({ player = player({ class = "法師", classToken = "MAGE" }) })
+        local P = ns.Profile
+        UnitGetAvailableRoles = function(unit) return unit == "player", false, true end
+        local okRun, err = pcall(function()
+            eq(P.suggested("MAGE", "t", true), true, "the game says tank is fine for me")
+            eq(P.suggested("MAGE", "h", true), false, "the game says heal is not")
+            eq(P.suggested("MAGE", "t"), false, "another mage: the table")
+            CLASS_ROLE_NOT_RECOMMENDED = "職業不建議"
+            eq(ns.ProfileUI.notSuggestedText(), "職業不建議", "the game's own words when it has them")
+            CLASS_ROLE_NOT_RECOMMENDED = nil
+            eq(ns.ProfileUI.notSuggestedText(), "此職業通常不擔任", "ours otherwise")
+            UnitGetAvailableRoles = function() error("boom") end
+            eq(P.gameSuggestion(), nil, "an error: no game answer")
+            eq(P.suggested("MAGE", "t", true), false, "falls back to the table")
+            UnitGetAvailableRoles = function() return nil end
+            eq(P.gameSuggestion(), nil, "nothing: no game answer")
+        end)
+        UnitGetAvailableRoles, CLASS_ROLE_NOT_RECOMMENDED = nil, nil
+        if not okRun then error(err, 0) end
     end)
 
     test("GF-010 sharing: nothing until set; then one L record goes out after the change delay", function()
@@ -375,5 +409,109 @@ return function(T)
         eq(small(ns.Framework.panel("roster")), "", "roster with the census")
         ns.ProfileUI.openCard(ns.Roster.current().members[2])
         eq(small(ns.ProfileUI.card), "", "card")
+    end)
+
+    ---------------------------------------------------------------------------
+    -- GF-016 (GPT review): 我的業務 opens the record itself, by its ID.
+    ---------------------------------------------------------------------------
+
+    local function tipText()
+        local out = {}
+        for _, l in ipairs(GameTooltip._lines) do out[#out + 1] = type(l) == "table" and l.text or l end
+        return table.concat(out, "|")
+    end
+    local function litRows(rows)
+        local out = {}
+        for _, r in ipairs(rows) do if r:IsShown() and r.focusMark:IsShown() then out[#out + 1] = r end end
+        return out
+    end
+
+    test("GF-016 我的業務 → an order: the orders page scrolls to that order and lights it (by ID)", function()
+        local ns = login()
+        local ids = {}
+        for i = 1, 14 do
+            local id = ns.Orders.place({ recipe = 2660, item = 2862, skill = 164, qty = i })
+            ok(id, "order " .. i)
+            ids[#ids + 1] = id
+            wow.advance(1)
+        end
+        local target = ids[1] -- the oldest: last on the page
+        ns.Framework.open("character")
+        local item
+        for _, it in ipairs(ns.Profile.myBusiness()) do if it.id == target then item = it end end
+        ok(item, "listed in 我的業務")
+        local opened = ns.Profile.openBusiness(item)
+        eq(opened, true, "opened")
+        eq(ns.Framework.current(), "orders", "the orders page")
+        eq(ns.OrdersUI.focusId, target, "focused by its ID")
+        local lit = litRows(ns.OrdersUI.rowFrames())
+        eq(#lit, 1, "one row lit"); eq(lit[1].view.id, target, "that order")
+        ok(ns.OrdersUI.scrollFrame():GetVerticalScroll() > 0, "scrolled down to it")
+        -- Opening the page again from the menu: nothing stays lit.
+        ns.Framework.open("character"); ns.Framework.open("orders")
+        eq(ns.OrdersUI.focusId, nil, "a plain open lights nothing")
+        eq(#litRows(ns.OrdersUI.rowFrames()), 0, "no row lit")
+    end)
+
+    test("GF-016 我的業務 → an ended adventure: 已結束 is chosen, a hiding 區域 filter is lifted, the ticket is lit", function()
+        local ns = login()
+        local Adv, AUI = ns.Adventure, ns.AdventureUI
+        local live = Adv.open({ dungeon = "sfk", leaderRole = "d" })
+        local gone = Adv.open({ dungeon = "smg", leaderRole = "d" })
+        ok(live and gone, "two tickets")
+        ok(Adv.leader(gone, "cancel", "manual"), "one cancelled")
+        Adv.refresh()
+        ns.Framework.open("adventure")
+        AUI.setTab("active")
+        AUI.zoneFilter = { ["影牙城堡"] = true } -- a zone the ended ticket is not in
+        AUI.zoneButton.selected = AUI.zoneFilter
+        AUI.refresh()
+        ns.Framework.open("character")
+        local item
+        for _, it in ipairs(ns.Profile.myBusiness()) do if it.id == gone then item = it end end
+        ok(item and item.closed, "the cancelled ticket in 我的業務")
+        local row
+        ns.Character.refresh()
+        for _, r in ipairs(ns.ProfileUI.controls.rows) do if r.item and r.item.id == gone then row = r end end
+        ok(row, "its row")
+        wow.click(row)
+        eq(ns.Framework.current(), "adventure", "the adventure page")
+        eq(AUI.tab, "ended", "已結束")
+        eq(AUI.zoneFilter, nil, "the filter that hid it is lifted")
+        eq(AUI.focusId, gone, "focused by its ID")
+        local lit = litRows(AUI.rowFrames())
+        eq(#lit, 1, "one row lit"); eq(lit[1].view.id, gone, "that ticket")
+        -- The open one: 進行中.
+        ns.Framework.open("character")
+        ok(ns.Profile.openBusiness({ kind = "adventure", id = live }), "the open one")
+        eq(AUI.tab, "active", "進行中")
+        eq(litRows(AUI.rowFrames())[1].view.id, live, "lit")
+    end)
+
+    test("GF-016 我的業務 → a record the page no longer lists: the personnel file stays, the tooltip says why, no error", function()
+        local ns = login()
+        local Adv = ns.Adventure
+        local id = Adv.open({ dungeon = "smg", leaderRole = "d" })
+        ok(Adv.leader(id, "cancel", "manual"), "cancelled")
+        Adv.local_().deleted[id] = true -- cleared from the page here (Adventure keeps the record)
+        Adv.refresh()
+        ns.Framework.open("character")
+        ns.Character.refresh()
+        local row
+        for _, r in ipairs(ns.ProfileUI.controls.rows) do if r.item and r.item.id == id then row = r end end
+        ok(row, "still in 我的業務")
+        wow.click(row)
+        eq(ns.Framework.current(), "character", "stays on the personnel file")
+        ok(tipText():find(ns.Profile.MISSING_TIP, 1, true), "tooltip: " .. ns.Profile.MISSING_TIP)
+        ok(tipText():find(ns.Profile.MISSING_DETAIL, 1, true), "and why")
+        row:GetScript("OnEnter")(row)
+        ok(tipText():find(ns.Profile.MISSING_TIP, 1, true), "hovering again still says so")
+        -- Unknown IDs and kinds: false, nothing breaks.
+        local okA, whyA = ns.Profile.openBusiness({ kind = "order", id = "nope" })
+        eq(okA, false, "unknown order"); eq(whyA, "missing", "missing")
+        eq(select(1, ns.OrdersUI.focus(nil)), false, "nil id")
+        eq(select(1, ns.AdventureUI.focus("nope")), false, "unknown ticket")
+        eq(select(2, ns.Profile.openBusiness({ kind = "bank", id = 1 })), "page", "unknown kind")
+        eq(ns.Framework.current(), "character", "still here")
     end)
 end

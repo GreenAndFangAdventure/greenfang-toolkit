@@ -18,16 +18,62 @@ UI.ROWS = 11
 UI.LIST_X, UI.LIST_W = 22, 540
 UI.DETAIL_X, UI.DETAIL_W = 586, 492
 UI.DETAIL_ROWS = 9
-UI.TOP = -96
+-- GF-UI-F: a column header over the list (物品 / 數量 / 可能提供 or 需要 / 時效),
+-- the rows under it; the detail on the right starts at the header too.
+-- GF-UI-H (owner 0.16.0: 分頁「調貨所」壓在標題上、「我的刊登」和「刊登」貼在一起、
+-- 「手動刊登」貼右邊界): no page title of its own (the window title and the
+-- sub-tab already name it); under the sub-tab row (its line ends 29 px into
+-- the page) come two rows: BAR_Y the tabs + the two check boxes over the
+-- detail column; TOOL_Y 收集組 on the left and 刊登 at the list's right edge.
+UI.BAR_Y, UI.TOOL_Y = -40, -84
+UI.CHECK_X = { auto = 586, manual = 786 }
+UI.POST_W = 96
+UI.HEAD_Y, UI.HEAD_H = -128, 28
+UI.TOP = UI.HEAD_Y - UI.HEAD_H - 4
+UI.EXPAND = 16
+-- Row columns (x inside a row, width); the quantity is right-aligned.
+UI.COL = {
+    expand = { x = 4, w = 16 },
+    icon = { x = 24, w = 36 },
+    name = { x = 66, w = 180 },
+    qty = { x = 252, w = 92 },
+    match = { x = 356, w = 96 },
+    fresh = { x = 460, w = 72 },
+}
+-- The detail list: who, how many, online, how fresh, where from, 聯絡.
+UI.DETAIL_HEAD_Y = UI.HEAD_Y - 52
+UI.DETAIL_TOP = UI.DETAIL_HEAD_Y - UI.HEAD_H - 4
+UI.DCOL = {
+    name = { x = 4, w = 130 }, what = { x = 138, w = 96 }, on = { x = 238, w = 44 },
+    fresh = { x = 286, w = 44 }, src = { x = 334, w = 84 },
+}
 UI.FORM_NAME = "GreenFangToolkit_SupplyForm"
 UI.PICKER_NAME = "GreenFangToolkit_SupplyBagPicker"
+UI.FINDER_NAME = "GreenFangToolkit_SupplyItemFinder"
 UI.PLACEHOLDER = "Interface\\Icons\\INV_Misc_QuestionMark"
-UI.FOOT = "僅供資訊媒合，交換條件由雙方自行協議"
+-- GF-UI-F: no sentence under the list; the same words are the 聯絡 tooltip.
+UI.CONTACT_TIP = "僅供資訊媒合，交換條件由雙方自行協議"
+UI.POPUP_DISCARD = "GREENFANGTOOLKIT_SUPPLY_DISCARD"
+UI.DISCARD_TEXT = "放棄未儲存的修改？"
+
+-- Column names per tab (GF-UI-F).
+UI.HEADINGS = {
+    need = { "物品", "數量", "可能提供", "時效" },
+    offer = { "物品", "數量", "需要", "時效" },
+    guild = { "物品", "徵求／供應", "在線", "時效" },
+    mine = { "物品", "數量", "狀態", "時效" },
+}
+UI.DETAIL_HEADINGS = { "成員", "數量", "在線", "時效", "來源" }
+-- 收集組 only where the lists come from the collection rules.
+UI.GROUP_TABS = { need = true, offer = true }
+UI.GROUP_X, UI.GROUP_W = 22, 170
+UI.EXPAND_CLOSED = "Interface\\Buttons\\UI-PlusButton-Up"
+UI.EXPAND_OPEN = "Interface\\Buttons\\UI-MinusButton-Up"
 
 UI.TABS = {
     { key = "need", text = "我缺的" },
     { key = "offer", text = "我可能有多的" },
-    { key = "guild", text = "公會供需" },
+    { key = "guild", text = "調貨看板" }, -- GF-UI-H: owner named it (was 公會供需); the key stays
     { key = "mine", text = "我的刊登" },
 }
 UI.EMPTY = {
@@ -37,11 +83,25 @@ UI.EMPTY = {
     mine = "還沒有刊登",
 }
 
-local panel, tabs, emptyLine, footLine, autoBox, manualBox, postButton
+local panel, tabs, statePanel, autoBox, manualBox, postButton, header, detailHeader
+local groupLabel, groupButton
 local rows, detailRows = {}, {}
 local detail = {}
-local state = { tab = "need", offset = 0, selected = nil, items = {} }
+local state = { tab = "need", offset = 0, selected = nil, items = {}, group = nil }
 UI.state = state
+
+-- f.tip under the mouse (check boxes, buttons, edit boxes of this page).
+local function withTip(f)
+    if not f or not f.HookScript then return f end
+    f:HookScript("OnEnter", function(self)
+        if self.tip and GameTooltip then
+            GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:AddLine(self.tip, 1, 1, 1, true); GameTooltip:Show()
+        end
+    end)
+    f:HookScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+    return f
+end
+UI.withTip = withTip
 
 ---------------------------------------------------------------------------
 -- Texts (pure, tested offline)
@@ -79,10 +139,27 @@ function UI.matchText(kind, it)
     return ""
 end
 
+-- The short cells under the column header (GF-UI-F): 「2 位」「暫無」.
+function UI.matchShort(kind, it)
+    if kind == "guild" then return it.onlineCount > 0 and (it.onlineCount .. " 位") or "離線" end
+    local n = #it.others
+    return n > 0 and (n .. " 位") or "暫無"
+end
+function UI.qtyShort(kind, it)
+    if kind == "guild" then return #it.needs .. "／" .. #it.offers end
+    return UI.qtyText(kind, it)
+end
+-- 時效 of a row: the best match's, else my own entry's.
+function UI.freshShort(it)
+    local e = it.others and it.others[1] or it.mine
+    return e and (Supply.FRESH_TEXT[e.fresh or "unknown"] or "未知") or ""
+end
+
 -- One person line in the detail list.
 function UI.personText(e)
     local name = e.member and ns.shortName(e.member.name) or "未知"
-    local what = e.direction == "need" and ("缺 " .. e.qty) or ("可能有 " .. e.qty)
+    -- GF-UI-H: automatic candidates read 可能提供 (manual ones 徵求／供應, below).
+    local what = e.direction == "need" and ("缺 " .. e.qty) or ("可能提供 " .. e.qty)
     if e.manual and not e.auto then what = (e.direction == "need" and "徵求 " or "供應 ") .. e.qty end
     local on = e.member and e.member.online and "在線" or "離線"
     return name, what, on, Supply.FRESH_TEXT[e.fresh or "unknown"] or "未知"
@@ -118,24 +195,28 @@ local function newRow(i)
     r:SetPoint("TOPLEFT", panel, "TOPLEFT", UI.LIST_X, UI.TOP - (i - 1) * UI.ROW_H)
     r.bg = Th.fill(r, Th.C.fill, "BACKGROUND")
     r.sel = W.rowSelect(r)
+    local C = UI.COL
+    -- GF-UI-F: the game's + / - in front of a row that opens a detail.
+    r.expand = r:CreateTexture(nil, "ARTWORK")
+    r.expand:SetSize(UI.EXPAND, UI.EXPAND)
+    r.expand:SetPoint("LEFT", r, "LEFT", C.expand.x, 0)
+    r.expand:Hide()
     r.icon = r:CreateTexture(nil, "ARTWORK")
     r.icon:SetSize(UI.ICON, UI.ICON)
-    r.icon:SetPoint("LEFT", r, "LEFT", 4, 0)
-    r.name = r:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
-    r.name:SetPoint("LEFT", r, "LEFT", UI.ICON + 12, 0)
-    r.name:SetWidth(220)
-    r.name:SetJustifyH("LEFT")
-    if r.name.SetWordWrap then r.name:SetWordWrap(false) end
-    r.qty = r:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT)
-    r.qty:SetPoint("LEFT", r, "LEFT", 276, 0)
-    r.qty:SetWidth(120)
-    r.qty:SetJustifyH("LEFT")
-    if r.qty.SetWordWrap then r.qty:SetWordWrap(false) end
-    r.match = r:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
-    r.match:SetPoint("RIGHT", r, "RIGHT", -8, 0)
-    r.match:SetWidth(136)
-    r.match:SetJustifyH("RIGHT")
-    if r.match.SetWordWrap then r.match:SetWordWrap(false) end
+    r.icon:SetPoint("LEFT", r, "LEFT", C.icon.x, 0)
+    local function cell(key, font, justify)
+        local fs = r:CreateFontString(nil, "ARTWORK", font)
+        fs:SetPoint("LEFT", r, "LEFT", C[key].x, 0)
+        fs:SetWidth(C[key].w)
+        fs:SetJustifyH(justify or "LEFT")
+        fs.gfAlign = justify or "LEFT"
+        if fs.SetWordWrap then fs:SetWordWrap(false) end
+        return fs
+    end
+    r.name = cell("name", ns.LABEL_FONT)
+    r.qty = cell("qty", ns.FIELD_FONT, "RIGHT")
+    r.match = cell("match", ns.LABEL_FONT)
+    r.fresh = cell("fresh", ns.LABEL_FONT)
     r:SetScript("OnClick", function(self) UI.select(self.index) end)
     r:SetScript("OnEnter", function(self)
         if self.itemID then itemTooltip(self, self.itemID, self.tipLines) end
@@ -152,17 +233,25 @@ function UI.listFor(kind)
     local out = {}
     if kind == "mine" then
         for _, l in ipairs(L.own()) do
-            out[#out + 1] = { itemID = l.itemID, listing = l,
-                qty = L.DIRECTION_TEXT[l.direction] .. " " .. l.quantity,
-                match = L.STATUS_TEXT[l.status] or "",
+            local left = (l.expiresAt or 0) - ns.Share.serverNow()
+            local days = left > 0 and math.max(1, math.ceil(left / 86400)) or 0
+            local q = L.DIRECTION_TEXT[l.direction] .. " " .. l.quantity
+            local st = L.STATUS_TEXT[l.status] or ""
+            out[#out + 1] = { itemID = l.itemID, listing = l, qty = q, qtyShort = q, match = st, matchShort = st,
+                fresh = l.status == "active" and ("剩 " .. days .. " 天") or "", expandable = true,
                 tip = { L.categoryText(l.category), l.note ~= "" and l.note or nil } }
         end
         return out
     end
+    local rule = UI.GROUP_TABS[kind] and UI.groupRule() or nil
     for _, it in ipairs(Supply.view(kind)) do
-        local tip = {}
-        if it.mine then tip[#tip + 1] = "來源：" .. sourceText(it.mine) end
-        out[#out + 1] = { itemID = it.itemID, item = it, qty = UI.qtyText(kind, it), match = UI.matchText(kind, it), tip = tip }
+        if not rule or (rule.items and rule.items[it.itemID]) then
+            local tip = {}
+            if it.mine then tip[#tip + 1] = "來源：" .. sourceText(it.mine) end
+            out[#out + 1] = { itemID = it.itemID, item = it, qty = UI.qtyText(kind, it), match = UI.matchText(kind, it),
+                qtyShort = UI.qtyShort(kind, it), matchShort = UI.matchShort(kind, it), fresh = UI.freshShort(it),
+                expandable = #it.others > 0, tip = tip }
+        end
     end
     return out
 end
@@ -185,15 +274,94 @@ function UI.drawList()
             setItemIcon(r.icon, data.itemID)
             local name = Supply.itemLabel(data.itemID)
             r.name:SetText(name)
-            r.qty:SetText(data.qty or "")
-            r.match:SetText(data.match or "")
-            r.sel.set(state.selected == state.offset + i)
+            r.qty:SetText(data.qtyShort or data.qty or "")
+            r.match:SetText(data.matchShort or data.match or "")
+            r.fresh:SetText(data.fresh or "")
+            local open = state.selected == state.offset + i
+            r.sel.set(open)
+            if data.expandable then
+                r.expandFile = open and UI.EXPAND_OPEN or UI.EXPAND_CLOSED
+                ns.Icons.set(r.expand, r.expandFile)
+                r.expand:Show()
+            else
+                r.expandFile = nil
+                r.expand:Hide()
+            end
             r:Show()
         elseif r then
             r:Hide()
         end
     end
-    emptyLine:SetText(#list == 0 and UI.EMPTY[state.tab] or "")
+    UI.drawState()
+end
+
+-- GF-UI-F: the list's state panel (W.statePanel): 空 / 載入中 / 資料過期 /
+-- 暫時無法讀取. Only when the list has no rows (or reading it failed).
+function UI.pageState()
+    if state.preview then return state.preview end
+    if state.failed then return "error" end
+    if #state.items > 0 then return nil end
+    local tab = state.tab
+    if UI.GROUP_TABS[tab] and Supply.autoOn() then
+        local last = Supply.last or {}
+        if last.questOK == false or last.bagOK == false then return "error" end
+        if not last.scanAt then return "loading" end
+    end
+    if tab ~= "mine" then
+        local okCount, counts = pcall(Supply.snapshotCounts)
+        if okCount and counts and (counts.expired or 0) > 0 then return "stale" end
+    end
+    return "empty"
+end
+function UI.drawState()
+    if not statePanel then return end
+    local kind = UI.pageState()
+    statePanel.set(kind, kind == "empty" and UI.EMPTY[state.tab] or nil)
+end
+-- /gftk supply state <empty|loading|stale|error|off>: show one state for a
+-- screenshot (MANUAL §3uif); nothing is read or changed.
+UI.PREVIEW_KINDS = { empty = true, loading = true, stale = true, error = true }
+function UI.previewState(kind)
+    if kind == "off" or kind == "" then kind = nil end
+    if kind and not UI.PREVIEW_KINDS[kind] then return false end
+    state.preview = kind
+    UI.refresh()
+    return true
+end
+
+---------------------------------------------------------------------------
+-- 收集組 (spec v2.0 附錄 A §7.2): only the active rules; 全部 = no filter.
+---------------------------------------------------------------------------
+
+function UI.groupOptions()
+    local list = { { value = nil, text = "全部" } }
+    for _, r in ipairs(Supply.activeRules()) do list[#list + 1] = { value = r.collectionID, text = r.title } end
+    return list
+end
+function UI.groupRule()
+    if not state.group then return nil end
+    for _, r in ipairs(Supply.activeRules()) do if r.collectionID == state.group then return r end end
+    return nil
+end
+function UI.setGroup(id)
+    state.group, state.offset, state.selected = id, 0, nil
+    if groupButton then groupButton.value = id; groupButton.refreshText() end
+    UI.refresh()
+end
+local function drawGroup()
+    if not groupButton then return end
+    if state.group and not UI.groupRule() then state.group = nil; groupButton.value = nil end
+    groupButton.refreshText()
+    local on = UI.GROUP_TABS[state.tab] == true
+    if on then groupLabel:Show(); groupButton:Show() else groupLabel:Hide(); groupButton:Hide() end
+    W.setEnabled(groupButton, #Supply.activeRules() > 0)
+end
+
+-- Column header texts of the current tab.
+local function drawHeader()
+    if not header then return end
+    local names = UI.HEADINGS[state.tab] or UI.HEADINGS.need
+    for i, fs in ipairs(header.cells) do fs:SetText(names[i] or "") end
 end
 
 ---------------------------------------------------------------------------
@@ -203,28 +371,26 @@ end
 local function newDetailRow(i)
     local r = CreateFrame("Frame", nil, panel)
     r:SetSize(UI.DETAIL_W, 40)
-    r:SetPoint("TOPLEFT", panel, "TOPLEFT", UI.DETAIL_X, UI.TOP - 60 - (i - 1) * 44)
-    r.name = r:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
-    r.name:SetPoint("LEFT", r, "LEFT", 4, 0)
-    r.name:SetWidth(130)
-    r.name:SetJustifyH("LEFT")
-    if r.name.SetWordWrap then r.name:SetWordWrap(false) end
-    r.what = r:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT)
-    r.what:SetPoint("LEFT", r, "LEFT", 138, 0)
-    r.what:SetWidth(96)
-    r.what:SetJustifyH("LEFT")
-    r.on = r:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
-    r.on:SetPoint("LEFT", r, "LEFT", 238, 0)
-    r.on:SetWidth(44)
-    r.fresh = r:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
-    r.fresh:SetPoint("LEFT", r, "LEFT", 286, 0)
-    r.fresh:SetWidth(44)
-    r.src = r:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT)
-    r.src:SetPoint("LEFT", r, "LEFT", 334, 0)
-    r.src:SetWidth(76)
+    r:SetPoint("TOPLEFT", panel, "TOPLEFT", UI.DETAIL_X, UI.DETAIL_TOP - (i - 1) * 44)
+    local function cell(key, font)
+        local fs = r:CreateFontString(nil, "ARTWORK", font)
+        fs:SetPoint("LEFT", r, "LEFT", UI.DCOL[key].x, 0)
+        fs:SetWidth(UI.DCOL[key].w)
+        fs:SetJustifyH("LEFT")
+        if fs.SetWordWrap then fs:SetWordWrap(false) end
+        return fs
+    end
+    r.name = cell("name", ns.LABEL_FONT)
+    r.what = cell("what", ns.FIELD_FONT)
+    r.on = cell("on", ns.LABEL_FONT)
+    r.fresh = cell("fresh", ns.LABEL_FONT)
+    r.src = cell("src", ns.DISABLED_FONT)
     r.contact = Th.button(r, "聯絡", 72, ns.BUTTON_H)
     r.contact:SetPoint("RIGHT", r, "RIGHT", 0, 0)
     r.contact:SetScript("OnClick", function(self) if self.entry then Supply.contact(self.entry) end end)
+    -- GF-UI-F: the page's one sentence lives here now (no footer line).
+    r.contact.tip = UI.CONTACT_TIP
+    withTip(r.contact)
     detailRows[i] = r
     return r
 end
@@ -233,12 +399,14 @@ local function hideDetailRows(from)
     for i = from, #detailRows do detailRows[i]:Hide() end
 end
 
--- Buttons under a listing of my own: 修改, 續期, 結束.
+-- Buttons under a listing of my own: 修改, 續期, 結束 while it is active;
+-- GF-UI-H: 刪除 once it has ended (已結束／已取消／已過期).
 local function shown(f, on) if on then f:Show() else f:Hide() end end
 local function listingButtons(l)
     local on = l ~= nil and l.status == "active"
     shown(detail.edit, on); shown(detail.renew, on); shown(detail.finish, on)
-    detail.edit.listing, detail.renew.listing, detail.finish.listing = l, l, l
+    shown(detail.delete, l ~= nil and l.status ~= "active")
+    detail.edit.listing, detail.renew.listing, detail.finish.listing, detail.delete.listing = l, l, l, l
 end
 
 function UI.drawDetail()
@@ -247,7 +415,8 @@ function UI.drawDetail()
     if not data then
         detail.icon:Hide()
         detail.name:SetText("")
-        detail.sub:SetText(#state.items > 0 and "選一個物品查看" or "")
+        detail.sub:SetText("")
+        if detailHeader then detailHeader:Hide() end
         listingButtons(nil)
         hideDetailRows(1)
         return
@@ -261,6 +430,7 @@ function UI.drawDetail()
         detail.sub:SetText(string.format("%s %d｜%s｜%s%s", L.DIRECTION_TEXT[l.direction], l.quantity, L.categoryText(l.category),
             L.STATUS_TEXT[l.status] or "", l.status == "active" and ("，剩 " .. days .. " 天") or ""))
         listingButtons(l)
+        if detailHeader then detailHeader:Hide() end
         hideDetailRows(1)
         if l.note and l.note ~= "" then
             local r = detailRows[1] or newDetailRow(1)
@@ -275,6 +445,7 @@ function UI.drawDetail()
         return
     end
     listingButtons(nil)
+    if detailHeader then if #data.item.others > 0 then detailHeader:Show() else detailHeader:Hide() end end
     local it = data.item
     detail.sub:SetText(data.qty .. (data.match ~= "" and ("｜" .. data.match) or ""))
     local list = it.others
@@ -300,6 +471,14 @@ function UI.drawDetail()
     end
 end
 
+-- GF-UI-H: remove an ended listing of mine from 我的刊登 (it never comes back).
+function UI.deleteListing(id)
+    local okDel, why = L.remove(id)
+    if okDel then state.selected = nil end
+    UI.refresh()
+    return okDel, why
+end
+
 function UI.select(index)
     state.selected = index
     UI.drawList()
@@ -319,7 +498,14 @@ function UI.refresh()
     W.setEnabled(postButton, Supply.manualOn())
     local keepItem = state.selected and state.items[state.selected] and state.items[state.selected].itemID
     local keepListing = state.selected and state.items[state.selected] and state.items[state.selected].listing
-    state.items = UI.listFor(state.tab)
+    drawGroup()
+    drawHeader()
+    -- GF-UI-F: a failed read shows 暫時無法讀取 instead of breaking the page;
+    -- a screenshot preview (UI.previewState) shows its state with no rows.
+    local okList, list = pcall(UI.listFor, state.tab)
+    state.failed = not okList
+    if not okList and Supply.note then pcall(Supply.note, "調貨所列表讀取失敗：" .. tostring(list)) end
+    state.items = (okList and not state.preview) and list or {}
     state.selected = nil
     for i, d in ipairs(state.items) do
         if (keepListing and d.listing and d.listing.id == keepListing.id) or (not keepListing and keepItem and d.itemID == keepItem) then
@@ -346,18 +532,6 @@ function UI.setTab(key)
     UI.refresh()
 end
 
--- f.tip under the mouse (check boxes, buttons, edit boxes of this page).
-local function withTip(f)
-    if not f or not f.HookScript then return f end
-    f:HookScript("OnEnter", function(self)
-        if self.tip and GameTooltip then
-            GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:AddLine(self.tip, 1, 1, 1, true); GameTooltip:Show()
-        end
-    end)
-    f:HookScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
-    return f
-end
-UI.withTip = withTip
 
 local function label(parent, text, font)
     local fs = parent:CreateFontString(nil, "ARTWORK", font or ns.LABEL_FONT)
@@ -377,36 +551,81 @@ end
 
 local function build(p)
     panel = p
-    local title = label(p, "綠皮調貨所", ns.TITLE_FONT)
-    title:SetPoint("TOPLEFT", p, "TOPLEFT", 22, -16)
-    local sub = label(p, "公會物資供需", ns.DISABLED_FONT)
-    sub:SetPoint("LEFT", title, "RIGHT", 12, 0)
-    autoBox = checkWithLabel(p, "自動集料", 660, -12, function(on) Supply.setAuto(on); UI.refresh() end)
+    -- GF-UI-H: no title line (it sat under the sub-tab row); see UI.BAR_Y.
+    autoBox = checkWithLabel(p, "自動集料", UI.CHECK_X.auto, UI.BAR_Y, function(on) Supply.setAuto(on); UI.refresh() end)
     autoBox.tip = "試用：荊棘谷書頁，依任務與背包自動算出缺的和可能多的（規則尚未實機確認）"
-    manualBox = checkWithLabel(p, "手動刊登", 840, -12, function(on) Supply.setManual(on); UI.refresh() end)
+    manualBox = checkWithLabel(p, "手動刊登", UI.CHECK_X.manual, UI.BAR_Y, function(on) Supply.setManual(on); UI.refresh() end)
     manualBox.tip = "關掉後不再分享我的刊登，也不顯示別人的刊登"
     withTip(autoBox); withTip(manualBox)
     tabs = Th.tabStrip(p, (function()
         local items = {}
         for _, t in ipairs(UI.TABS) do items[#items + 1] = { key = t.key, text = t.text } end
         return items
-    end)(), 22, -50, function(key) UI.setTab(key) end)
+    end)(), UI.LIST_X, UI.BAR_Y, function(key) UI.setTab(key) end)
     tabs.select(state.tab)
-    postButton = Th.button(p, "刊登", 96, ns.BUTTON_H)
-    postButton:SetPoint("TOPLEFT", p, "TOPLEFT", UI.LIST_X + UI.LIST_W - 96, -50)
+    UI.tabs = tabs
+    postButton = Th.button(p, "刊登", UI.POST_W, ns.BUTTON_H)
+    postButton:SetPoint("TOPLEFT", p, "TOPLEFT", UI.LIST_X + UI.LIST_W - UI.POST_W, UI.TOOL_Y)
+    UI.postButton = postButton
     postButton:SetScript("OnClick", function() UI.openForm() end)
-    emptyLine = label(p, "", ns.LABEL_FONT)
-    emptyLine:SetPoint("TOPLEFT", p, "TOPLEFT", UI.LIST_X + 8, UI.TOP - 12)
-    Th.vline(p, UI.DETAIL_X - 16, UI.TOP, UI.TOP - UI.ROWS * UI.ROW_H)
+    -- GF-UI-F: 收集組, shown on 我缺的 / 我可能有多的 only (GF-UI-H: on the tool row).
+    groupLabel = label(p, "收集組", ns.FIELD_FONT)
+    groupLabel:SetPoint("TOPLEFT", p, "TOPLEFT", UI.GROUP_X, UI.TOOL_Y - 6)
+    groupButton = ns.choiceButton(p, UI.GROUP_W, UI.GROUP_X + 56, UI.TOOL_Y, UI.groupOptions,
+        function(value) UI.setGroup(value) end, "全部")
+    UI.groupLabel, UI.groupButton, UI.autoBox, UI.manualBox = groupLabel, groupButton, autoBox, manualBox
+    -- The list's column header: a faint bar, gold names; the quantity right-aligned.
+    header = CreateFrame("Frame", nil, p)
+    header:SetPoint("TOPLEFT", p, "TOPLEFT", UI.LIST_X, UI.HEAD_Y)
+    header:SetSize(UI.LIST_W, UI.HEAD_H)
+    Th.headerBar(header)
+    header.cells = {}
+    local C = UI.COL
+    local cols = { { x = C.icon.x, w = C.name.x + C.name.w - C.icon.x }, { x = C.qty.x, w = C.qty.w, right = true },
+        { x = C.match.x, w = C.match.w }, { x = C.fresh.x, w = C.fresh.w } }
+    for i, c in ipairs(cols) do
+        local fs = header:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT)
+        fs:SetPoint("LEFT", header, "LEFT", c.x, 0)
+        fs:SetWidth(c.w)
+        fs:SetJustifyH(c.right and "RIGHT" or "LEFT")
+        fs.gfAlign = c.right and "RIGHT" or "LEFT"
+        if fs.SetWordWrap then fs:SetWordWrap(false) end
+        header.cells[i] = fs
+    end
+    UI.header = header
+    -- Empty / loading / stale / error: the shared state panel in the list area.
+    statePanel = W.statePanel(p, UI.LIST_W, 120)
+    statePanel:SetPoint("TOPLEFT", p, "TOPLEFT", UI.LIST_X, UI.TOP - 24)
+    UI.statePanel = statePanel
+    -- A screenshot preview never outlives the page.
+    if p.HookScript then p:HookScript("OnHide", function() state.preview = nil end) end
+    Th.vline(p, UI.DETAIL_X - 16, UI.HEAD_Y, UI.TOP - UI.ROWS * UI.ROW_H)
     detail.icon = p:CreateTexture(nil, "ARTWORK")
     detail.icon:SetSize(40, 40)
-    detail.icon:SetPoint("TOPLEFT", p, "TOPLEFT", UI.DETAIL_X, UI.TOP)
+    detail.icon:SetPoint("TOPLEFT", p, "TOPLEFT", UI.DETAIL_X, UI.HEAD_Y)
     detail.name = label(p, "", ns.TITLE_FONT)
-    detail.name:SetPoint("TOPLEFT", p, "TOPLEFT", UI.DETAIL_X + 50, UI.TOP - 2)
+    detail.name:SetPoint("TOPLEFT", p, "TOPLEFT", UI.DETAIL_X + 50, UI.HEAD_Y - 2)
     detail.name:SetWidth(UI.DETAIL_W - 50)
     if detail.name.SetWordWrap then detail.name:SetWordWrap(false) end
+    -- The detail's own column header (成員 / 數量 / 在線 / 時效 / 來源).
+    detailHeader = CreateFrame("Frame", nil, p)
+    detailHeader:SetPoint("TOPLEFT", p, "TOPLEFT", UI.DETAIL_X, UI.DETAIL_HEAD_Y)
+    detailHeader:SetSize(UI.DETAIL_W, UI.HEAD_H)
+    Th.headerBar(detailHeader)
+    detailHeader.cells = {}
+    for i, key in ipairs({ "name", "what", "on", "fresh", "src" }) do
+        local fs = detailHeader:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT)
+        fs:SetPoint("LEFT", detailHeader, "LEFT", UI.DCOL[key].x, 0)
+        fs:SetWidth(UI.DCOL[key].w)
+        fs:SetJustifyH("LEFT")
+        if fs.SetWordWrap then fs:SetWordWrap(false) end
+        fs:SetText(UI.DETAIL_HEADINGS[i])
+        detailHeader.cells[i] = fs
+    end
+    detailHeader:Hide()
+    UI.detailHeader = detailHeader
     detail.sub = label(p, "", ns.LABEL_FONT)
-    detail.sub:SetPoint("TOPLEFT", p, "TOPLEFT", UI.DETAIL_X + 50, UI.TOP - 26)
+    detail.sub:SetPoint("TOPLEFT", p, "TOPLEFT", UI.DETAIL_X + 50, UI.HEAD_Y - 26)
     detail.sub:SetWidth(UI.DETAIL_W - 50)
     if detail.sub.SetWordWrap then detail.sub:SetWordWrap(false) end
     local by = UI.TOP - UI.ROWS * UI.ROW_H + 40
@@ -429,14 +648,25 @@ local function build(p)
             L.finish(l.id, "closed"); UI.refresh()
         end)
     end)
+    -- GF-UI-H: 刪除 an ended listing of mine (in place of the three above).
+    detail.delete = Th.button(p, "刪除", 80, ns.BUTTON_H)
+    detail.delete:SetPoint("TOPLEFT", p, "TOPLEFT", UI.DETAIL_X, by)
+    detail.delete:SetScript("OnClick", function(self)
+        local l = self.listing
+        if not l then return end
+        W.confirm("刪除這筆已結束的" .. L.DIRECTION_TEXT[l.direction] .. "？", function()
+            UI.deleteListing(l.id)
+        end)
+    end)
+    UI.detail = detail
     listingButtons(nil)
-    footLine = label(p, UI.FOOT, ns.DISABLED_FONT)
-    footLine:SetPoint("BOTTOMLEFT", p, "BOTTOMLEFT", 22, 18)
 end
 
 ---------------------------------------------------------------------------
 -- The listing form (one window; ESC and X close it, a click outside does
--- not: it may hold what the player typed)
+-- not: it may hold what the player typed). GF-UI-F: with unsaved changes,
+-- X / ESC / 取消 first ask with the game's own confirm box (StaticPopup);
+-- with none they close at once.
 ---------------------------------------------------------------------------
 
 local form
@@ -445,19 +675,67 @@ UI.formState = formState
 
 local function formMessage(text) if form then form.msg:SetText(text or "") end end
 
+-- What the form holds now, as one string (compared with the one at opening).
+local function formSnapshot()
+    if not form then return nil end
+    return table.concat({ tostring(formState.direction), tostring(formState.itemID), tostring(formState.category),
+        tostring(formState.days), tostring(form.qty:GetText() or ""), tostring(form.note:GetText() or "") }, "|")
+end
+function UI.formDirty()
+    return form ~= nil and form:IsShown() and formState.initial ~= nil and formSnapshot() ~= formState.initial
+end
+
+-- Close the form; force skips the question (after 放棄, or after saving).
+function UI.closeForm(force)
+    if not form then return true end
+    if not force and UI.formDirty() then UI.askDiscard(); return false end
+    formState.initial = nil
+    form.gfRawHide(form)
+    return true
+end
+
+local function discardDialog()
+    if type(StaticPopupDialogs) ~= "table" or type(StaticPopup_Show) ~= "function" then return false end
+    if not StaticPopupDialogs[UI.POPUP_DISCARD] then
+        StaticPopupDialogs[UI.POPUP_DISCARD] = {
+            text = UI.DISCARD_TEXT, button1 = "放棄", button2 = "繼續編輯",
+            OnAccept = function() UI.closeForm(true) end,
+            -- The form sits in FULLSCREEN_DIALOG: lift the box above it while it is open.
+            OnShow = function(self)
+                if self and self.SetFrameStrata and self.GetFrameStrata then
+                    self.gfOldStrata = self:GetFrameStrata()
+                    self:SetFrameStrata("FULLSCREEN_DIALOG")
+                    if self.Raise then self:Raise() end
+                end
+            end,
+            OnHide = function(self)
+                if self and self.gfOldStrata and self.SetFrameStrata then self:SetFrameStrata(self.gfOldStrata); self.gfOldStrata = nil end
+            end,
+            timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
+        }
+    end
+    return true
+end
+function UI.askDiscard()
+    if discardDialog() then return StaticPopup_Show(UI.POPUP_DISCARD) end
+    return W.confirm(UI.DISCARD_TEXT, function() UI.closeForm(true) end)
+end
+
 local function setFormItem(itemID, bagInfo)
     formState.itemID, formState.bagInfo = itemID, bagInfo
     if not form then return end
     if itemID then
         setItemIcon(form.itemIcon, itemID)
         form.itemName:SetText((Supply.itemLabel(itemID)))
+        -- GF-UI-H: the type comes from the item (classID / subclassID), never a pick.
         local info = L.itemInfo(itemID)
-        local cat = info and info.classID and L.CLASS_CATEGORY[info.classID]
-        if cat and not formState.categoryTouched then formState.category = cat; form.cats.select(cat) end
+        formState.category = L.categoryFor(info, formState.editing and formState.editing.category or "other")
+        form.typeText:SetText(info and L.typeText(info) or "")
         local problem = not formState.editing and L.itemProblem(itemID, bagInfo) or nil
         formMessage(problem)
     else
         form.itemIcon:Hide()
+        form.typeText:SetText("")
         form.itemName:SetText("把物品拖到這裡、按住 Shift 點物品，或從背包選")
     end
 end
@@ -526,19 +804,25 @@ local function buildForm()
     f.itemName:SetWidth(430)
     if f.itemName.SetWordWrap then f.itemName:SetWordWrap(false) end
     y = y - 50
-    f.itemBox = Th.editBox(f, 300, 30)
+    f.itemBox = Th.editBox(f, 230, 30)
     f.itemBox:SetPoint("TOPLEFT", f, "TOPLEFT", 104, y)
     f.itemBox:SetScript("OnTextChanged", function(self) UI.formFromText(self:GetText()) end)
     f.itemBox.tip = "貼上物品連結，或游標在這裡時按住 Shift 點物品"
     withTip(f.itemBox)
     f.pick = Th.button(f, "從背包選", 110, ns.BUTTON_H)
     f.pick:SetPoint("LEFT", f.itemBox, "RIGHT", 10, 0)
-    f.pick:SetScript("OnClick", function() UI.openPicker() end)
+    f.pick:SetScript("OnClick", function() UI.openPicker("bag") end)
+    -- GF-UI-H: 找物品 — every item the client knows (also what is not in my bags).
+    f.find = Th.button(f, "找物品", 110, ns.BUTTON_H)
+    f.find:SetPoint("LEFT", f.pick, "RIGHT", 8, 0)
+    f.find:SetScript("OnClick", function() UI.openPicker("all") end)
     y = y - 50
-    row("分類")
-    local cats = {}
-    for _, c in ipairs(L.CATEGORIES) do cats[#cats + 1] = { key = c.key, text = c.text, w = 72 } end
-    f.cats = Th.tabStrip(f, cats, 104, y, function(key) formState.category = key; formState.categoryTouched = true end)
+    -- GF-UI-H: 類型 is read from the item (classID / subclassID); nothing to choose.
+    row("類型")
+    f.typeText = label(f, "", ns.LABEL_FONT)
+    f.typeText:SetPoint("TOPLEFT", f, "TOPLEFT", 104, y - 6)
+    f.typeText:SetWidth(460)
+    if f.typeText.SetWordWrap then f.typeText:SetWordWrap(false) end
     y = y - 50
     row("數量")
     f.qty = Th.editBox(f, 80, 30)
@@ -566,37 +850,45 @@ local function buildForm()
     f.save:SetScript("OnClick", function() UI.submitForm() end)
     f.cancel = Th.button(f, "取消", 110, ns.BUTTON_H)
     f.cancel:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -18, 16)
-    f.cancel:SetScript("OnClick", function() f:Hide() end)
+    f.cancel:SetScript("OnClick", function() UI.closeForm() end)
     f:Hide()
+    -- X and ESC (ns.escape) both call f:Hide(): ask first when something changed.
+    f.gfRawHide = f.Hide
+    f.Hide = function(self) return UI.closeForm() end
     form = f
     hookLinks()
     return f
 end
 
 -- listing: edit that one (direction and item stay); nil: a new one.
-function UI.openForm(listing)
+-- GF-UI-F: an open form with unsaved changes is kept (force replaces it).
+function UI.openForm(listing, force)
     if not Supply.manualOn() then return false end
+    if not force and UI.formDirty() then
+        if form.Raise then form:Raise() end
+        return false
+    end
     local f = form or buildForm()
     for k in pairs(formState) do formState[k] = nil end
     formState.editing = listing
     formState.direction = listing and listing.direction or "need"
     formState.category = listing and listing.category or "other"
-    formState.categoryTouched = listing ~= nil
     formState.days = listing and listing.days or L.DEFAULT_DAYS
     f.TitleText:SetText(listing and "修改刊登" or "刊登")
     f.save:SetText(listing and "儲存" or "刊登")
     f.dirs.select(formState.direction)
-    f.cats.select(formState.category)
     f.days.select(formState.days)
     f.itemBox:SetText("")
     f.qty:SetText(tostring(listing and listing.quantity or 1))
     f.note:SetText(listing and listing.note or "")
     W.setEnabled(f.pick, listing == nil)
+    W.setEnabled(f.find, listing == nil)
     for _, b in ipairs(f.dirs.buttons) do W.setEnabled(b, listing == nil) end
     if listing then f.itemBox:Hide() else f.itemBox:Show() end
     setFormItem(listing and listing.itemID or nil)
     formMessage("")
     f:Show()
+    formState.initial = formSnapshot()
     return true
 end
 
@@ -612,11 +904,11 @@ function UI.submitForm()
         formMessage(why)
         if dup then
             -- An active listing of the same item: edit that one instead.
-            ns.after(0, function() UI.openForm(dup); formMessage(why) end)
+            ns.after(0, function() UI.openForm(dup, true); formMessage(why) end)
         end
         return nil, why
     end
-    form:Hide()
+    UI.closeForm(true)
     if not formState.editing then state.tab = "mine"; if tabs then tabs.select("mine") end end
     UI.refresh()
     return l
@@ -625,93 +917,236 @@ end
 function UI.form() return form end
 
 ---------------------------------------------------------------------------
--- The bag picker (a list: ESC and a click outside close it)
+-- The item picker (a list: ESC, X and a click outside close it).
+-- GF-UI-H: two sources: 背包 (unbound bag items, as before) and 全部 (every
+-- item the client knows: L.catalog); a name / ItemID search; 類型 and 子類
+-- filters from the item's classID / subclassID. Untradeable items are never
+-- in the list.
 ---------------------------------------------------------------------------
 
 local picker
 UI.PICK_ROWS = 10
-local pickState = { offset = 0, items = {} }
+UI.PICK_W = 500
+UI.PICK_SOURCES = { { key = "bag", text = "背包", w = 80 }, { key = "all", text = "全部", w = 80 } }
+UI.PICK_EMPTY = { bag = "背包裡沒有可交易的物品", all = "找不到可交易的物品" }
+UI.PICK_COL = { icon = 2, name = 42, nameW = 230, type = 280, typeW = 140 }
+UI.PICK_FILTER = { searchLabel = 12, search = 56, searchW = 150, class = 216, sub = 356, filterW = 130 }
+local pickState = { offset = 0, items = {}, base = {}, source = "bag", text = "", class = nil, subclass = nil }
+UI.pickState = pickState
+
+local function pickFiltered()
+    local out = {}
+    for _, e in ipairs(pickState.base) do
+        if (pickState.class == nil or e.info.classID == pickState.class)
+            and (pickState.subclass == nil or e.info.subclassID == pickState.subclass) then
+            out[#out + 1] = e
+        end
+    end
+    return out
+end
 
 local function drawPicker()
+    if not picker then return end
+    pickState.items = pickFiltered()
+    pickState.offset = math.max(0, math.min(pickState.offset, #pickState.items - UI.PICK_ROWS))
     for i = 1, UI.PICK_ROWS do
         local b = picker.rows[i]
         local it = pickState.items[pickState.offset + i]
         if it then
             setItemIcon(b.icon, it.itemID)
             b.name:SetText((Supply.itemLabel(it.itemID)))
-            b.count:SetText("x" .. it.count)
+            b.kind:SetText(L.typeText(it.info))
+            b.count:SetText(it.count and ("x" .. it.count) or "")
             b.item = it
             b:Show()
         else
+            b.item = nil
             b:Hide()
         end
     end
-    picker.empty:SetText(#pickState.items == 0 and "背包裡沒有可交易的物品" or "")
+    picker.empty:SetText(#pickState.items == 0 and (UI.PICK_EMPTY[pickState.source] or "") or "")
+    picker.sources.select(pickState.source)
+    picker.class.value, picker.sub.value = pickState.class, pickState.subclass
+    picker.class.refreshText(); picker.sub.refreshText()
+    W.setEnabled(picker.sub, pickState.class ~= nil)
 end
 
-function UI.openPicker()
-    if not picker then
-        local f = CreateFrame("Frame", UI.PICKER_NAME, UIParent)
-        f:SetSize(360, UI.PICK_ROWS * 40 + 56)
-        f:SetFrameStrata("TOOLTIP")
-        if f.SetFrameLevel then f:SetFrameLevel(100) end
-        Th.panel(f)
-        f:EnableMouse(true)
-        f.title = label(f, "從背包選", ns.FIELD_FONT)
-        f.title:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -10)
-        f.close = Th.closeButton(f)
-        f.empty = label(f, "", ns.LABEL_FONT)
-        f.empty:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -48)
-        f.rows = {}
-        for i = 1, UI.PICK_ROWS do
-            local b = CreateFrame("Button", nil, f)
-            b:SetSize(336, 38)
-            b:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -42 - (i - 1) * 40)
-            b.icon = b:CreateTexture(nil, "ARTWORK")
-            b.icon:SetSize(32, 32)
-            b.icon:SetPoint("LEFT", b, "LEFT", 2, 0)
-            b.name = label(b, "", ns.LABEL_FONT)
-            b.name:SetPoint("LEFT", b, "LEFT", 42, 0)
-            b.name:SetWidth(230)
-            if b.name.SetWordWrap then b.name:SetWordWrap(false) end
-            b.count = label(b, "", ns.LABEL_FONT)
-            b.count:SetPoint("RIGHT", b, "RIGHT", -6, 0)
-            b:SetScript("OnClick", function(self)
-                if self.item then setFormItem(self.item.itemID, { isBound = false }) end
-                f:Hide()
-            end)
-            b:SetScript("OnEnter", function(self) if self.item then itemTooltip(self, self.item.itemID) end end)
-            b:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
-            if b.EnableMouseWheel then b:EnableMouseWheel(true) end
-            b:SetScript("OnMouseWheel", function(_, delta)
-                pickState.offset = math.max(0, math.min(math.max(0, #pickState.items - UI.PICK_ROWS), pickState.offset - delta))
-                drawPicker()
-            end)
-            f.rows[i] = b
-        end
-        f:Hide()
-        ns.escRegister(f, ns.ESC_LEVEL.grid)
-        picker = f
+-- Read the list again (source or search changed); the class filter stays
+-- while it still has items.
+function UI.pickReload()
+    pickState.base = L.catalog({ source = pickState.source, text = pickState.text })
+    local hasClass = false
+    for _, c in ipairs(L.catalogClasses(pickState.base)) do if c.value == pickState.class then hasClass = true end end
+    if not hasClass then pickState.class, pickState.subclass = nil, nil end
+    drawPicker()
+    return pickState.items
+end
+
+function UI.pickSource(key)
+    pickState.source, pickState.offset = key == "all" and "all" or "bag", 0
+    return UI.pickReload()
+end
+function UI.pickSearch(text)
+    pickState.text, pickState.offset = ns.str(text), 0
+    if picker and picker.search and picker.search:GetText() ~= pickState.text then picker.search:SetText(pickState.text) end
+    return UI.pickReload()
+end
+function UI.pickClass(classID)
+    pickState.class, pickState.subclass, pickState.offset = classID, nil, 0
+    drawPicker()
+    return pickState.items
+end
+function UI.pickSubclass(subclassID)
+    pickState.subclass, pickState.offset = subclassID, 0
+    drawPicker()
+    return pickState.items
+end
+-- Row i of the visible list into the form.
+function UI.pickChoose(i)
+    local it = pickState.items[pickState.offset + i]
+    if not it then return false end
+    setFormItem(it.itemID, { isBound = false })
+    if picker then picker:Hide() end
+    return true
+end
+
+local searchToken = 0
+local function buildPicker()
+    local f = CreateFrame("Frame", UI.PICKER_NAME, UIParent)
+    f:SetSize(UI.PICK_W, UI.PICK_ROWS * 40 + 136)
+    f:SetFrameStrata("TOOLTIP")
+    -- Under the filters' drop-down menus (those sit at level 100).
+    if f.SetFrameLevel then f:SetFrameLevel(50) end
+    Th.panel(f)
+    f:EnableMouse(true)
+    f.title = label(f, "選物品", ns.FIELD_FONT)
+    f.title:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -10)
+    f.close = Th.closeButton(f)
+    f.sources = Th.tabStrip(f, UI.PICK_SOURCES, 12, -40, function(key) UI.pickSource(key) end)
+    local P = UI.PICK_FILTER
+    f.searchLabel = label(f, "搜尋", ns.FIELD_FONT)
+    f.searchLabel:SetPoint("TOPLEFT", f, "TOPLEFT", P.searchLabel, -86)
+    f.search = Th.editBox(f, P.searchW, 30)
+    f.search:SetPoint("TOPLEFT", f, "TOPLEFT", P.search, -80)
+    f.search.tip = "名字或物品編號"
+    withTip(f.search)
+    f.search:SetScript("OnTextChanged", function(self)
+        searchToken = searchToken + 1
+        local token, text = searchToken, self:GetText()
+        ns.after(0.25, function() if token == searchToken and text ~= pickState.text then UI.pickSearch(text) end end)
+    end)
+    f.search:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    f.search:SetScript("OnEnterPressed", function(self) self:ClearFocus(); UI.pickSearch(self:GetText()) end)
+    f.class = ns.choiceButton(f, P.filterW, P.class, -80, function()
+        local list = { { value = nil, text = "全部類型" } }
+        for _, c in ipairs(L.catalogClasses(pickState.base)) do list[#list + 1] = c end
+        return list
+    end, function(value) UI.pickClass(value) end, "全部類型")
+    f.sub = ns.choiceButton(f, P.filterW, P.sub, -80, function()
+        local list = { { value = nil, text = "全部子類" } }
+        for _, c in ipairs(L.catalogSubclasses(pickState.base, pickState.class)) do list[#list + 1] = c end
+        return list
+    end, function(value) UI.pickSubclass(value) end, "全部子類")
+    f.empty = label(f, "", ns.LABEL_FONT)
+    f.empty:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -126)
+    f.rows = {}
+    local C = UI.PICK_COL
+    for i = 1, UI.PICK_ROWS do
+        local b = CreateFrame("Button", nil, f)
+        b:SetSize(UI.PICK_W - 24, 38)
+        b:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -120 - (i - 1) * 40)
+        b.icon = b:CreateTexture(nil, "ARTWORK")
+        b.icon:SetSize(32, 32)
+        b.icon:SetPoint("LEFT", b, "LEFT", C.icon, 0)
+        b.name = label(b, "", ns.LABEL_FONT)
+        b.name:SetPoint("LEFT", b, "LEFT", C.name, 0)
+        b.name:SetWidth(C.nameW)
+        if b.name.SetWordWrap then b.name:SetWordWrap(false) end
+        b.kind = label(b, "", ns.DISABLED_FONT)
+        b.kind:SetPoint("LEFT", b, "LEFT", C.type, 0)
+        b.kind:SetWidth(C.typeW)
+        if b.kind.SetWordWrap then b.kind:SetWordWrap(false) end
+        b.count = label(b, "", ns.LABEL_FONT)
+        b.count:SetPoint("RIGHT", b, "RIGHT", -6, 0)
+        b:SetScript("OnClick", function() UI.pickChoose(i) end)
+        b:SetScript("OnEnter", function(self) if self.item then itemTooltip(self, self.item.itemID) end end)
+        b:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+        if b.EnableMouseWheel then b:EnableMouseWheel(true) end
+        b:SetScript("OnMouseWheel", function(_, delta)
+            pickState.offset = math.max(0, math.min(math.max(0, #pickState.items - UI.PICK_ROWS), pickState.offset - delta))
+            drawPicker()
+        end)
+        f.rows[i] = b
     end
+    f:Hide()
+    ns.escRegister(f, ns.ESC_LEVEL.grid)
+    picker = f
+    return f
+end
+
+-- source: "bag" (從背包選, the default) or "all" (找物品).
+function UI.openPicker(source)
+    if not picker then buildPicker() end
     picker:ClearAllPoints()
     if form and form:IsShown() then picker:SetPoint("TOPLEFT", form, "TOPRIGHT", 4, 0)
     else picker:SetPoint("CENTER", UIParent, "CENTER", 0, 0) end
-    pickState.items, pickState.offset = L.bagItems() or {}, 0
-    drawPicker()
+    pickState.source = source == "all" and "all" or "bag"
+    pickState.text, pickState.class, pickState.subclass, pickState.offset = "", nil, nil, 0
+    picker.search:SetText("")
+    picker.title:SetText(pickState.source == "all" and "找物品" or "從背包選")
+    UI.pickReload()
     picker:Show()
     return picker
 end
 function UI.picker() return picker end
+-- Item data arrived: the open picker shows the newly known items (once per half second).
+function UI.pickerItemInfo()
+    if picker and picker:IsShown() then UI.pickReload() end
+end
+local pickTimer = false
+function UI.pickerItemInfoSoon()
+    if pickTimer or not (picker and picker:IsShown()) then return end
+    pickTimer = true
+    ns.after(0.5, function() pickTimer = false; UI.pickerItemInfo() end)
+end
 
 ---------------------------------------------------------------------------
 
 Supply.onChanged = UI.refreshSoon
-Supply.onItemInfo = UI.refreshSoon
+Supply.onItemInfo = function() UI.refreshSoon(); UI.pickerItemInfoSoon() end
 ns.Share.onUpdate(function() Supply.invalidate(); UI.refreshSoon() end)
 
 local regen = CreateFrame("Frame")
 pcall(regen.RegisterEvent, regen, "PLAYER_REGEN_ENABLED")
-regen:SetScript("OnEvent", function() ns.after(0, function() if UI.pending then UI.refreshSoon() end end) end)
+pcall(regen.RegisterEvent, regen, "ADDON_LOADED")
+-- GF-UI-F (MANUAL §3uif): /gftk supply state <empty|loading|stale|error|off>
+-- opens the page showing that state, for the owner's screenshots. Init.lua
+-- sets the slash handler while loading; it is wrapped once all files are in.
+local slashWrapped = false
+function UI.command(rest)
+    local kind = ns.str(rest):match("^state%s*(%a*)")
+    if not kind then return false end
+    ns.Framework.open(UI.ID)
+    if not UI.previewState(kind:lower()) then ns.say("/gftk supply state empty｜loading｜stale｜error｜off") end
+    return true
+end
+local function wrapSlash()
+    if slashWrapped or type(SlashCmdList) ~= "table" or type(SlashCmdList.GREENFANGTOOLKIT) ~= "function" then return end
+    slashWrapped = true
+    local orig = SlashCmdList.GREENFANGTOOLKIT
+    SlashCmdList.GREENFANGTOOLKIT = function(msg, ...)
+        local rest = ns.str(msg):gsub("^%s+", ""):match("^[Ss][Uu][Pp][Pp][Ll][Yy]%s+(.+)$")
+        if rest and UI.command(rest) then return end
+        return orig(msg, ...)
+    end
+end
+regen:SetScript("OnEvent", function(_, event, name)
+    if event == "ADDON_LOADED" then
+        if name == "GreenFangToolkit" then wrapSlash() end
+        return
+    end
+    ns.after(0, function() if UI.pending then UI.refreshSoon() end end)
+end)
 
 ns.Framework.register({
     id = UI.ID,

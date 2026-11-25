@@ -318,7 +318,7 @@ return function(T)
         local id = A.submitTicket()
         local text = A.timeText(ns.Adventure.get(id))
         ok(plain(text):match("%d%d%d%d/%d%d/%d%d"), "the row has the year")
-        ok(text:find("INV_Misc_Book_09", 1, true), "the 之後 icon is a whole icon (no calendar box)")
+        ok(text:find("INV_Misc_PocketWatch_01", 1, true), "the 之後 icon is the clock, whole (GF-UI-G: one clock for every time)")
         eq(ns.GameIcons.ART.future[1].box, nil, "no texture box")
     end)
 

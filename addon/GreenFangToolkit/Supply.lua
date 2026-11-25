@@ -495,7 +495,12 @@ function Supply.invalidate() snapCache = {} end
 ---------------------------------------------------------------------------
 
 -- Returns a list of entries { key, a, member, own, itemID, direction, qty,
--- auto = n or nil, manual = listing or nil, t, fresh, rule }.
+-- auto = n or nil, manual = listing or nil, manuals = { listings } or nil,
+-- t, fresh, rule }. One entry per person, item and direction: a provider is
+-- counted once and qty is the largest single source (an automatic bag
+-- candidate and a manual promise of the same things are not two supplies).
+-- GF-016: every manual listing is kept in manuals (an old client may send
+-- two of the same item and direction); manual is the largest of them.
 function Supply.entries()
     local byKey, list = {}, {}
     local function add(a, member, own, itemID, direction, qty, t, fresh, src, payload, rule)
@@ -506,7 +511,13 @@ function Supply.entries()
             byKey[key] = e
             list[#list + 1] = e
         end
-        if src == "auto" then e.auto = qty; e.rule = rule else e.manual = payload end
+        if src == "auto" then
+            e.auto = math.max(e.auto or 0, qty); e.rule = e.rule or rule
+        else
+            e.manuals = e.manuals or {}
+            e.manuals[#e.manuals + 1] = payload
+            if not e.manual or (payload.quantity or 0) > (e.manual.quantity or 0) then e.manual = payload end
+        end
         e.qty = math.max(e.qty, qty) -- one gap / one supply, never two
         if t > e.t then e.t, e.fresh = t, fresh end
     end
@@ -538,7 +549,12 @@ Supply.better = better
 --   mine "offer": what I may have extra, others = who needs it
 --   guild:        everybody else's needs and offers, by item
 function Supply.view(kind)
-    local all = Supply.entries()
+    local all = {}
+    -- GF-UI-H: others' manual listings of untradeable items are left out here.
+    local Lst = ns.SupplyListings
+    for _, e in ipairs(Supply.entries()) do
+        if not (Lst and Lst.shownOnPage) or Lst.shownOnPage(e) then all[#all + 1] = e end
+    end
     local items, order = {}, {}
     local function itemFor(id)
         local it = items[id]

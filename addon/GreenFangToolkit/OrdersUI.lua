@@ -53,22 +53,22 @@ local Icons = ns.Icons
 -- Pure helpers (offline tests)
 ---------------------------------------------------------------------------
 
--- 12345 -> "1g 23s 45c" with the game's coin icons (plain letters when the
--- client has no GetCoinTextureString).
-function UI.money(c)
+-- 12345 -> 1[金] 23[銀] 45[銅]: the numbers with the game's coin icons.
+-- GF-UI-H (owner: 金額一律用金／銀／銅圖示): always the icons, also where the
+-- client has no GetCoinTextureString (the Forever client showed "1g 23s 45c");
+-- the icons are plain |T textures (Interface\\MoneyFrame), no client function.
+UI.COIN_TEX = { gold = "Interface\\MoneyFrame\\UI-GoldIcon", silver = "Interface\\MoneyFrame\\UI-SilverIcon",
+    copper = "Interface\\MoneyFrame\\UI-CopperIcon" }
+function UI.money(c, size)
     c = math.floor(tonumber(c) or 0)
-    -- GF-UI-D: where the client has the coin art, the numbers in gold / silver /
-    -- copper with the game's coin icons (Theme.coinText).
-    if type(GetCoinTextureString) == "function" then
-        if ns.Theme then return ns.Theme.coinText(c) end
-        local ok, s = pcall(GetCoinTextureString, c)
-        if ok and type(s) == "string" and s ~= "" then return s end
-    end
+    if ns.Theme and ns.Theme.coinText then return ns.Theme.coinText(c, size) end
     local g, s, cu = math.floor(c / 10000), math.floor(c / 100) % 100, c % 100
+    local n = tostring(size or 0)
     local out = {}
-    if g > 0 then out[#out + 1] = g .. "g" end
-    if s > 0 then out[#out + 1] = s .. "s" end
-    if cu > 0 or #out == 0 then out[#out + 1] = cu .. "c" end
+    local function part(v, tex) out[#out + 1] = v .. "|T" .. tex .. ":" .. n .. ":" .. n .. ":2:0|t" end
+    if g > 0 then part(g, UI.COIN_TEX.gold) end
+    if s > 0 then part(s, UI.COIN_TEX.silver) end
+    if cu > 0 or #out == 0 then part(cu, UI.COIN_TEX.copper) end
     return table.concat(out, " ")
 end
 
@@ -399,6 +399,12 @@ local function newRow(i)
     end
     row.head = row:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT)
     row.head:SetPoint("LEFT", row, "LEFT", 6, 0)
+    -- GF-016: the row 我的業務 opened (UI.focus), lit with the quest log's highlight.
+    row.focusMark = row:CreateTexture(nil, "BORDER")
+    row.focusMark:SetAllPoints()
+    Icons.set(row.focusMark, "Interface\QuestFrame\UI-QuestTitleHighlight")
+    if row.focusMark.SetBlendMode then row.focusMark:SetBlendMode("ADD") end
+    row.focusMark:Hide()
     rowWidgets[i] = row
     return row
 end
@@ -532,6 +538,7 @@ function UI.layoutRows()
                 row:ClearAllPoints()
                 row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -(i - 1) * ROW_HEIGHT)
                 fillRow(row, data, i)
+                if data.view and UI.focusId ~= nil and data.view.id == UI.focusId then row.focusMark:Show() else row.focusMark:Hide() end
                 row:Show()
             else
                 row:Hide(); row.view = nil
@@ -541,6 +548,47 @@ function UI.layoutRows()
 end
 function UI.rowFrames() return rowWidgets end
 function UI.shownRows() return shownRows end
+function UI.scrollFrame() return scroll end
+
+---------------------------------------------------------------------------
+-- GF-016 (GPT review): 我的業務 opens the order itself. locate(id) says
+-- whether this page lists it (pure: no frames needed); focus(id) scrolls to
+-- it and lights it. A missing id changes nothing and returns false, "missing".
+---------------------------------------------------------------------------
+
+UI.focusId = nil
+function UI.locate(id)
+    if id == nil then return false end
+    for _, r in ipairs(UI.pageRows()) do if r.view and r.view.id == id then return true end end
+    return false
+end
+
+-- Scroll so row i (1-based) sits in view, about in the middle.
+function UI.scrollToRow(i)
+    if not (scroll and i) then return end
+    local h = ns.num((scroll:GetHeight())) or 0
+    if h <= 0 then h = 420 end
+    local total = #shownRows * ROW_HEIGHT
+    local y = (i - 1) * ROW_HEIGHT - math.floor((h - ROW_HEIGHT) / 2)
+    y = math.max(0, math.min(y, math.max(0, total - h)))
+    scroll:SetVerticalScroll(y)
+    UI.layoutRows()
+end
+
+function UI.focus(id)
+    if not UI.locate(id) then
+        UI.focusId = nil
+        if panel then UI.layoutRows() end
+        return false, "missing"
+    end
+    UI.focusId = id
+    if not panel then return true end
+    UI.refresh()
+    for i, r in ipairs(shownRows) do
+        if r.view and r.view.id == id then UI.scrollToRow(i); return true end
+    end
+    return true
+end
 
 -- GF-UI-C (owner: 「不接 / 工錢 / ?」 ran into each other): every profession
 -- is one group [icon] 接單/不接 [工錢] coin amount; groups sit in even columns
@@ -658,7 +706,9 @@ ns.Framework.register({
     order = 13,
     available = function() return ns.guildState() == "target" end,
     create = build,
-    show = function() O().markSeen(); UI.refresh() end,
+    show = function() UI.focusId = nil; O().markSeen(); UI.refresh() end,
+    -- GF-014 / GF-016: 業務通知 opens this page, then focus(id) finds the row.
+    focus = function(id) return UI.focus(id) end,
 })
 
 ---------------------------------------------------------------------------

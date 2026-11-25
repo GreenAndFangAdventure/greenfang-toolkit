@@ -7,6 +7,11 @@ local wow = {}
 local TOC_FILES = { "Config.lua", "Core.lua", "Theme.lua", "Data.lua", "Icons.lua", "GameIcons.lua", "Professions.lua", "Roster.lua", "Sync.lua", "Comm.lua", "Share.lua", "Profile.lua", "Ledger.lua", "Orders.lua", "Prices.lua", "Delivery.lua", "WebOrders.lua", "AdventureData.lua", "Adventure.lua",
     "Export.lua", "Framework.lua", "UI.lua", "Character.lua", "ProfileUI.lua", "Recipes.lua", "Diag.lua", "GuildAdmin.lua", "NativeLFG.lua", "OrdersUI.lua", "Widgets.lua", "AdventureUI.lua", "SleepingBagData.lua", "SleepingBag.lua", "SupplyRules.lua", "Supply.lua", "SupplyListings.lua", "SupplyUI.lua", "Probe.lua", "Init.lua" }
 TOC_FILES[#TOC_FILES + 1] = "Events.lua" -- GF-013 (appended, like the TOC)
+TOC_FILES[#TOC_FILES + 1] = "Notify.lua" -- GF-014 (appended, like the TOC)
+TOC_FILES[#TOC_FILES + 1] = "NotifyUI.lua"
+TOC_FILES[#TOC_FILES + 1] = "SupplyRadar.lua"
+TOC_FILES[#TOC_FILES + 1] = "Bank.lua" -- GF-012 (appended, like the TOC)
+TOC_FILES[#TOC_FILES + 1] = "BankUI.lua"
 wow.TOC_FILES = TOC_FILES
 
 ---------------------------------------------------------------------------

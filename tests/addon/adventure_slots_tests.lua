@@ -426,10 +426,11 @@ return function(T)
         local f = _G[U.TICKET_NAME]
         eq(#d.slots, 1, "one slot (現在)")
         for i = 2, 5 do
-            local pk = (function() wow.click(f.addSlot); return U.picker() end)()
-            ok(pk:IsShown() and pk.title:GetText() == "時段 " .. i, "adding opens its picker: 時段 " .. i)
-            ok(pk.remove:IsShown(), "移除 with more than one slot")
-            pk:Hide()
+            -- GF-UI-G: ＋時段 opens the new slot's editor inside the form (no picker window).
+            wow.click(f.addSlot)
+            ok(f.slotEdit:IsShown() and f.slotEditIndex == i, "adding opens its editor: 時段 " .. i)
+            ok(f.slotEdit.remove:IsShown(), "移除 with more than one slot")
+            U.closeSlotEditor(f)
         end
         eq(#d.slots, 5, "five"); eq(f.addSlot:IsShown(), false, "no ＋時段 at 5")
         ok(f.slotChips[5]:IsShown(), "five chips")

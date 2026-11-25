@@ -104,7 +104,10 @@ F.DEFAULT_ENTRY = {
 -- The game's own icons, each with fallbacks (MANUAL §3uie).
 F.ENTRY_ICON = {
     profile = { "Interface\\Icons\\INV_Misc_Head_Human_01", "Interface\\Icons\\INV_Misc_Note_01" },
-    directory = { "Interface\\Icons\\INV_Misc_Book_09", "Interface\\Icons\\INV_Misc_Note_02" },
+    -- GF-UI-F: a group of people (the game's group-finder icon), then the
+    -- guild tabard; never a book (冒險指南 is the book).
+    directory = { "Interface\\Icons\\INV_Misc_GroupLooking", "Interface\\Icons\\INV_Shirt_GuildTabard_01",
+        "Interface\\Icons\\INV_Misc_Note_02" },
     crafting = { "Interface\\Icons\\Trade_BlackSmithing", "Interface\\Icons\\INV_Hammer_20" },
     logistics = { "Interface\\Icons\\INV_Box_01", "Interface\\Icons\\INV_Misc_Bag_08" },
     adventure = { "Interface\\Icons\\INV_Misc_Map_01", "Interface\\Icons\\INV_Sword_04" },
@@ -112,7 +115,7 @@ F.ENTRY_ICON = {
     settings = { "Interface\\Icons\\INV_Misc_Gear_01", "Interface\\Icons\\Trade_Engineering" },
     page = { "Interface\\Icons\\INV_Misc_Note_01" }, -- an entry of its own (no entry given)
 }
-F.NAV_ICON = 20
+F.NAV_ICON = 22 -- GF-UI-G: 22 px in the module list (22-24)
 
 ---------------------------------------------------------------------------
 -- Registry
@@ -258,6 +261,7 @@ local function createWindow()
     if window then return window end
     -- GF-UI-D: the theme's window (dark panel, 1 px line, gold title, the X).
     local f = ns.Theme.window(F.WINDOW_NAME, UIParent, F.NAV_WIDTH + F.PANEL_WIDTH + 10, F.PANEL_HEIGHT + F.SUBTAB_H)
+    if ns.Theme.C.main then ns.Theme.color(f.gfOpaque, ns.Theme.C.main) end -- GF-UI-G: the main window, more opaque
     f:SetPoint("CENTER")
     f:SetFrameStrata("DIALOG")
     f:SetMovable(true)
@@ -271,7 +275,7 @@ local function createWindow()
     nav:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -32)
     nav:SetSize(F.NAV_WIDTH - 14, F.PANEL_HEIGHT + F.SUBTAB_H - 44)
     -- GF-UI-D: the module list is a faint panel with a line on its right.
-    nav.bg = ns.Theme.fill(nav, ns.Theme.C.panel, "BACKGROUND")
+    nav.bg = ns.Theme.fill(nav, ns.Theme.C.side or ns.Theme.C.panel, "BACKGROUND") -- GF-UI-G: #2B3225
     nav.line = ns.Theme.vline(nav, 0, 0, 0, nil, true)
     f.nav = nav
     -- GF-UI-E: the sub-tab row over the page, with a thin line under it.

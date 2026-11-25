@@ -47,7 +47,7 @@ function L.categoryText(key) return byKey[key] and byKey[key].text or "其他" e
 L.DIRECTION_TEXT = { need = "徵求", offer = "供應" }
 L.STATUS_TEXT = { active = "刊登中", closed = "已結束", cancelled = "已取消", expired = "已過期" }
 
-local stats = { rejected = 0, created = 0, updated = 0, ended = 0 }
+local stats = { rejected = 0, created = 0, updated = 0, ended = 0, deleted = 0 }
 L.stats = stats
 
 ---------------------------------------------------------------------------
@@ -235,28 +235,89 @@ function L.afterCombat() end
 L.CLASS_CATEGORY = { [9] = "recipe", [7] = "material", [5] = "material", [2] = "gear", [4] = "gear",
     [0] = "consumable", [12] = "quest" }
 
--- { name, link, icon, classID, bindType } or nil, "loading" / "unknown".
-function L.itemInfo(itemID)
+-- { name, link, icon, classID, subclassID, typeName, subTypeName, bindType }
+-- or nil, "loading" / "unknown". noRequest: an item not in the client's cache
+-- is not asked from the server (GF-UI-H: the item finder reads many IDs).
+function L.itemInfo(itemID, noRequest)
     if type(itemID) ~= "number" or itemID <= 0 then return nil, "unknown" end
     local getInfo = (type(C_Item) == "table" and type(C_Item.GetItemInfo) == "function") and C_Item.GetItemInfo or GetItemInfo
     if type(getInfo) ~= "function" then return nil, "unknown" end
-    local okCall, name, link, _, _, _, _, _, _, _, icon, _, classID, _, bindType = pcall(getInfo, itemID)
+    local okCall, name, link, _, _, _, typeName, subTypeName, _, _, icon, _, classID, subclassID, bindType = pcall(getInfo, itemID)
     if not okCall then return nil, "unknown" end
     if type(name) ~= "string" or name == "" then
-        if type(C_Item) == "table" and type(C_Item.RequestLoadItemDataByID) == "function" then ns.call(C_Item.RequestLoadItemDataByID, itemID) end
+        if not noRequest and type(C_Item) == "table" and type(C_Item.RequestLoadItemDataByID) == "function" then
+            ns.call(C_Item.RequestLoadItemDataByID, itemID)
+        end
         return nil, "loading"
     end
     return { itemID = itemID, name = name, link = type(link) == "string" and link or nil,
-        icon = icon or Supply.itemIcon(itemID), classID = tonumber(classID), bindType = tonumber(bindType) }
+        icon = icon or Supply.itemIcon(itemID), classID = tonumber(classID), subclassID = tonumber(subclassID),
+        typeName = type(typeName) == "string" and typeName ~= "" and typeName or nil,
+        subTypeName = type(subTypeName) == "string" and subTypeName ~= "" and subTypeName or nil,
+        bindType = tonumber(bindType) }
 end
 
--- nil when it may be listed, else why not (text for the form).
+-- GF-UI-H: 拾取綁定 (1) and quest items (4) can never be traded: never listed,
+-- in either direction, and never offered by the item finder.
+L.NO_TRADE_BIND = { [1] = true, [4] = true }
+function L.tradeable(info) return info ~= nil and not L.NO_TRADE_BIND[info.bindType or 0] end
+
+-- nil when it may be listed, else why not (text for the form). The same for
+-- 徵求 and 供應.
 function L.itemProblem(itemID, fromBag)
     local info, why = L.itemInfo(itemID)
     if not info then return why == "loading" and "物品資料載入中，請稍後再試" or "無法辨識這個物品" end
-    if info.bindType == 1 or info.bindType == 4 then return "這個物品拾取綁定，不能交易" end
+    if not L.tradeable(info) then return "這個物品拾取綁定，不能交易" end
     if fromBag and fromBag.isBound then return "這個物品已綁定，不能交易" end
     return nil
+end
+
+---------------------------------------------------------------------------
+-- GF-UI-H: the item type, from the game's classID / subclassID (never chosen
+-- by the player). Names: the client's own (GetItemInfo's type texts, else
+-- GetItemClassInfo / GetItemSubClassInfo), else these.
+---------------------------------------------------------------------------
+
+L.CLASS_NAME = { [0] = "消耗品", [1] = "容器", [2] = "武器", [3] = "寶石", [4] = "護甲", [5] = "材料",
+    [6] = "彈藥", [7] = "商品", [9] = "配方", [11] = "箭袋", [12] = "任務", [13] = "鑰匙", [15] = "雜項" }
+
+local function clientClassName(classID)
+    local fnc = (type(C_Item) == "table" and type(C_Item.GetItemClassInfo) == "function") and C_Item.GetItemClassInfo or GetItemClassInfo
+    if type(fnc) ~= "function" then return nil end
+    local okCall, name = pcall(fnc, classID)
+    return okCall and type(name) == "string" and name ~= "" and name or nil
+end
+local function clientSubName(classID, subclassID)
+    local fnc = (type(C_Item) == "table" and type(C_Item.GetItemSubClassInfo) == "function") and C_Item.GetItemSubClassInfo or GetItemSubClassInfo
+    if type(fnc) ~= "function" then return nil end
+    local okCall, name = pcall(fnc, classID, subclassID)
+    return okCall and type(name) == "string" and name ~= "" and name or nil
+end
+
+function L.className(classID, info)
+    if classID == nil then return "其他" end
+    return (info and info.typeName) or clientClassName(classID) or L.CLASS_NAME[classID] or "其他"
+end
+function L.subclassName(classID, subclassID, info)
+    if classID == nil or subclassID == nil then return nil end
+    return (info and info.subTypeName) or clientSubName(classID, subclassID)
+end
+
+-- The listing category (wire code) from the item class; unknown classes keep
+-- what the caller gave (old callers), else 其他.
+function L.categoryFor(info, fallback)
+    local cat = info and info.classID and L.CLASS_CATEGORY[info.classID]
+    if cat then return cat end
+    return byKey[fallback] and fallback or "other"
+end
+
+-- 「配方｜裁縫」: the type line shown in the form and the finder.
+function L.typeText(info)
+    if not info then return "" end
+    local c = L.className(info.classID, info)
+    local s = L.subclassName(info.classID, info.subclassID, info)
+    if s and s ~= c then return c .. "｜" .. s end
+    return c
 end
 
 -- Unbound items in this character's bags, one entry per ItemID (the 背包
@@ -286,6 +347,132 @@ function L.bagItems()
 end
 
 ---------------------------------------------------------------------------
+-- GF-UI-H: the item finder (自己背包沒有的物品也能刊登). Only what the client
+-- already knows; no item database is shipped:
+--   背包 unbound bag items; 刊登 my listings and the guild's received ones;
+--   集料 the collection rules' items; 配方 the cached recipe reagents and
+--   products; 行情 items in the price store (AH scans, merchants).
+-- An item not in the client's cache is asked for only from the small sources
+-- (it appears once the client has it); the price store never asks.
+-- Untradeable items (拾取綁定, quest items, bound bag stacks) never appear.
+---------------------------------------------------------------------------
+
+L.CATALOG_MAX = 3000 -- IDs looked at per opening (the price store can be big)
+
+local function addID(set, order, id, ask)
+    id = tonumber(id)
+    if not id or id <= 0 or id > 10000000 then return end
+    if set[id] == nil then
+        if #order >= L.CATALOG_MAX then return end
+        set[id] = ask and true or false
+        order[#order + 1] = id
+    elseif ask then
+        set[id] = true
+    end
+end
+
+-- { [itemID] = askServer } and the order they were found in.
+function L.catalogIDs()
+    local set, order = {}, {}
+    for _, l in ipairs(L.own()) do addID(set, order, l.itemID, true) end
+    local okAll, all = pcall(L.activeAll)
+    for _, l in ipairs(okAll and all or {}) do addID(set, order, l.itemID, true) end
+    for _, r in ipairs(ns.SupplyRules and ns.SupplyRules.list or {}) do
+        for _, id in ipairs(r.order or {}) do addID(set, order, id, true) end
+    end
+    local P = ns.Prices
+    local okDB, p = pcall(function() return P and P.db() end)
+    if okDB and type(p) == "table" then
+        for _, s in pairs(type(p.reagents) == "table" and p.reagents or {}) do
+            local r = P.decodeReagents(s)
+            if r then
+                addID(set, order, r.output, true)
+                for _, x in ipairs(r.list) do addID(set, order, x.id, true) end
+            end
+        end
+        for id in pairs(type(p.vendor) == "table" and p.vendor or {}) do addID(set, order, id, false) end
+        for _, items in pairs(type(p.ah) == "table" and p.ah or {}) do
+            if type(items) == "table" then for id in pairs(items) do addID(set, order, id, false) end end
+        end
+    end
+    return set, order
+end
+
+-- Lower case, for the name search (ASCII only; CJK has no case).
+local function fold(s) return str(s):lower() end
+
+-- The finder's list: { itemID, info, count, bag } sorted by type, then name.
+-- opts.source "bag" (default) or "all"; opts.text a name part, an ItemID or
+-- an item link; opts.class / opts.subclass the filters (nil = 全部).
+function L.catalog(opts)
+    opts = opts or {}
+    local bag = {}
+    for _, b in ipairs(L.bagItems() or {}) do bag[b.itemID] = b end
+    local set, order
+    if opts.source == "all" then
+        set, order = L.catalogIDs()
+        for _, b in ipairs(L.bagItems() or {}) do addID(set, order, b.itemID, true) end
+    else
+        set, order = {}, {}
+        for _, b in ipairs(L.bagItems() or {}) do addID(set, order, b.itemID, true) end
+    end
+    local text = str(opts.text):gsub("^%s+", ""):gsub("%s+$", "")
+    local exact = L.itemFromText(text) or (text:match("^%d+$") and tonumber(text)) or nil
+    if exact then addID(set, order, exact, true) end
+    local needle = (exact or text == "") and nil or fold(text)
+    local out = {}
+    for _, id in ipairs(order) do
+        local info = L.itemInfo(id, not set[id])
+        if info and L.tradeable(info) then
+            local okText = (exact and id == exact) or (not exact and (not needle or fold(info.name):find(needle, 1, true) ~= nil))
+            local okClass = opts.class == nil or info.classID == opts.class
+            local okSub = opts.subclass == nil or info.subclassID == opts.subclass
+            if okText and okClass and okSub then
+                local b = bag[id]
+                out[#out + 1] = { itemID = id, info = info, count = b and b.count or nil, bag = b ~= nil }
+            end
+        end
+    end
+    table.sort(out, function(x, y)
+        local cx, cy = x.info.classID or 99, y.info.classID or 99
+        if cx ~= cy then return cx < cy end
+        local sx, sy = x.info.subclassID or 99, y.info.subclassID or 99
+        if sx ~= sy then return sx < sy end
+        if x.info.name ~= y.info.name then return x.info.name < y.info.name end
+        return x.itemID < y.itemID
+    end)
+    return out
+end
+
+-- The filters' choices for a list from L.catalog (without the class / subclass
+-- filter): { { value = classID, text } } and, for one class, its subclasses.
+function L.catalogClasses(list)
+    local seen, out = {}, {}
+    for _, e in ipairs(list) do
+        local c = e.info.classID
+        if c ~= nil and not seen[c] then
+            seen[c] = true
+            out[#out + 1] = { value = c, text = L.className(c, e.info) }
+        end
+    end
+    table.sort(out, function(a, b) return a.value < b.value end)
+    return out
+end
+function L.catalogSubclasses(list, classID)
+    local seen, out = {}, {}
+    if classID == nil then return out end
+    for _, e in ipairs(list) do
+        local s = e.info.subclassID
+        if e.info.classID == classID and s ~= nil and not seen[s] then
+            seen[s] = true
+            out[#out + 1] = { value = s, text = L.subclassName(classID, s, e.info) or L.className(classID, e.info) }
+        end
+    end
+    table.sort(out, function(a, b) return a.value < b.value end)
+    return out
+end
+
+---------------------------------------------------------------------------
 -- Create / edit / end (only this character's own listings exist here)
 ---------------------------------------------------------------------------
 
@@ -310,7 +497,8 @@ function L.check(f, editing)
     if not validDays(days) then return nil, "有效期請選 3、7、14 或 30 天" end
     local note, why = L.cleanNote(f.note)
     if not note then return nil, why == "too-long" and ("備註最多 " .. L.NOTE_MAX .. " 字") or "備註有問題" end
-    local cat = byKey[f.category] and f.category or "other"
+    -- GF-UI-H: the category follows the item's class (never the player's pick).
+    local cat = L.categoryFor((L.itemInfo(itemID, true)), f.category)
     return { direction = f.direction, itemID = itemID, quantity = qty, days = days, note = note, category = cat }
 end
 
@@ -375,6 +563,31 @@ function L.finish(id, status)
     stats.ended = stats.ended + 1
     L.publish()
     return true
+end
+
+-- GF-UI-H: 刪除 an ended listing of mine (已結束／已取消／已過期). It is
+-- already missing from my published snapshot (that newer snapshot is its
+-- tombstone), so removing the local copy cannot bring it back; its id is
+-- never handed out again (nextID only grows). An active one is not deleted:
+-- 結束 it first.
+function L.remove(id)
+    local m = mine()
+    local l = m and m.list[id]
+    if not l then return false, "找不到這筆刊登" end
+    if l.status == "active" then return false, "刊登中的請先結束" end
+    m.list[id] = nil
+    stats.deleted = (stats.deleted or 0) + 1
+    L.publish()
+    return true
+end
+
+-- GF-UI-H: a received listing of an item the client knows as untradeable
+-- (拾取綁定, quest item) is not shown on the page (Supply.view). Unknown items
+-- stay (their data may still be loading). The radar keeps its own checks.
+function L.shownOnPage(e)
+    if not e or e.own or not e.manual or e.auto then return true end
+    local info = L.itemInfo(e.itemID, true)
+    return info == nil or L.tradeable(info)
 end
 
 ---------------------------------------------------------------------------

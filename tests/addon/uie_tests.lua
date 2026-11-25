@@ -111,7 +111,7 @@ return function(env)
         eq(navTexts(ns), "職工檔案,職工名冊,委託業務,物資調度,冒險業務,冒險指南,奇怪,舊頁", "物資調度 shows up; others after the six")
         local pages = {}
         for _, d in ipairs(F.pagesOf("logistics")) do pages[#pages + 1] = F.pageTitle(d) end
-        eq(table.concat(pages, ","), "我的物資,調貨所", "subOrder first, subTitle used")
+        eq(table.concat(pages, ","), "我的物資,調貨所,臨時黑箱", "subOrder first, subTitle used") -- GF-012 adds 臨時黑箱 (was 公會黑庫)
         pages = {}
         for _, d in ipairs(F.pagesOf("profile")) do pages[#pages + 1] = d.id end
         eq(table.concat(pages, ","), "profile,character", "profile and character share 職工檔案")

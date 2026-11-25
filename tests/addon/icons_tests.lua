@@ -130,9 +130,10 @@ return function(T)
     test("GF-002-C time marks: now, clock for today, calendar for later", function()
         local ns = login()
         local U = ns.AdventureUI
-        ok(U.timeText({ timeMode = "n" }):find("TimeStop", 1, true), "now")
+        -- GF-UI-G (owner): 現在 and a set time share one small clock.
+        ok(U.timeText({ timeMode = "n" }):find("PocketWatch_01", 1, true), "now")
         ok(U.timeText({ timeMode = "t", start = 1763000000, finish = 1763003600 }):find("PocketWatch", 1, true), "today")
-        ok(U.timeText({ timeMode = "f", start = 1763000000, finish = 1763003600 }):find("INV_Misc_Book_09", 1, true), "future (GF-002-F: a book, not the calendar art)")
+        ok(U.timeText({ timeMode = "f", start = 1763000000, finish = 1763003600 }):find("PocketWatch_01", 1, true), "future: the same clock")
     end)
 
     test("GF-002-C item 8: dungeon colours by level (white fits, grey too low, red too high)", function()
