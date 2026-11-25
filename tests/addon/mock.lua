@@ -10,6 +10,8 @@ TOC_FILES[#TOC_FILES + 1] = "Events.lua" -- GF-013 (appended, like the TOC)
 TOC_FILES[#TOC_FILES + 1] = "Notify.lua" -- GF-014 (appended, like the TOC)
 TOC_FILES[#TOC_FILES + 1] = "NotifyUI.lua"
 TOC_FILES[#TOC_FILES + 1] = "SupplyRadar.lua"
+TOC_FILES[#TOC_FILES + 1] = "Bank.lua" -- GF-012 (appended, like the TOC)
+TOC_FILES[#TOC_FILES + 1] = "BankUI.lua"
 wow.TOC_FILES = TOC_FILES
 
 ---------------------------------------------------------------------------

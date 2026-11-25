@@ -52,3 +52,5 @@ Events.lua
 Notify.lua
 NotifyUI.lua
 SupplyRadar.lua
+Bank.lua
+BankUI.lua

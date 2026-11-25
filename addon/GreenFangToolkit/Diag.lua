@@ -164,6 +164,8 @@ local SECTIONS = {
     -- GF-014: 業務通知 and the local radar (this computer only; nothing is sent).
     { title = "業務通知與需求雷達（GF-014）", text = function()
         return (ns.Notify and ns.Notify.diagText() or "") .. (ns.SupplyRadar and ("｜" .. ns.SupplyRadar.diagText()) or "") end },
+    -- GF-012: 公會黑庫 phase 1 (who is guild master, the custodian list; no stock yet).
+    { title = "公會黑庫（GF-012）", text = function() return ns.Bank and ns.Bank.diagText() or "" end },
 }
 
 -- GF-UI-B (GF-UI-A §2.11): 16 px text (18 px state line, gold section
