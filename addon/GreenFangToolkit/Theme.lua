@@ -22,7 +22,7 @@ ns.Theme = T
 -- Colours (one table). r, g, b[, a].
 ---------------------------------------------------------------------------
 
--- GF-UI-G (0.16.x, the 冒險業務 sample page): deep olive grey, warm grey brown and
+-- GF-UI-G (0.16.x, the 冒險業務 sample page), GF-UI-J (warm charcoal, no green): charcoal, warm brown grey and
 -- a muted brass gold. Every colour of the toolkit is here (hex in the comment);
 -- gold only for what is chosen, section headers and the main action; red stays
 -- for removing. The fills are the game's white square tinted (T.color).
@@ -32,28 +32,29 @@ local function rgb(hex, a)
 end
 T.rgb = rgb
 T.C = {
-    bg = rgb("22251E", 0.97),             -- windows, menus, popups: never see-through
-    main = rgb("22251E", 0.99),           -- the main window: more opaque still
-    side = rgb("2B3225"),                 -- the module list on the left
-    panel = rgb("2B3225", 0.55),          -- a panel inside a window
-    rowA = rgb("272822"), rowB = rgb("2E2D25"), -- list rows, one after the other
-    form = rgb("303329"),                 -- forms and drop-down lists: opaque, nothing shows through
-    selFill = rgb("3B4630"),              -- the chosen row / tab / item
-    selLine = rgb("B49B63"),              -- its 1 px frame
+    -- GF-UI-J (owner, 0.16.2 in game: 「太綠」): warm charcoal; no olive green anywhere.
+    bg = rgb("232323", 0.97),             -- windows, menus, popups: never see-through
+    main = rgb("232323", 0.99),           -- the main window: more opaque still
+    side = rgb("292724"),                 -- the module list on the left
+    panel = rgb("292724", 0.55),          -- a panel inside a window
+    rowA = rgb("282624"), rowB = rgb("302D29"), -- list rows, warm brown grey, one after the other
+    form = rgb("302C28"),                 -- forms, pop-ups and drop-down lists: opaque, nothing shows through
+    selFill = rgb("3A332A"),              -- the chosen row / tab / item: a warm brown, not green
+    selLine = rgb("B9925F"),              -- its 1 px frame: matte brass
     title = rgb("CFB77E"),                -- titles and section headers
-    line = rgb("535144"),                 -- 1 px borders and separators
-    lineHover = rgb("8A8470"),            -- the border under the mouse
+    line = rgb("4A4540"),                 -- 1 px borders and separators (warm grey)
+    lineHover = rgb("8A8072"),            -- the border under the mouse
     gold = rgb("CFB77E"),                 -- chosen / active, section headers (the title colour)
-    goldFill = rgb("3B4630"),             -- the fill of a chosen tab or toggle (selFill)
-    goldLine = rgb("B49B63", 0.85),       -- the line under a section header, a focused box
+    goldFill = rgb("3A332A"),             -- the fill of a chosen tab or toggle (selFill)
+    goldLine = rgb("B9925F", 0.85),       -- the line under a section header, a focused box
     fill = { 1, 1, 1, 0.03 },             -- a button's own fill (almost transparent)
-    hover = rgb("E5DDC8", 0.08),          -- a button / row under the mouse: a little lighter
-    head = rgb("2B3225"),                 -- table header bar
-    input = rgb("303329"),                -- edit boxes, check boxes (the form colour, opaque)
-    text = rgb("E5DDC8"),                 -- normal text and button text
-    sub = rgb("BEB5A0"),                  -- secondary text
-    muted = rgb("BEB5A0"),                -- the X, not chosen
-    disabled = rgb("BEB5A0", 0.45),       -- what cannot be pressed: dimmer
+    hover = rgb("E8DFD2", 0.08),          -- a button / row under the mouse: a little lighter
+    head = rgb("292724"),                 -- table header bar (the side colour, no green)
+    input = rgb("302C28"),                -- edit boxes, check boxes (the form colour, opaque)
+    text = rgb("E8DFD2"),                 -- normal text and button text: warm white
+    sub = rgb("BEB4A4"),                  -- secondary text
+    muted = rgb("BEB4A4"),                -- the X, not chosen
+    disabled = rgb("BEB4A4", 0.45),       -- what cannot be pressed: dimmer
     good = { 0.25, 1, 0.35 }, bad = { 1, 0.3, 0.3 },
     coinGold = { 1, 0.82, 0 }, coinSilver = { 0.8, 0.8, 0.84 }, coinCopper = { 0.93, 0.62, 0.36 },
 }
