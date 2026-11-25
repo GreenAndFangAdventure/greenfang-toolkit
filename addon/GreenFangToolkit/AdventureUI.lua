@@ -691,6 +691,12 @@ local function newRow(i)
     row.delete.action = "delete"
     row.delete:Hide()
     row.head = row:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT); row.head:SetPoint("LEFT", row, "LEFT", 6, 0)
+    -- GF-016: the row 我的業務 opened (UI.focus), lit with the quest log's highlight.
+    row.focusMark = row:CreateTexture(nil, "BORDER")
+    row.focusMark:SetAllPoints()
+    Icons.set(row.focusMark, "Interface\QuestFrame\UI-QuestTitleHighlight")
+    if row.focusMark.SetBlendMode then row.focusMark:SetBlendMode("ADD") end
+    row.focusMark:Hide()
     row:EnableMouse(true)
     if row.RegisterForClicks then row:RegisterForClicks("LeftButtonUp", "RightButtonUp") end
     row:SetScript("OnMouseUp", function(self, mouse)
@@ -1048,6 +1054,7 @@ function UI.layoutRows()
                 row:ClearAllPoints()
                 row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -(i - 1) * ROW_HEIGHT)
                 fillRow(row, data, i)
+                if data.view and UI.focusId ~= nil and data.view.id == UI.focusId then row.focusMark:Show() else row.focusMark:Hide() end
                 row:Show()
             else row:Hide(); row.view = nil; row.mine = nil; row.lfg = nil end
         end
@@ -1056,6 +1063,56 @@ end
 function UI.rowFrames() return rowWidgets end
 function UI.scrollFrame() return scroll end
 function UI.shownRows() return shownRows end
+
+---------------------------------------------------------------------------
+-- GF-016 (GPT review): 我的業務 opens the ticket itself. locate(id) gives the
+-- tab that lists it ("active" / "ended"; pure: no frames needed) or nil when
+-- the page does not list it (removed, past the keep time, or deleted here).
+-- focus(id) switches to that tab, lifts a 區域 filter that hides it, scrolls
+-- to it and lights it. A missing id changes nothing: false, "missing".
+---------------------------------------------------------------------------
+
+UI.focusId = nil
+function UI.locate(id)
+    if id == nil then return nil end
+    local tickets = A().rowsFor()
+    for _, r in ipairs(tickets) do
+        if r.view.id == id then return r.view.closed == true and "ended" or "active", r.view end
+    end
+    return nil
+end
+
+function UI.scrollToRow(i)
+    if not (scroll and i) then return end
+    local h = ns.num((scroll:GetHeight())) or 0
+    if h <= 0 then h = 420 end
+    local total = #shownRows * ROW_HEIGHT
+    local y = (i - 1) * ROW_HEIGHT - math.floor((h - ROW_HEIGHT) / 2)
+    y = math.max(0, math.min(y, math.max(0, total - h)))
+    scroll:SetVerticalScroll(y)
+    UI.layoutRows()
+end
+
+function UI.focus(id)
+    local tab, v = UI.locate(id)
+    if not tab then
+        UI.focusId = nil
+        if panel then UI.layoutRows() end
+        return false, "missing"
+    end
+    UI.tab = tab
+    if UI.zoneFilter and not zonePass({ UI.zoneOf(v) }) then
+        UI.zoneFilter = nil
+        if UI.zoneButton then UI.zoneButton.selected = nil end
+    end
+    UI.focusId = id
+    if not panel then return true end
+    UI.refresh()
+    for i, r in ipairs(shownRows) do
+        if r.view and r.view.id == id then UI.scrollToRow(i); return true end
+    end
+    return true
+end
 
 -- R-11.3 / GF-002-C item 9: dungeon art, the number of people, the missing roles.
 function UI.summaryText()
@@ -1153,7 +1210,7 @@ ns.Framework.register({
     order = 14,
     available = function() return ns.guildState() == "target" end,
     create = build,
-    show = function() A().markSeen(); UI.refresh() end,
+    show = function() UI.focusId = nil; A().markSeen(); UI.refresh() end,
 })
 
 ---------------------------------------------------------------------------

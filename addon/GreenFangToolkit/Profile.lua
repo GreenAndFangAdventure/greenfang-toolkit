@@ -28,13 +28,20 @@ Profile.ROLES = { "t", "h", "d" }
 Profile.ROLE_NAME = { t = "坦克", h = "治療", d = "輸出" }
 Profile.UNSET_NAME, Profile.UNKNOWN_NAME = "未設定", "未知"
 
--- Roles each class can take (spec §5.2: 職業允許職責依已驗證 Forever 資料表).
--- Source: the 1.x class design (talent trees and the abilities each class
--- has); NOT verified on Forever 16001 in game or from Forever's own data,
--- so every row is marked verified = false. A class not in the table
--- (unknown or new) may pick any role: the table never blocks what it does
--- not know.
-Profile.CLASS_ROLES_SOURCE = "1.x 職業設計推測（天賦樹與職業技能）；未經 Forever 16001 實機或官方資料驗證"
+-- Roles each class usually takes (spec §5.2: 職業允許職責依已驗證 Forever 資料表).
+-- GF-016: there is no verified Forever table, so nothing is blocked: a role
+-- outside this list is only marked 「此職業通常不擔任」 (a dimmer icon and a
+-- tooltip) and may still be chosen. Forever's own interface code does the
+-- same (WoWBlzCode Forever/…/Blizzard_GroupFinder_VanillaStyle/Classic/
+-- Blizzard_LFGVanilla_Listing.xml: UnitGetAvailableRoles("player") gives
+-- "recommended" roles, the others get a cover and CLASS_ROLE_NOT_RECOMMENDED,
+-- the check box stays usable; UnitRoleDocumentation.lua also has
+-- AreClassRolesSoftSuggestions). For the own character the game's answer
+-- (UnitGetAvailableRoles) wins when the client has it; others use this table.
+-- Source of the table: the 1.x class design (talent trees and abilities);
+-- NOT verified on Forever 16001, so every row is verified = false.
+Profile.CLASS_ROLES_SOURCE = "建議用（不擋）：1.x 職業設計推測；本角色優先用遊戲 UnitGetAvailableRoles；未經 Forever 16001 實機驗證"
+Profile.NOT_SUGGESTED_TIP = "此職業通常不擔任"
 Profile.CLASS_ROLES = {
     WARRIOR = { t = true, d = true, verified = false },
     PALADIN = { t = true, h = true, d = true, verified = false },
@@ -47,9 +54,29 @@ Profile.CLASS_ROLES = {
     HUNTER = { d = true, verified = false },
 }
 
--- May a character of this class take role r?
+-- May a character of this class take role r? Any real role (GF-016: the
+-- class list is a suggestion, never a block).
 function Profile.allowed(classToken, r)
+    return Profile.ROLE_NAME[r] ~= nil
+end
+
+-- The game's own suggestion for this character: { t, h, d } or nil when the
+-- client has no UnitGetAvailableRoles (or it fails / gives no booleans).
+function Profile.gameSuggestion()
+    if type(UnitGetAvailableRoles) ~= "function" then return nil end
+    local okC, t, h, d = pcall(UnitGetAvailableRoles, "player")
+    if not okC or type(t) ~= "boolean" or type(h) ~= "boolean" or type(d) ~= "boolean" then return nil end
+    return { t = t, h = h, d = d }
+end
+
+-- Does this class usually take role r? own = the own character (asks the game first).
+-- An unknown class: true (nothing to suggest against).
+function Profile.suggested(classToken, r, own)
     if not Profile.ROLE_NAME[r] then return false end
+    if own then
+        local g = Profile.gameSuggestion()
+        if g then return g[r] == true end
+    end
     local row = Profile.CLASS_ROLES[str(classToken)]
     if not row then return true end
     return row[r] == true
@@ -123,7 +150,7 @@ function Profile.own()
     return e
 end
 
-local function ownClass() return str(ns.Sync and ns.Sync.player().classToken) end
+function Profile.ownClass() return str(ns.Sync and ns.Sync.player().classToken) end
 
 local listeners = {}
 function Profile.onChange(fn) listeners[#listeners + 1] = fn end
@@ -145,12 +172,12 @@ local function publish(now)
     end
 end
 
--- Set the main role (nil = 未設定). It joins 可支援. false + reason when
--- the class cannot take it.
+-- Set the main role (nil = 未設定). It joins 可支援. Any role may be chosen
+-- (GF-016: a role the class does not usually take is only a hint on the page).
 function Profile.setMain(r)
     local e = Profile.own()
     if not e then return false, "no-guid" end
-    if r ~= nil and not Profile.allowed(ownClass(), r) then return false, "class" end
+    if r ~= nil and not ORDER[r] then return false, "role" end
     if e.main == r then return true end
     e.main = r
     if r then e.can[r] = true end
@@ -165,7 +192,6 @@ function Profile.setCan(r, on)
     local e = Profile.own()
     if not e then return false, "no-guid" end
     if not ORDER[r] then return false, "role" end
-    if on and not Profile.allowed(ownClass(), r) then return false, "class" end
     if not on and e.main == r then return false, "main" end
     if (e.can[r] == true) == (on and true or false) then return true end
     e.can[r] = on and true or nil
@@ -195,16 +221,13 @@ end
 -- The own value for the share group: nil = not shared (withdrawn, or never
 -- set: a character that never touched its roles sends nothing and stays 未知,
 -- so the guild does not get one more record per member for nothing).
--- Roles the class cannot take are left out (the table may have changed).
+-- Every chosen role is sent (GF-016: the class list never removes one).
 function Profile.ownValue()
     local e = Profile.own()
     if not (e and e.share and e.set) then return nil end
-    local class = ownClass()
     local can = {}
-    for r in pairs(e.can) do if Profile.allowed(class, r) then can[r] = true end end
-    local main = e.main
-    if main and not Profile.allowed(class, main) then main = nil end
-    return Profile.encode({ main = main, can = can })
+    for r in pairs(e.can) do if ORDER[r] then can[r] = true end end
+    return Profile.encode({ main = e.main, can = can })
 end
 
 ---------------------------------------------------------------------------
@@ -367,16 +390,28 @@ function Profile.myBusiness()
     return out
 end
 
--- Open the record where it lives: its module's page, and the record itself
--- when that module offers focus(id) (feature-detected; added at integration).
+-- Open the record where it lives (GF-016): its module's page, on the right
+-- tab, scrolled to the record and lit (OrdersUI / AdventureUI focus(id), by
+-- the record ID). When that page no longer lists the record (cleared, past
+-- the keep time) nothing moves: false, "missing", and the personnel file
+-- stays where it is (ProfileUI says so in the row's tooltip).
+Profile.MISSING_TIP = "找不到原紀錄"
+Profile.MISSING_DETAIL = "已清除或超過保留時間"
 function Profile.openBusiness(item)
-    if type(item) ~= "table" then return false end
+    if type(item) ~= "table" then return false, "item" end
     local page, ui = nil, nil
     if item.kind == "order" then page, ui = "orders", ns.OrdersUI
     elseif item.kind == "adventure" then page, ui = "adventure", ns.AdventureUI end
-    if not page or not ns.Framework.get(page) then return false end
+    if not page or not ns.Framework.get(page) then return false, "page" end
+    if ui and type(ui.locate) == "function" then
+        local okL, where = pcall(ui.locate, item.id)
+        if not (okL and where) then return false, "missing" end
+    end
     ns.Framework.open(page)
-    if ui and type(ui.focus) == "function" then pcall(ui.focus, item.id) end
+    if ui and type(ui.focus) == "function" then
+        local okF, found = pcall(ui.focus, item.id)
+        if not (okF and found) then return false, "missing" end
+    end
     return true
 end
 

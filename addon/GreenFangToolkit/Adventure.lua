@@ -1093,6 +1093,9 @@ function Adv.leader(id, action, arg, extra)
         e.fm = math.min(e.fm or t, t)
         e.st, e.sa, e.dt = "c", t, t
         Adv.addLog(e, "done")
+        -- GF-016: seen here, by the leader (Events.leaderEvidence); a copy of a
+        -- member's detection (maintain) is not marked.
+        events("markSelfDone", id, t)
     elseif action == "depart" then e.st, e.sa = "g", t
     elseif action == "finalize" then
         local slots = entrySlots(e)
