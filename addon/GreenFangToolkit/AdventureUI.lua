@@ -939,7 +939,7 @@ local function fillRow(row, data, i)
             local w = A().myWorker()
             list[#list + 1] = { icon = "apply", tip = "申請", action = "lfgApply", fn = function()
                 local _, token = ns.call(UnitClass, "player")
-                local main, alt = A().defaultRoles(token)
+                local main, alt = A().myRoles(token)
                 ns.NativeLFG.apply(r, w and w.main or main, w and w.alt or alt)
             end }
         end
@@ -1409,7 +1409,7 @@ UI.TICKET_NAME = "GreenFangToolkit_AdventurePopup"
 
 function UI.newDraft()
     local _, token = ns.call(UnitClass, "player")
-    local main = A().defaultRoles(token)
+    local main = A().myRoles(token)
     -- GF-002-H: slots = { { id, now, start, dur (hours or nil = no length), dayOff } }, 1-5 (R-16.1).
     return { slots = { { now = true } }, roles = { t = 1, h = 1, d = 3 }, size = 5, tags = 0, note = "", mode = "a",
         leaderRole = main, quests = {} }
@@ -2410,7 +2410,7 @@ function UI.newWorkerDraft(mode)
         return mine
     end
     local _, token = ns.call(UnitClass, "player")
-    local main, alt = A().defaultRoles(token)
+    local main, alt = A().myRoles(token)
     return { dungeons = {}, quests = {}, allQuests = false, main = main, alt = alt, slots = { { now = true } } }
 end
 

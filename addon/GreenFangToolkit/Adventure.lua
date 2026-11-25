@@ -936,6 +936,17 @@ function Adv.defaultRoles(classToken)
     local r = CLASS_ROLES[str(classToken)] or { "d" }
     return r[1], r[2]
 end
+-- 0.16.0 (spec v2.0 §5.2, §9): my own roles for a new ticket or signup: the
+-- 職工檔案 role settings (GF-010) when a main role is set, else the class
+-- default. Always editable by hand; tickets already made keep their roles.
+function Adv.myRoles(classToken)
+    local P = ns.Profile
+    if P and P.ticketRoles then
+        local ok, main, alt = pcall(P.ticketRoles)
+        if ok and main then return main, alt end
+    end
+    return Adv.defaultRoles(classToken)
+end
 
 -- GF-002-H (R-16.1 - R-16.4): the slots from a draft. o.slots = { { id, now, s, d } }
 -- (d seconds or nil = no length; 0.12.x shapes { now } / { s, e } work too), or the
@@ -1169,7 +1180,7 @@ function Adv.worker(id, action, slots)
     if w then main, alt = w.rm, w.ra end
     if not main then
         local _, token = ns.call(UnitClass, "player")
-        main, alt = Adv.defaultRoles(token)
+        main, alt = Adv.myRoles(token)
     end
     local t = now()
     local sx

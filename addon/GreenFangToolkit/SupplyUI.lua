@@ -722,3 +722,14 @@ ns.Framework.register({
     create = build,
     show = UI.refresh,
 })
+
+-- 0.16.0 (spec v2.0 §5.1, §7.1): 職工檔案「個人需求」opens this page on 我的刊登
+-- (the same records; nothing is copied into the personnel file).
+if ns.Profile and ns.Profile.setNeedsProvider then
+    ns.Profile.setNeedsProvider({
+        open = function()
+            ns.Framework.open(UI.ID)
+            UI.setTab("mine")
+        end,
+    })
+end

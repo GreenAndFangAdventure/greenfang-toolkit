@@ -73,10 +73,14 @@ return function(T)
         ok(P.setCan("t", true), "add 坦克")
         eq(keysOf(P.roles(SELF_GUID).can), "th", "can")
         eq(select(1, P.ticketRoles()), "h", "ticket main"); eq(select(2, P.ticketRoles()), "t", "ticket alt")
+        -- 0.16.0: new tickets and signups take these roles (Adventure.myRoles).
+        eq(select(1, ns.Adventure.myRoles("MAGE")), "h", "myRoles uses 職工檔案 over the class default")
+        eq(select(2, ns.Adventure.myRoles("MAGE")), "t", "myRoles alt")
         ok(P.setMain("t"), "switch main to 坦克")
         eq(keysOf(P.roles(SELF_GUID).can), "th", "the old main stays as 可支援")
         ok(P.setMain(nil), "back to 未設定")
         eq(P.roles(SELF_GUID).main, nil, "unset")
+        eq(select(1, ns.Adventure.myRoles("MAGE")), "d", "unset: the class default again")
         -- Saved under the GUID, never a name.
         local chars = GreenFangToolkitDB.profile.chars
         ok(chars[SELF_GUID], "keyed by GUID")
@@ -293,11 +297,18 @@ return function(T)
         eq(ns.Framework.current(), row.item.kind == "order" and "orders" or "adventure", "its page opens")
     end)
 
-    test("GF-010 personnel file: 個人需求 hidden until GF-009 registers; 配方 / 我的服務 reuse the editors", function()
+    test("GF-010 personnel file: 個人需求 opens GF-009 我的刊登; hidden without a provider; 配方 / 我的服務 reuse the editors", function()
         local ns = login()
         ns.Framework.open("character")
         local c = ns.ProfileUI.controls
-        ok(not c.needsHead:IsShown() and not c.needsButton:IsShown(), "hidden")
+        -- 0.16.0: GF-009 (SupplyUI) registers the provider.
+        ok(c.needsHead:IsShown() and c.needsButton:IsShown(), "shown: GF-009 is loaded")
+        wow.click(c.needsButton)
+        eq(ns.Framework.current(), "supply", "個人需求 opens 綠皮調貨所")
+        ns.Framework.open("character")
+        ns.Profile.setNeedsProvider(nil)
+        ns.Character.refresh()
+        ok(not c.needsHead:IsShown() and not c.needsButton:IsShown(), "hidden without a provider")
         local opened = false
         ns.Profile.setNeedsProvider({ open = function() opened = true end })
         ns.Character.refresh()
