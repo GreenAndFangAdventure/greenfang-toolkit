@@ -15,6 +15,8 @@ TOC_FILES[#TOC_FILES + 1] = "BankUI.lua"
 TOC_FILES[#TOC_FILES + 1] = "SupplyCatalog.lua" -- GF-009-12 (appended, like the TOC)
 TOC_FILES[#TOC_FILES + 1] = "SupplyCatalogData.lua"
 TOC_FILES[#TOC_FILES + 1] = "WorkerMatch.lua" -- GF-014-02 (appended, like the TOC)
+TOC_FILES[#TOC_FILES + 1] = "Talents.lua" -- GF-011 (appended, like the TOC)
+TOC_FILES[#TOC_FILES + 1] = "SleepingBagMap.lua" -- GF-008-B (appended, like the TOC)
 wow.TOC_FILES = TOC_FILES
 
 ---------------------------------------------------------------------------
@@ -257,6 +259,7 @@ function wow.reset(opts)
         noSecureTemplate = opts.noSecureTemplate, -- client without SecureActionButtonTemplate
         noSpellAPI = opts.noSpellAPI,       -- C_Spell missing
         tradeSkill = opts.tradeSkill,       -- an open profession window (GF-001-D10)
+        talents = opts.talents,             -- GF-011: the trait-tree API (wow.installTalents)
     }
     wow.state = state
     wow.installGlobals()
@@ -728,6 +731,63 @@ function wow.installGlobals()
     if state.noClub then
         C_Club, C_CreatureInfo, GetPlayerInfoByGUID = nil, nil, nil
     end
+    wow.installTalents()
+end
+
+-- GF-011: Forever 1.60.1 (ui 16001, owner's probe 2026-11-26) has no
+-- classic talent API, and neither does the mock. state.talents (opts.talents)
+-- installs the trait-tree API the probe saw:
+--   { configID, treeID, specID, import, groups = { { id, name, icon } },
+--     nodes = { { id, group, ranks } }, noGroupIDs, noLink }
+-- Made-up IDs and names only.
+function wow.installTalents()
+    GetTalentInfo, GetTalentTabInfo, GetNumTalentTabs, GetActiveTalentGroup = nil, nil, nil, nil
+    GetUnspentTalentPoints, IsDualSpecUnlocked = nil, nil
+    C_ClassTalents, C_Traits, C_SpecializationInfo, LinkTypes = nil, nil, nil, nil
+    local t = state.talents
+    if not t then return end
+    state.talentReads = 0
+    C_SpecializationInfo = {
+        GetSpecialization = function() return 1 end,
+        GetSpecializationInfo = function() return t.specID or 0, "專精" end,
+        GetActiveSpecGroup = function() return 1 end,
+        GetCombatConfigIDForSpecGroup = function() return t.configID end,
+    }
+    C_ClassTalents = { GetActiveConfigID = function() return t.configID end }
+    local byId = {}
+    for _, n in ipairs(t.nodes or {}) do byId[n.id] = n end
+    C_Traits = {
+        GetConfigInfo = function(id)
+            if id ~= t.configID then return nil end
+            return { ID = id, type = 1, name = "", treeIDs = { t.treeID } }
+        end,
+        GetTreeNodes = function(tree)
+            state.talentReads = state.talentReads + 1
+            if tree ~= t.treeID then return {} end
+            local ids = {}
+            for _, n in ipairs(t.nodes or {}) do ids[#ids + 1] = n.id end
+            return ids
+        end,
+        GetNodeInfo = function(_, id)
+            local n = byId[id]
+            if not n then return nil end
+            return { ID = id, activeRank = n.ranks, ranksPurchased = n.ranks, posX = 0, posY = 0,
+                groupIDs = (not t.noGroupIDs) and { n.group } or {} }
+        end,
+        GetEntryInfo = function(_, e) return { definitionID = e, maxRanks = 5 } end,
+        GetDefinitionInfo = function(d) return { spellID = d } end,
+        GetGroupDisplayInfoByTreeID = function(tree)
+            local trees = t.trees or { [t.treeID] = t.groups }
+            local out = {}
+            for _, g in ipairs(trees[tree] or {}) do out[#out + 1] = { groupID = g.id, displayName = g.name, icon = g.icon } end
+            return out
+        end,
+        GetTreeCurrencyInfo = function() return { { spent = 0, spentInTree = 0 } } end,
+        GenerateImportString = function(id) return id == t.configID and t.import or nil end,
+        HasValidInspectData = function() return false end,
+        GetLoadoutSerializationVersion = function() return 2 end,
+    }
+    if not t.noLink then LinkTypes = { TalentBuild = "talentbuild" } end
 end
 
 ---------------------------------------------------------------------------
@@ -829,6 +889,49 @@ function wow.serializeSV(name, value)
     serializeValue(value, "", out)
     out[#out + 1] = "\n"
     return table.concat(out)
+end
+
+---------------------------------------------------------------------------
+-- GF-009-13 fix: the Forever profile, on by default (GF_CLASSIC_GLOBALS=1 in
+-- the environment turns it off). The owner's /gftk probe on Forever
+-- 1.60.1.71139: the classic item and bag globals do not exist, only C_Item
+-- and C_Container. Here they always read nil, also when a test sets one for
+-- its fake client: a fake GetItemInfo / GetItemInfoInstant / GetItemCount is
+-- reachable only as C_Item.<name> (the Forever way), so AddOn code that
+-- calls the global finds nothing, as in the game.
+-- The other missing globals (old quest, trade skill and talent API) stay
+-- settable: a few tests check the old-client fallbacks on purpose, behind a
+-- C_ path. The static check in catalog_tests ("no global-only calls") covers
+-- them for the AddOn code.
+---------------------------------------------------------------------------
+wow.FOREVER_MISSING = { "GetItemInfo", "GetItemInfoInstant", "GetItemCount", "GetContainerItemInfo",
+    "GetContainerNumSlots", "GetNumBankSlots", "BankButtonIDToInvSlotID", "GetQuestLogTitle", "GetQuestTagInfo",
+    "IsQuestFlaggedCompleted", "GetQuestsCompleted", "GetNumTradeSkills", "GetTradeSkillLine", "GetTalentInfo",
+    "GetNumTalentTabs", "GetTalentTabInfo", "GetNumTalents", "IsDualSpecUnlocked", "InspectFrame_Show" }
+wow.FOREVER_STRICT = { "GetItemInfo", "GetItemInfoInstant", "GetItemCount", "GetContainerItemInfo",
+    "GetContainerNumSlots", "GetNumBankSlots", "BankButtonIDToInvSlotID" }
+local strict = {}
+for _, k in ipairs(wow.FOREVER_STRICT) do strict[k] = true end
+local C_ITEM_ALIAS = { GetItemInfo = true, GetItemInfoInstant = true, GetItemCount = true }
+local shadow = {}
+local cItem -- C_Item lives here, so that every assignment passes __newindex
+wow.forever = os.getenv("GF_CLASSIC_GLOBALS") ~= "1"
+wow.foreverShadow = shadow
+if wow.forever then
+    setmetatable(_G, {
+        __index = function(_, k) if k == "C_Item" then return cItem end end,
+        __newindex = function(t, k, v)
+            if strict[k] then shadow[k] = v; return end
+            if k == "C_Item" then
+                if type(v) == "table" and getmetatable(v) == nil then
+                    setmetatable(v, { __index = function(_, key) if C_ITEM_ALIAS[key] then return shadow[key] end end })
+                end
+                cItem = v
+                return
+            end
+            rawset(t, k, v)
+        end,
+    })
 end
 
 return wow

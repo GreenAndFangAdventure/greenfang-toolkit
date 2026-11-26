@@ -25,6 +25,12 @@
 -- (pending) and asked again after the next login.
 -- Counts (saved with the run): requests sent, GET_ITEM_INFO_RECEIVED events
 -- (all, and those for our IDs), success, failed, invalid, timeouts, retries.
+-- GF-009-13 fix (Forever 0.16.4 sample: 0 successes, 39 events, none ours):
+-- C_Item.RequestLoadItemDataByID answers with ITEM_DATA_LOAD_RESULT, not
+-- GET_ITEM_INFO_RECEIVED. Both are listened to and counted apart (loads);
+-- waiting IDs are also polled (IsItemDataCachedByID, then GetItemInfo) every
+-- tick; a retry asks through GetItemInfo
+-- (the other path), so a client where one path is silent still gets there.
 local _, D = ...
 local S = {}
 D.CatalogScan = S
@@ -65,7 +71,7 @@ local function call(fn, ...)
     if type(fn) ~= "function" then return nil end
     local res = { pcall(fn, ...) }
     if not res[1] then return nil end
-    return unpack(res, 2)
+    return unpack(res, 2, table.maxn(res)) -- holes (the 16th value is nil on Forever)
 end
 local function count(t) local n = 0 for _ in pairs(t or {}) do n = n + 1 end return n end
 
@@ -163,9 +169,19 @@ local function exists(id)
     return true
 end
 
+-- GF-009-13 fix (Forever field probe): the client answers C_Item.GetItemInfo
+-- (the classic 18 values) while the global GetItemInfo gives nothing, so the
+-- scan saw no item at all, not even cached cloth. C_Item first, as
+-- SupplyListings does.
+function S.infoFn()
+    if type(C_Item) == "table" and type(C_Item.GetItemInfo) == "function" then return C_Item.GetItemInfo end
+    if type(GetItemInfo) == "function" then return GetItemInfo end
+    return nil
+end
+
 -- The client's answer for one item, or nil while it does not know it.
 local function record(id)
-    local name, _, quality, itemLevel, _, _, _, _, _, icon, _, classID, subclassID, bindType = call(GetItemInfo, id)
+    local name, _, quality, itemLevel, _, _, _, _, _, icon, _, classID, subclassID, bindType = call(S.infoFn(), id)
     if type(name) ~= "string" or name == "" then return nil end
     return { name, tonumber(classID) or -1, tonumber(subclassID) or 0, tonumber(bindType) or 0,
         tonumber(quality) or 0, tonumber(itemLevel) or 0, tonumber(icon) or 0 }
@@ -217,7 +233,20 @@ end
 
 function S.active() return active and S.db(active) or nil end
 
--- One tick: timeouts, then at most one request.
+local function bump(c, key) c[key] = (c[key] or 0) + 1 end
+
+-- A waiting ID the client now has: done, whatever event (if any) said so.
+local function settle(d, id, how)
+    local r = record(id)
+    if not r then return false end
+    inflight[id], d.pending[id] = nil, nil
+    d.got[id] = r
+    bump(d.counts, "success")
+    bump(d.counts, how)
+    return true
+end
+
+-- One tick: answers found by polling, timeouts, then at most one request.
 function S.step()
     local d = S.active()
     if not d or not d.running then return "stopped" end
@@ -225,6 +254,9 @@ function S.step()
     local why = S.paused()
     if why then c.paused = c.paused + 1; return why end
     local t = now()
+    for id in pairs(inflight) do
+        if cached(id) then settle(d, id, "polled") end
+    end
     for id, f in pairs(inflight) do
         if t - f.t >= S.TIMEOUT then
             inflight[id] = nil
@@ -273,7 +305,15 @@ function S.step()
     end
     local tries = d.pending[id] or 0
     inflight[id], d.pending[id] = { t = t, tries = tries }, tries
-    if not ask(id) then
+    -- A retry asks through GetItemInfo (it queues the server itself and is
+    -- answered by GET_ITEM_INFO_RECEIVED); the first try through
+    -- RequestLoadItemDataByID (ITEM_DATA_LOAD_RESULT).
+    if tries > 0 and S.infoFn() then
+        if settle(d, id, "known") then return "known" end
+        bump(c, "viaInfo")
+    elseif ask(id) then
+        bump(c, "viaLoad")
+    else
         inflight[id] = nil
         d.running, active = false, nil
         return "no-api"
@@ -282,10 +322,11 @@ function S.step()
     return "asked"
 end
 
--- GET_ITEM_INFO_RECEIVED (itemID, success): every event is counted.
-function S.received(id, success)
+-- GET_ITEM_INFO_RECEIVED and ITEM_DATA_LOAD_RESULT (itemID, success): every
+-- event is counted (events / loads).
+function S.received(id, success, event)
     local d = S.active()
-    if d then d.counts.events = d.counts.events + 1 end
+    if d then bump(d.counts, event == "ITEM_DATA_LOAD_RESULT" and "loads" or "events") end
     id = tonumber(id)
     if not d or not id or not inflight[id] then return false end
     local c = d.counts
@@ -330,9 +371,10 @@ function S.statusText(mode)
     local waiting = count(d.pending)
     local left = math.max(0, total - d.pos) + waiting
     local c = d.counts
-    return string.format("%s%s，%d／%d（成功 %d，無效 %d，逾時 %d，等待 %d）；請求 %d 次，事件 %d 次（我們的 %d），約剩 %d 分鐘",
+    return string.format("%s%s，%d／%d（成功 %d，無效 %d，逾時 %d，等待 %d）；請求 %d 次（載入 %d、GetItemInfo %d），事件 %d 次＋載入事件 %d 次（我們的 %d），輪詢找到 %d、已快取 %d、逾時 %d 次，約剩 %d 分鐘",
         head, state, d.pos, total, count(d.got), count(d.invalid), count(d.timeout), waiting,
-        c.requests, c.events, c.ours, math.ceil(left * S.TICK / 60))
+        c.requests, c.viaLoad or 0, c.viaInfo or 0, c.events, c.loads or 0, c.ours, c.polled or 0, c.known or 0,
+        c.timeouts or 0, math.ceil(left * S.TICK / 60))
 end
 
 -- The sample's result, one line per ID.
@@ -434,10 +476,11 @@ if type(CreateFrame) == "function" then
     local ev = CreateFrame("Frame")
     pcall(ev.RegisterEvent, ev, "PLAYER_ENTERING_WORLD")
     pcall(ev.RegisterEvent, ev, "GET_ITEM_INFO_RECEIVED")
+    pcall(ev.RegisterEvent, ev, "ITEM_DATA_LOAD_RESULT")
     local resumed = false
     ev:SetScript("OnEvent", function(_, event, a, b)
-        if event == "GET_ITEM_INFO_RECEIVED" then
-            S.received(a, b)
+        if event == "GET_ITEM_INFO_RECEIVED" or event == "ITEM_DATA_LOAD_RESULT" then
+            S.received(a, b, event)
         elseif not resumed then
             resumed = true
             S.resume()

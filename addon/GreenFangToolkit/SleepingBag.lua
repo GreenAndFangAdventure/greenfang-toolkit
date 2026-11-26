@@ -4,6 +4,12 @@
 --   Normal mode: every step with coordinates, travel and alternatives.
 -- Both modes share one progress per character (settings.modules.sleepingbag
 -- .characters[GUID]). Progress is confirmed by hand; no quest IDs are used yet.
+--
+-- GF-008-B (owner 2026-11-26: 「睡袋指南先只有一般模式就好」): only normal
+-- mode is shown. The RPG code and the saved mode stay (SB.RPG_ON brings the
+-- switch back); a character saved in "rpg" keeps its mode and its step and
+-- simply sees normal mode. 看地圖 opens the world map on the step's zone with
+-- a pin (SleepingBagMap.lua); steps without x / y have neither.
 
 local _, ns = ...
 local str = ns.str
@@ -12,8 +18,9 @@ local SB = {}
 ns.SleepingBag = SB
 SB.ID = "sleepingbag"
 SB.MODES = { rpg = "RPG 模式", normal = "一般模式" }
+SB.RPG_ON = false -- GF-008-B: true shows the RPG / normal switch again
 
-local panel, modeButton, progressLine, bodyText, revealButton, doneButton, backButton, resetButton
+local panel, modeButton, progressLine, bodyText, revealButton, doneButton, backButton, resetButton, mapButton
 local scroll, scrollChild
 
 ---------------------------------------------------------------------------
@@ -46,6 +53,12 @@ function SB.currentStep()
     local route = SB.route()
     if not route then return nil end
     return route.steps[SB.state().step]
+end
+
+-- GF-008-B: the mode the page shows (normal while the RPG switch is off).
+function SB.viewMode()
+    if SB.RPG_ON then return SB.state().mode end
+    return "normal"
 end
 
 function SB.setMode(mode)
@@ -121,11 +134,12 @@ function SB.stepLines(step, mode, revealed)
     return lines
 end
 
--- Whole page text for the current state.
-function SB.pageText()
+-- Whole page text for the current state (mode: the one to draw; default the shown one).
+function SB.pageText(mode)
     local route = SB.route()
     if not route then return "目前沒有你陣營的路線資料。" end
     local s = SB.state()
+    mode = mode or SB.viewMode()
     local out = {}
     if SB.isFinished() then
         out[#out + 1] = "已完成全部 " .. #route.steps .. " 步。獎勵：" .. route.reward
@@ -134,8 +148,8 @@ function SB.pageText()
     end
     local step = route.steps[s.step]
     out[#out + 1] = string.format("【第 %d 步】%s", s.step, step.zone)
-    for _, line in ipairs(SB.stepLines(step, s.mode, s.revealed[step.id])) do out[#out + 1] = line end
-    if s.mode == "normal" then
+    for _, line in ipairs(SB.stepLines(step, mode, s.revealed[step.id])) do out[#out + 1] = line end
+    if mode == "normal" then
         out[#out + 1] = ""
         out[#out + 1] = "【全部步驟】"
         for i, st in ipairs(route.steps) do
@@ -157,7 +171,9 @@ function SB.refresh()
     if not panel then return end
     local route, s = SB.route(), SB.state()
     local total = route and #route.steps or 0
-    modeButton:SetText("目前：" .. SB.MODES[s.mode])
+    local mode = SB.viewMode()
+    modeButton:SetText("目前：" .. SB.MODES[mode])
+    if SB.RPG_ON then modeButton:Show() else modeButton:Hide() end -- GF-008-B
     progressLine:SetText(string.format("%s｜進度 %d / %d｜%s",
         route and route.title or "", math.min(s.step - 1, total), total,
         "每一步都待實地驗證，進度請自行確認"))
@@ -165,9 +181,23 @@ function SB.refresh()
     bodyText:SetText(text)
     scrollChild:SetHeight(math.max(400, select(2, text:gsub("\n", "")) * 18 + 60))
     local step = SB.currentStep()
-    revealButton:SetShown(s.mode == "rpg" and step ~= nil and not s.revealed[step.id])
+    if mode == "rpg" and step ~= nil and not s.revealed[step.id] then revealButton:Show() else revealButton:Hide() end
     doneButton:SetEnabled(step ~= nil)
     backButton:SetEnabled(s.step > 1)
+    -- GF-008-B: 看地圖 only for a step with x / y on a map this client can show;
+    -- not lit in combat (the world map cannot be opened then).
+    local Map = ns.SleepingBagMap
+    local can = Map and step and Map.canShow(step)
+    if can then mapButton:Show() else mapButton:Hide() end
+    mapButton:SetEnabled(can and not ns.inCombat() or false)
+    if Map then Map.update(step, s.step) end
+end
+
+-- GF-008-B: 看地圖 for the current step.
+function SB.showMap()
+    local step, Map = SB.currentStep(), ns.SleepingBagMap
+    if not (step and Map) then return false end
+    return Map.show(step, SB.state().step)
 end
 
 local function button(parent, text, w, x, y, fn)
@@ -185,9 +215,14 @@ local function build(p)
     progressLine:SetWidth(950)
     progressLine:SetJustifyH("LEFT")
     modeButton = button(p, "", 260, 20, -64, SB.toggleMode)
-    doneButton = button(p, "完成這一步", 120, 290, -64, SB.complete)
-    backButton = button(p, "上一步", 90, 418, -64, SB.back)
-    revealButton = button(p, "顯示座標與走法", 150, 516, -64, SB.reveal)
+    -- GF-008-B: without the mode switch the row starts at the left edge.
+    local x0 = SB.RPG_ON and 290 or 20
+    doneButton = button(p, "完成這一步", 120, x0, -64, SB.complete)
+    backButton = button(p, "上一步", 90, x0 + 128, -64, SB.back)
+    revealButton = button(p, "顯示座標與走法", 150, x0 + 226, -64, SB.reveal)
+    mapButton = button(p, "看地圖", 100, x0 + 226 + (SB.RPG_ON and 158 or 0), -64, function() SB.showMap() end)
+    mapButton.tip = "在世界地圖上標出這一步的位置"
+    SB.mapButton = mapButton
     resetButton = button(p, "重設進度", 100, 880, -64, SB.reset)
     scroll = ns.createFrame("ScrollFrame", nil, p, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", p, "TOPLEFT", 20, -100)

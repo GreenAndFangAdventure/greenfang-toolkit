@@ -441,7 +441,8 @@ end
 UI.CARD_NAME = "GreenFangToolkit_RosterCard"
 UI.CARD = { pad = 12, minW = 380, maxW = 560, line = 22, gap = 8, roleIcon = 20, canIcon = 18, profIcon = 18,
     profRows = 8, iconX = 12, nameX = 36, skillW = 96, recipeW = 64, colGap = 12 }
-UI.CARD_HEAD = { char = "角色", role = "職責", prof = "專業", skill = "技能", recipe = "配方" }
+UI.CARD_HEAD = { char = "角色", role = "職責", talent = "天賦", prof = "專業", skill = "技能", recipe = "配方" }
+UI.CARD.talentIcon = 18 -- GF-011
 local card
 
 local function cardText(f, font, justify)
@@ -459,7 +460,7 @@ local function buildCard()
     ns.Theme.panel(f)
     if f.EnableMouse then f:EnableMouse(false) end
     local hf = ns.Theme.FONT and ns.Theme.FONT.header or ns.FIELD_FONT
-    f.head = { char = cardText(f, hf), role = cardText(f, hf), prof = cardText(f, hf) }
+    f.head = { char = cardText(f, hf), role = cardText(f, hf), talent = cardText(f, hf), prof = cardText(f, hf) }
     for k, fs in pairs(f.head) do fs:SetText(UI.CARD_HEAD[k]) end
     f.name = cardText(f, ns.TITLE_FONT)
     f.facts = cardText(f, ns.LABEL_FONT)
@@ -477,6 +478,15 @@ local function buildCard()
         f.canText[i] = cardText(f, ns.LABEL_FONT)
     end
     f.age = cardText(f, ns.DISABLED_FONT)
+    -- GF-011: 天賦 — per group its icon and points (14/32/5).
+    f.talentIcon, f.talentText = {}, {}
+    for i = 1, 4 do
+        f.talentIcon[i] = f:CreateTexture(nil, "ARTWORK")
+        f.talentIcon[i]:SetSize(UI.CARD.talentIcon, UI.CARD.talentIcon)
+        f.talentText[i] = cardText(f, ns.LABEL_FONT)
+    end
+    f.talentSum = cardText(f, ns.LABEL_FONT)
+    f.talentAge = cardText(f, ns.DISABLED_FONT)
     f.skillHead = cardText(f, ns.DISABLED_FONT, "RIGHT")
     f.skillHead:SetText(UI.CARD_HEAD.skill)
     f.recipeHead = cardText(f, ns.DISABLED_FONT, "RIGHT")
@@ -610,6 +620,7 @@ function UI.fillRosterCard(row)
         for i = 1, 3 do f.canIcon[i]:Hide(); f.canText[i]:Hide() end
     end
     y = y - C.gap
+    y = UI.fillCardTalents(f, m, x, y, inner)
     -- 專業: column heads on the section line, then fixed columns.
     local recipeR = w - C.pad
     local skillR = recipeR - C.recipeW - C.colGap
@@ -643,6 +654,36 @@ function UI.fillRosterCard(row)
     return f
 end
 
+-- GF-011: the 天賦 section (only when the member's talents are known):
+-- 「天賦」 head, then each group's icon and points, the total 14/32/5 and age.
+function UI.fillCardTalents(f, m, x, y, inner)
+    local C = UI.CARD
+    local t = ns.Talents and ns.Talents.of(m.guid) or nil
+    f.talents = t
+    showIf(f.head.talent, t ~= nil); showIf(f.talentSum, t ~= nil); showIf(f.talentAge, t ~= nil)
+    for i = 1, 4 do f.talentIcon[i]:Hide(); f.talentText[i]:Hide() end
+    if not t then return y end
+    place(f.head.talent, x, y); y = y - C.line
+    local cx = x
+    for i, g in ipairs(t.groups) do
+        if i > 4 then break end
+        if g.icon and f.talentIcon[i].SetTexture then
+            f.talentIcon[i]:SetTexture(g.icon)
+            place(f.talentIcon[i], cx, y + 1); f.talentIcon[i]:Show()
+            cx = cx + C.talentIcon + 4
+        end
+        f.talentText[i]:SetText(tostring(g.spent))
+        place(f.talentText[i], cx, y); f.talentText[i]:Show()
+        cx = cx + ns.measure(f.talentText[i]) + 14
+    end
+    f.talentSum:SetText(t.text)
+    place(f.talentSum, cx + 6, y)
+    local age = ns.Profile and t.at and not t.own and ns.Profile.ageText(t.at) or ""
+    f.talentAge:SetText(age)
+    place(f.talentAge, x + inner - ns.measure(f.talentAge), y)
+    return y - C.line - C.gap
+end
+
 -- The card's words, one line each (同步與診斷 and the offline tests): a
 -- profession row reads 「鍛造 280 / 300　配方 2 個」.
 function UI.rosterCardText()
@@ -653,6 +694,9 @@ function UI.rosterCardText()
     local can = {}
     for i = 1, 3 do if card.canText[i]:IsShown() then can[#can + 1] = str(card.canText[i]:GetText()) end end
     if card.canLabel:IsShown() then out[#out + 1] = "可支援 " .. table.concat(can, "、") .. (str(card.age:GetText()) ~= "" and ("　" .. card.age:GetText()) or "") end
+    if card.talentSum and card.talentSum:IsShown() ~= false and str(card.talentSum:GetText()) ~= "" then
+        out[#out + 1] = "天賦 " .. card.talentSum:GetText() .. (str(card.talentAge:GetText()) ~= "" and ("　" .. card.talentAge:GetText()) or "")
+    end
     for _, r in ipairs(card.rows) do
         if r.name:IsShown() then
             local t = str(r.name:GetText())
@@ -1225,6 +1269,11 @@ function UI.memberMenuItems(m)
     if rest[1] and rest[1].header then items[1] = rest[1]; k = 2 end
     if UI.hasRecipes(m.guid) then
         items[#items + 1] = { text = "配方", key = "recipes", fn = function() ns.Recipes.show(m.guid) end }
+    end
+    -- GF-011: the member's talents as a talentbuild link in the chat box.
+    local T = ns.Talents
+    if T and T.canLink(T.of(m.guid)) then
+        items[#items + 1] = { text = T.LINK_LABEL, key = "talentlink", fn = function() T.insertLink(m.guid, m.name) end }
     end
     for i = k, #rest do items[#items + 1] = rest[i] end
     return items

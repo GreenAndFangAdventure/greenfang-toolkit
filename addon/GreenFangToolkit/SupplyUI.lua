@@ -910,7 +910,8 @@ UI.setFormItem = setFormItem
 
 -- Item data arrived: a form still waiting for its item shows it now.
 function UI.formItemInfo()
-    if form and form:IsShown() and formState.itemID and formState.preview == "loading" then
+    -- GF-009-13 fix: a late answer also clears 逾時.
+    if form and form:IsShown() and formState.itemID and (formState.preview == "loading" or formState.preview == "timeout") then
         setFormItem(formState.itemID, formState.bagInfo)
     end
 end
