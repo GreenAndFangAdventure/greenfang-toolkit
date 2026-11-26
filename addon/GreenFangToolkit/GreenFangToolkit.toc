@@ -58,3 +58,4 @@ SupplyCatalog.lua
 SupplyCatalogData.lua
 WorkerMatch.lua
 Talents.lua
+SleepingBagMap.lua

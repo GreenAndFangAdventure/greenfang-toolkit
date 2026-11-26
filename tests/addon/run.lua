@@ -660,7 +660,7 @@ test("sleepingbag: RPG hides coordinates until revealed; normal shows all", func
     SlashCmdList.GREENFANGTOOLKIT("sleepingbag")
     local SB = ns.SleepingBag
     eq(SB.state().mode, "rpg", "RPG by default")
-    local text = SB.pageText()
+    local text = SB.pageText("rpg") -- GF-008-B: the page shows normal mode; the RPG text still exists
     ok(text:find("南貧瘠之地", 1, true), "landmark shown")
     ok(not text:find("46, 74", 1, true), "coordinates hidden in RPG")
     ok(text:find("待實地驗證", 1, true), "unverified tag")
@@ -4620,6 +4620,7 @@ assert(loadfile(ROOT .. "/tests/addon/labels_tests.lua"))()({ test = test, eq = 
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 -- GF-002-E: bigger, no wrapping, ESC, the fee column, 下單 / 我的服務 (tests/addon/usability_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/usability_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint, shareLogin = shareLogin, shareFrom = shareFrom,
     rMsg = rMsg, leatherWindow = leatherWindow, PEER = PEER, A_PEER = A_PEER, A_THIRD = A_THIRD })
 -- GF-002-F: no overlaps, click outside, past midnight, the year, my worker ticket, sizes (tests/addon/layout_tests.lua).
@@ -4699,6 +4700,9 @@ assert(loadfile(ROOT .. "/tests/addon/gf01403_tests.lua"))()({ test = test, eq =
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 -- GF-011: roster talents, the T share group, 天賦連結 (tests/addon/talents_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/talents_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-008-B: the sleeping-bag guide, normal mode only, the world-map pin (tests/addon/sleepingbag_map_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/sleepingbag_map_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------
