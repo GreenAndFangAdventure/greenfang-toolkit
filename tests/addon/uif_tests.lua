@@ -205,8 +205,9 @@ return function(T)
         ok(found, "聯絡 shown")
         eq(found.tip, UI.CONTACT_TIP, "the sentence is the 聯絡 tooltip")
         ok(UI.detailHeader:IsShown(), "the detail has its column header")
-        ok(has(pageTexts(supplyPage(ns)), "來源"), "來源 column")
-        ok(has(pageTexts(supplyPage(ns)), "自動"), "來源：自動 kept in the detail")
+        -- GF-009-14 B: the last column shows a manual row's 交易條件 (條件); automatic rows still say 自動.
+        ok(has(pageTexts(supplyPage(ns)), "條件"), "條件 column")
+        ok(has(pageTexts(supplyPage(ns)), "自動"), "自動 kept in the detail")
     end))
 
     test("GF-UI-F 調貨所: rows that open a detail show the game's + / -; the open one is -", done(function()
@@ -444,9 +445,10 @@ return function(T)
         UI.openForm()
         f.qty:SetText("5")
         UI.openPicker()
+        -- GF-009-14: the picker is a window (no click-outside layer); a click
+        -- outside reaches the game, never the form.
         local blocker = ns.clickBlocker()
-        ok(blocker and blocker:IsShown(), "blocker for the picker")
-        blocker._scripts.OnClick(blocker)
+        ok(not (blocker and blocker:IsShown()), "no click-outside layer for the picker")
         ok(f:IsShown() and not wow.popup(), "a click outside leaves the form and asks nothing")
         -- The 刊登 button while changes are open keeps them.
         ok(not UI.openForm(), "not replaced")

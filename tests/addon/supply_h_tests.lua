@@ -401,4 +401,171 @@ return function(T)
             end
         end
     end))
+
+    ---------------------------------------------------------------------------
+    -- GF-009-14 B: notes and 交易條件 (group M) on manual listings
+    ---------------------------------------------------------------------------
+
+    local A_C, A_D = "0000-0000000C", "0000-0000000D"
+    local function listing(id, dir, itemID, note, t)
+        return { id = id, direction = dir, category = "material", itemID = itemID, quantity = 2,
+            createdAt = t, expiresAt = t + 7 * 86400, rev = 1, note = note or "" }
+    end
+    local function tipOf(rows, itemID)
+        for _, r in ipairs(rows) do if r.itemID == itemID then return table.concat(r.tip or {}, "\n"), r end end
+        return nil
+    end
+
+    test("GF-009-14 B group M: the wire format, limits, an unknown letter, old clients still read L (9 fields)", done(function()
+        local ns = login({})
+        local L = ns.SupplyListings
+        local t = T0() - 60
+        local list = { listing(1, "offer", CLOTH, "", t), listing(2, "need", RECIPE, "", t), listing(3, "offer", POTION, "", t),
+            listing(4, "need", HERB, "", t) }
+        list[1].terms, list[1].price = "price", 12005
+        list[2].terms = "free"; list[3].terms = "swap"; list[4].terms = "negotiable"
+        local v = L.encodeTerms({ list[1], list[2], list[3], list[4] })
+        eq(v, "1,1.p." .. ns.Share.b36(12005) .. ",2.f.,3.x.,4.n.", "1,<id>.<letter>.<price>")
+        local m = L.decodeTerms("M", v)
+        eq(m[1].terms .. m[1].price, "price12005", "訂價 and the copper"); eq(m[2].terms, "free", "免費")
+        eq(m[3].terms, "swap", "交換"); eq(m[4].terms, "negotiable", "面議")
+        local z = L.decodeTerms("M", "1,1.z.,2.f.")
+        eq(z[1].terms, nil, "an unknown letter: that listing reads 未標示"); eq(z[2].terms, "free", "the rest kept")
+        eq(L.decodeTerms("M", "2,1.f."), nil, "only version 1")
+        eq(L.decodeTerms("M", "1,1.p."), nil, "訂價 without a price")
+        eq(L.decodeTerms("M", "1,1.p." .. ns.Share.b36(L.PRICE_MAX + 1)), nil, "over the money cap")
+        ok(L.decodeTerms("M", "1,1.p." .. ns.Share.b36(L.PRICE_MAX)) ~= nil, "the cap itself is fine")
+        eq(L.decodeTerms("M", "1,1.f.5"), nil, "a price on 免費")
+        eq(L.decodeTerms("M", "1,1.f.,1.n."), nil, "an id twice")
+        local many = { "1" }
+        for i = 1, 11 do many[#many + 1] = ns.Share.b36(i) .. ".n." end
+        eq(L.decodeTerms("M", table.concat(many, ",")), nil, "more than 10")
+        ok(L.decodeTerms("M", "1") ~= nil and next(L.decodeTerms("M", "1")) == nil, "an empty snapshot")
+        -- L stays 9 fields: an old decoder (this one, unchanged) reads a listing with terms.
+        local lv = L.encode({ list[1] })
+        local fields = 0
+        for _ in (lv .. "."):gmatch("([^.]*)%.") do fields = fields + 1 end
+        eq(fields, 9, "L: still 9 fields")
+        ok(L.decode("L", lv) and L.decode("L", lv)[1].itemID == CLOTH, "old clients keep reading L")
+        ok(ns.Share.isLocalGroup("M"), "M is local (not GF Sync, not the site)")
+        eq(L.termsText("price", 12005), "每個 1金 20銀 5銅", "long price")
+        eq(L.termsText("price", 12005, true), "1金20銀5銅", "short price")
+        eq(L.termsText(nil), "未標示", "no terms")
+    end))
+
+    test("GF-009-14 B the form: 交易條件 under 數量 (面議 for a new one), 每個 price only for 訂價, the money cap; re-editing", done(function()
+        local ns = login({ bag = { { CLOTH, 5 } } })
+        local L = ns.SupplyListings
+        ns.Framework.open("supply")
+        local UI = ns.SupplyUI
+        UI.openForm()
+        local f = UI.form()
+        eq(UI.formState.terms, "negotiable", "a new listing: 面議")
+        ok(not f.priceRow:IsShown(), "no price row for 面議")
+        UI.formFromText(tostring(CLOTH))
+        f.qty:SetText("3"); f.note:SetText("可議價")
+        UI.setFormTerms("price")
+        ok(f.priceRow:IsShown(), "訂價 opens 金 / 銀 / 銅")
+        eq(f.priceRow.each._text, "每個", "labelled 每個")
+        f.gold:SetText("214749")
+        local l, why = UI.submitForm()
+        ok(not l and tostring(why):find("每個最多", 1, true), "over the money cap: " .. tostring(why))
+        f.gold:SetText("1"); f.silver:SetText("120")
+        l, why = UI.submitForm()
+        ok(not l and why == UI.SILVER_MAX_TEXT, "銀 over 99")
+        f.silver:SetText("20"); f.copper:SetText("5")
+        l = UI.submitForm()
+        ok(l and l.terms == "price" and l.price == 12005, "訂價 1金 20銀 5銅 per item")
+        local tip, row = tipOf(UI.listFor("mine"), CLOTH)
+        ok(tip:find("交易條件：每個 1金 20銀 5銅", 1, true) and tip:find("備註：可議價", 1, true), "我的刊登 tooltip: " .. tip)
+        ok(row.hasNote, "note icon in 我的刊登")
+        -- Re-edit: the form comes back with the price; then 交換 drops it.
+        UI.openForm(l)
+        eq(UI.formState.terms, "price", "edit: terms back"); eq(f.gold:GetText(), "1", "gold back"); eq(f.copper:GetText(), "5", "copper back")
+        UI.setFormTerms("swap")
+        ok(not f.priceRow:IsShown(), "交換: no price")
+        f.note:SetText("換絲綢")
+        local l2 = UI.submitForm()
+        ok(l2 and l2.terms == "swap" and l2.price == nil, "edited to 交換, the price gone")
+        ok(L.renew(l2.id, 14) and L.own()[1].terms == "swap", "續期 keeps the terms")
+        local rec = ns.Share.get(ns.Share.selfAuthor(), "M")
+        ok(rec and rec.v:find("%.x%.") ~= nil, "M published with the listing: " .. tostring(rec and rec.v))
+        -- An old listing (no terms) edited without choosing keeps 未標示.
+        local m = L.own()[1]
+        m.terms, m.price = nil, nil
+        UI.openForm(m)
+        eq(UI.formState.terms, nil, "an old listing: nothing chosen")
+        f.note:SetText("舊單改備註")
+        local l3 = UI.submitForm()
+        ok(l3 and l3.terms == nil and l3.note == "舊單改備註", "still 未標示, note changed")
+    end))
+
+    test("GF-009-14 B two characters: terms and full notes in 我缺的 / 我可能有多的 / 調貨看板 / 我的刊登; same item, different prices; old listings 未標示", done(function()
+        local ns = login({ bag = { { CLOTH, 5 } } })
+        local L = ns.SupplyListings
+        local UI = ns.SupplyUI
+        ns.Framework.open("supply")
+        -- Mine (character A): I need cloth (面議), I offer the recipe (交換).
+        local need = L.create(lform({ direction = "need", itemID = CLOTH, note = "" }))
+        local offer = L.create(lform({ direction = "offer", itemID = RECIPE, terms = "swap", note = "換布料" }))
+        ok(need and offer, "my two listings")
+        -- What another character receives from me: my own L and M values decode there.
+        local selfA = ns.Share.selfAuthor()
+        local theirs = L.decodeTerms("M", ns.Share.get(selfA, "M").v)
+        local seen = {}
+        for _, x in ipairs(L.decode("L", ns.Share.get(selfA, "L").v)) do seen[x.itemID] = theirs[x.id] end
+        eq(seen[CLOTH].terms, "negotiable", "the other side sees my 面議"); eq(seen[RECIPE].terms, "swap", "and my 交換")
+        -- B, C and D offer cloth: 訂價 1金 / 免費 / an old AddOn (L only); B needs the recipe.
+        local t = T0() - 60
+        local bOffer, bNeed = listing(1, "offer", CLOTH, "一組二十個", t), listing(2, "need", RECIPE, "", t)
+        bOffer.terms, bOffer.price, bNeed.terms = "price", 10000, "negotiable"
+        local cOffer = listing(1, "offer", CLOTH, "送新人", t); cOffer.terms = "free"
+        local dOffer = listing(1, "offer", CLOTH, "老版本的備註", t)
+        from(ns, PEER_B, vMsg(ns, A_B, "L", t, L.encode({ bOffer, bNeed })))
+        from(ns, PEER_B, vMsg(ns, A_B, "M", t, L.encodeTerms({ bOffer, bNeed })))
+        from(ns, PEER_B, vMsg(ns, A_C, "L", t, L.encode({ cOffer })))
+        from(ns, PEER_B, vMsg(ns, A_C, "M", t, L.encodeTerms({ cOffer })))
+        from(ns, PEER_B, vMsg(ns, A_D, "L", t, L.encode({ dOffer })))
+        ns.Supply.invalidate()
+        -- 我缺的: cloth, three offers, each with its own terms and note.
+        local tip, row = tipOf(UI.listFor("need"), CLOTH)
+        ok(tip, "cloth in 我缺的")
+        tip = tip or ""
+        ok(tip:find("測試乙：供應 2｜交易條件：每個 1金", 1, true), "B's price: " .. tip)
+        ok(tip:find("備註：一組二十個", 1, true), "B's note in full")
+        ok(tip:find("測試丙：供應 2｜交易條件：免費", 1, true) and tip:find("備註：送新人", 1, true), "C: 免費 and note")
+        ok(tip:find("測試丁：供應 2｜交易條件：未標示", 1, true) and tip:find("備註：老版本的備註", 1, true), "D (old AddOn): 未標示, note shown")
+        ok(row and row.hasNote, "a note: the icon")
+        -- The detail rows: short terms, the icon only with a note, the full text in the tooltip.
+        UI.setTab("need")
+        local idx
+        for i, it in ipairs(UI.state.items) do if it.itemID == CLOTH then idx = i end end
+        UI.select(idx)
+        local conds, icons, tips = {}, 0, {}
+        for _, r in ipairs(UI.detailRowList()) do
+            if r:IsShown() then
+                conds[#conds + 1] = r.src._text
+                if r.noteIcon:IsShown() then icons = icons + 1 end
+                r:GetScript("OnEnter")(r)
+                for _, ln in ipairs(GameTooltip._lines) do tips[#tips + 1] = ln.text end
+            end
+        end
+        local p = table.concat(conds, ",")
+        ok(p:find("1金", 1, true) and p:find("免費", 1, true) and p:find("未標示", 1, true), "條件 column: " .. p)
+        eq(icons, 3, "three listings with a note: three icons")
+        ok(table.concat(tips, "\n"):find("備註：老版本的備註", 1, true), "the detail row's tooltip has the full note")
+        -- 我可能有多的: B needs my recipe; no note, no icon.
+        local tip2, row2 = tipOf(UI.listFor("offer"), RECIPE)
+        ok(tip2 and tip2:find("測試乙：徵求 2｜交易條件：面議", 1, true), "B's need: 面議: " .. tostring(tip2))
+        ok(row2 and not row2.hasNote, "no note: no icon")
+        -- 調貨看板: everyone's.
+        local tip3 = tipOf(UI.listFor("guild"), CLOTH) or ""
+        ok(tip3:find("每個 1金", 1, true) and tip3:find("免費", 1, true) and tip3:find("送新人", 1, true), "調貨看板: " .. tip3)
+        -- 我的刊登: mine.
+        local tip4 = tipOf(UI.listFor("mine"), RECIPE) or ""
+        ok(tip4:find("交易條件：交換", 1, true) and tip4:find("備註：換布料", 1, true), "我的刊登: " .. tip4)
+        -- Automatic candidates keep 可能提供.
+        local _, what = UI.personText({ direction = "offer", qty = 3, auto = 3, member = { name = "測試乙" } })
+        eq(what, "可能提供 3", "自動集料 stays 可能提供")
+    end))
 end
