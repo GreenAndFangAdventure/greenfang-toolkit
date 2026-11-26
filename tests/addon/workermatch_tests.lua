@@ -89,6 +89,7 @@ return function(T)
         local ns = login()
         local M, Adv = ns.WorkerMatch, ns.Adventure
         myWorker(ns, { quests = { 850, 851 } })
+        M.set("quests", true) -- GF-014-03: quest-only matches are off by default
         local placeOnly = ticket(ns, B)
         local t = ns.Share.serverNow()
         offer(ns, C, "T", { { id = "accc.1", src = "g", ver = 1, cr = t, ds = "", qs = "850.851", tm = "n",
@@ -159,7 +160,7 @@ return function(T)
         local ns = login()
         local M, N = ns.WorkerMatch, ns.Notify
         eq(M.get("on"), true, "on by default"); eq(M.get("alt"), true, "support role by default")
-        eq(M.get("quests"), true, "quests by default"); eq(M.get("chat"), false, "no extra chat line by default")
+        eq(M.get("quests"), false, "GF-014-03: quest-only matches off by default"); eq(M.get("chat"), false, "no extra chat line by default")
         -- The rows under 設定.
         local parent = CreateFrame("Frame", nil, UIParent)
         local boxes = ns.NotifyUI.buildSettings(parent, 12, -40)

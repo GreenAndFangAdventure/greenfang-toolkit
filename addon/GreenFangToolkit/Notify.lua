@@ -14,6 +14,7 @@
 --     actions optional { { key = "view", text = "查看需求" }, ... } (buttons;
 --             the module's onAction(entry, key) handles them)
 --     ttl     seconds the notice is kept (default N.TTL)
+--     summary false: not counted in the chat line (the module printed its own; GF-014-03)
 --   returns "stored" / "merged" / "quiet" / "queued" / "off" / "burst" / "bad"
 --
 -- Rules: a module the player switched off adds nothing. In combat a push only
@@ -133,6 +134,8 @@ function N.changed()
     for _, fn in ipairs(listeners) do pcall(fn) end
 end
 
+-- GF-014-03: recheck = function(n): a notice that waited in combat, just before
+-- it shows; false drops it, else it may refresh n.text / ttl / target / summary.
 -- module: { onAction = function(entry, actionKey) } (buttons other than the
 -- shared 忽略), focus = function(id, target) for its own page when that page
 -- has no focus() yet.
@@ -258,7 +261,7 @@ local function apply(n)
         end
         e.unread, e.alertAt = true, t
         stats.merged = stats.merged + 1
-        alert()
+        if n.summary ~= false then alert() end -- GF-014-03: the module printed its own line
         N.changed()
         return "merged"
     end
@@ -272,7 +275,7 @@ local function apply(n)
         actions = n.actions, t = t, alertAt = t, expires = t + n.ttl, unread = true, count = 1 }
     N.prune(s)
     stats.stored = stats.stored + 1
-    alert()
+    if n.summary ~= false then alert() end -- GF-014-03
     N.changed()
     return "stored"
 end
@@ -288,6 +291,7 @@ function N.push(n)
         module = n.module, key = tostring(n.key), text = cut(n.text, N.TEXT_MAX),
         target = cleanTarget(n.target), actions = cleanActions(n.actions),
         ttl = math.max(60, math.min(tonumber(n.ttl) or N.TTL, 30 * 86400)),
+        summary = n.summary ~= false, -- GF-014-03: false = not counted in the chat line
     }
     if ns.inCombat() then
         local qk = clean.module .. "\1" .. clean.key
@@ -312,7 +316,20 @@ function N.afterCombat()
     for _, qk in ipairs(order) do
         local n = queue[qk]
         queue[qk] = nil
-        if n and N.enabled(n.module) then apply(n) end
+        -- GF-014-03: the module checks it again first (recheck(n) false = gone; it may
+        -- refresh text / ttl / target / summary in n).
+        local h = n and handlers[n.module]
+        local keep = true
+        if n and h and type(h.recheck) == "function" then
+            local okCall, res = pcall(h.recheck, n)
+            if okCall and res == false then keep = false; stats.dropped = (stats.dropped or 0) + 1 end
+            if okCall and keep then
+                n.text = cut(n.text, N.TEXT_MAX)
+                n.target = cleanTarget(n.target)
+                n.ttl = math.max(60, math.min(tonumber(n.ttl) or N.TTL, 30 * 86400))
+            end
+        end
+        if n and keep and N.enabled(n.module) then apply(n) end
     end
     if alertPending > 0 and not alertTimer then
         alertTimer = true
