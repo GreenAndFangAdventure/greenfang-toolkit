@@ -67,8 +67,9 @@ G.ART = {
     -- GF-002-E (owner: 「有些圖示與主題不合」): each picked for its meaning;
     -- the table with the reasons is tests/addon/MANUAL.md §3z.
     -- 職工單 = "I want to join". GF-UI-G: ＋職工單 and 我的職工單 share the game's
-    -- recruiting sign (the guild charter gossip mark), then a notice, then the raised hand.
-    worker = { { "Interface\\GossipFrame\\PetitionGossipIcon" }, { "Interface\\Icons\\INV_Misc_Note_06" },
+    -- recruiting sign. GF-UI-J (owner, 0.16.2: the gossip mark reads as a speech bubble):
+    -- a posted notice scroll (a square game icon, always in the client), then a note.
+    worker = { { "Interface\\Icons\\INV_Scroll_05" }, { "Interface\\Icons\\INV_Misc_Note_06" },
         { "Interface\\Icons\\Spell_Holy_SealOfSalvation" } },
     -- GF-UI-G: 現在 and a set time share one small brass clock.
     clock = { { "Interface\\Icons\\INV_Misc_PocketWatch_01" }, { "Interface\\Icons\\Spell_Nature_TimeStop" } },

@@ -211,7 +211,7 @@ return function(T)
         local G = ns.GameIcons
         local first = function(key) return G.ART[key] and G.ART[key][1][1] end
         eq(first("adventure"), "Interface\\Icons\\INV_Misc_Map_01", "冒險單: a map")
-        eq(first("worker"), "Interface\\GossipFrame\\PetitionGossipIcon", "職工單: the recruiting sign (GF-UI-G)")
+        eq(first("worker"), "Interface\\Icons\\INV_Scroll_05", "職工單: the notice scroll (GF-UI-J)")
         eq(first("adjust"), "Interface\\Icons\\INV_Misc_GroupLooking", "調整: a person (GF-002-G social heads)")
         eq(first("group"), "Interface\\Icons\\INV_Misc_GroupNeedMore", "組隊: several heads")
         ok(first("direct") ~= first("consent"), "直接錄取 and 團長同意 look different")

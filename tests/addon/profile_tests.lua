@@ -226,8 +226,7 @@ return function(T)
         ok(rowFor(ns, "測試丁-測試伺服器").cell.roles:GetText() ~= "輸出", "never 輸出 by default")
         -- Tooltip line.
         ns.UI.showRowTooltip(peer, nil)
-        local tip = {}
-        for _, l in ipairs(GameTooltip._lines) do tip[#tip + 1] = l.text end
+        local tip = { ns.UI.rosterCardText() } -- GF-UI-I: the member card
         ok(table.concat(tip, "\n"):find("主職責 坦克", 1, true), "tooltip: " .. table.concat(tip, " / "))
         -- Click on the 職責 cell: the card; elsewhere: select (unchanged).
         local col = ns.UI.columns[ns.UI.CELL.roles]

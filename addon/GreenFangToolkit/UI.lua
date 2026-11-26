@@ -361,6 +361,7 @@ local function newRow(i)
         self:SetScript("OnUpdate", nil)
         self.hoverSlot = nil
         GameTooltip:Hide()
+        UI.hideRosterCard()
     end)
     row:SetScript("OnMouseUp", function(self, mouse)
         local x = UI.cursorX(self)
@@ -426,48 +427,265 @@ function UI.slotAt(row, x)
     return nil
 end
 
--- Tooltip for a row: one profession when slot is given, else the member.
-function UI.showRowTooltip(row, slot)
-    if slot then
-        ns.tooltipAbove(row, slot.x0 or 0) -- right above that icon (GF-001-D21)
+---------------------------------------------------------------------------
+-- GF-UI-I (owner 0.16.2: 角色、階級、職責、專業擠在同一塊，技能點數和配方數沒對齊):
+-- the member tooltip is a small card of its own in three sections.
+--   角色  the name in its class colour; level, race, class; the full rank
+--   職責  主職責 and 可支援 as the game's role icons with their names
+--   專業  fixed columns: icon + name | 技能 | 配方 (numbers right-aligned)
+-- A GameTooltip cannot hold fixed columns, so this is a frame. Only one
+-- shows at a time: the card hides the GameTooltip, a profession icon's
+-- GameTooltip hides the card, and leaving the row hides both.
+---------------------------------------------------------------------------
+
+UI.CARD_NAME = "GreenFangToolkit_RosterCard"
+UI.CARD = { pad = 12, minW = 380, maxW = 560, line = 22, gap = 8, roleIcon = 20, canIcon = 18, profIcon = 18,
+    profRows = 8, iconX = 12, nameX = 36, skillW = 96, recipeW = 64, colGap = 12 }
+UI.CARD_HEAD = { char = "角色", role = "職責", prof = "專業", skill = "技能", recipe = "配方" }
+local card
+
+local function cardText(f, font, justify)
+    local fs = ns.freeText(f:CreateFontString(nil, "ARTWORK", font or ns.LABEL_FONT))
+    fs:SetJustifyH(justify or "LEFT")
+    fs.gfAlign = justify or "LEFT"
+    if fs.SetWordWrap then fs:SetWordWrap(false) end
+    return fs
+end
+
+local function buildCard()
+    local f = CreateFrame("Frame", UI.CARD_NAME, UIParent)
+    f:SetFrameStrata("TOOLTIP")
+    if f.SetFrameLevel then f:SetFrameLevel(80) end
+    ns.Theme.panel(f)
+    if f.EnableMouse then f:EnableMouse(false) end
+    local hf = ns.Theme.FONT and ns.Theme.FONT.header or ns.FIELD_FONT
+    f.head = { char = cardText(f, hf), role = cardText(f, hf), prof = cardText(f, hf) }
+    for k, fs in pairs(f.head) do fs:SetText(UI.CARD_HEAD[k]) end
+    f.name = cardText(f, ns.TITLE_FONT)
+    f.facts = cardText(f, ns.LABEL_FONT)
+    f.rank = cardText(f, ns.LABEL_FONT)
+    if f.rank.SetWordWrap then f.rank:SetWordWrap(true) end
+    f.mainIcon = f:CreateTexture(nil, "ARTWORK")
+    f.mainIcon:SetSize(UI.CARD.roleIcon, UI.CARD.roleIcon)
+    f.mainText = cardText(f, ns.LABEL_FONT)
+    f.canLabel = cardText(f, ns.LABEL_FONT)
+    f.canLabel:SetText("可支援")
+    f.canIcon, f.canText = {}, {}
+    for i = 1, 3 do
+        f.canIcon[i] = f:CreateTexture(nil, "ARTWORK")
+        f.canIcon[i]:SetSize(UI.CARD.canIcon, UI.CARD.canIcon)
+        f.canText[i] = cardText(f, ns.LABEL_FONT)
+    end
+    f.age = cardText(f, ns.DISABLED_FONT)
+    f.skillHead = cardText(f, ns.DISABLED_FONT, "RIGHT")
+    f.skillHead:SetText(UI.CARD_HEAD.skill)
+    f.recipeHead = cardText(f, ns.DISABLED_FONT, "RIGHT")
+    f.recipeHead:SetText(UI.CARD_HEAD.recipe)
+    f.rows = {}
+    for i = 1, UI.CARD.profRows do
+        local r = { icon = f:CreateTexture(nil, "ARTWORK") }
+        r.icon:SetSize(UI.CARD.profIcon, UI.CARD.profIcon)
+        r.name = cardText(f, ns.LABEL_FONT)
+        r.skill = cardText(f, ns.LABEL_FONT, "RIGHT")
+        r.recipes = cardText(f, ns.LABEL_FONT, "RIGHT")
+        f.rows[i] = r
+    end
+    f:Hide()
+    card = f
+    return f
+end
+function UI.rosterCard() return card end
+function UI.hideRosterCard() if card then card:Hide() end end
+
+local function place(obj, x, y)
+    obj:ClearAllPoints()
+    obj:SetPoint("TOPLEFT", card, "TOPLEFT", x, y)
+end
+local function showIf(obj, on) if on then obj:Show() else obj:Hide() end end
+
+-- The rows of the 專業 section: { prof, name, skill, recipes, secondary }.
+function UI.cardProfessions(row)
+    local out = {}
+    if row.detail then
+        for _, prof in ipairs(row.detail.professions) do
+            local id = ns.Professions.skillLineOf(prof)
+            local r = id and ns.Recipes and ns.Recipes.of(row.memberGuid, id)
+            out[#out + 1] = { prof = prof, name = str(prof.name), skill = ns.Professions.valueText(prof) or "",
+                recipes = r and tostring(#r.ids) or "", secondary = ns.Professions.isSecondary(prof) }
+        end
     else
-        GameTooltip:SetOwner(row, "ANCHOR_TOP")
+        for _, name in ipairs(row.rosterNames or {}) do
+            out[#out + 1] = { prof = str(name), name = str(name), skill = "", recipes = "", secondary = false }
+        end
     end
-    if slot then
-        ns.Professions.addTooltipLines(GameTooltip, slot.entry.prof, row.memberGuid)
-        GameTooltip:Show()
-        return
-    end
-    local detail, names = row.detail, row.rosterNames
-    -- GF-UI-B (GF-UI-A §2.2 item 10): a small card: name, level, race, class,
-    -- rank (種族 left the columns), then each profession.
+    return out
+end
+
+-- Fill and lay out the card for a roster row; returns the card.
+function UI.fillRosterCard(row)
+    local f = card or buildCard()
+    local C = UI.CARD
     local m = row.member or {}
-    local c = Icons.classColor(m.classToken)
-    GameTooltip:AddLine(str(row.memberName), c[1], c[2], c[3])
+    local x, y = C.pad, -C.pad
+    -- 角色
+    place(f.head.char, x, y); y = y - C.line
+    local cc = Icons.classColor(m.classToken)
+    f.name:SetText(str(row.memberName))
+    f.name:SetTextColor(cc[1], cc[2], cc[3])
+    place(f.name, x, y); y = y - C.line - 2
     local facts = {}
     if type(m.level) == "number" and m.level > 0 then facts[#facts + 1] = tostring(m.level) end
     local race = Export.raceText(m)
     if str(race) ~= "" then facts[#facts + 1] = race end
     if str(m.class) ~= "" then facts[#facts + 1] = m.class end
-    if str(m.guildRank) ~= "" then facts[#facts + 1] = m.guildRank end
-    if #facts > 0 then GameTooltip:AddLine(table.concat(facts, "  "), 0.9, 0.9, 0.9) end
-    -- GF-010: 主職責 / 可支援, and how fresh it is (近期 / 稍早 / 過期).
-    if ns.Profile and ns.ProfileUI then
-        local p = ns.Profile.roles(m.guid)
-        local main, can = ns.ProfileUI.rolesText(p)
-        local age = ns.Profile.ageText(p.at)
-        GameTooltip:AddLine("主職責 " .. main .. "　可支援 " .. can .. (age ~= "" and ("　" .. age) or ""), 0.9, 0.9, 0.9)
+    f.facts:SetText(table.concat(facts, "  "))
+    place(f.facts, x, y)
+    if #facts > 0 then y = y - C.line end
+    f.rank:SetText(str(m.guildRank) ~= "" and ("階級　" .. str(m.guildRank)) or "")
+    -- 職責
+    local roleTexts = {}
+    local p = ns.Profile and ns.Profile.roles(m.guid) or nil
+    local Pr = ns.Profile
+    -- 專業
+    local profs = UI.cardProfessions(row)
+    -- Width: wide enough for the name, the facts and every profession row; the
+    -- rank wraps only past maxW (it is never cut).
+    local nameW = 0
+    for i = 1, math.min(#profs, C.profRows) do
+        f.rows[i].name:SetText(profs[i].name)
+        nameW = math.max(nameW, ns.measure(f.rows[i].name))
     end
-    if detail then
-        for _, prof in ipairs(detail.professions) do
-            local c = ns.Professions.isSecondary(prof) and SECONDARY_COLOR or { 0.9, 0.9, 0.9 }
-            local note = UI.recipeNote(row.memberGuid, prof)
-            GameTooltip:AddLine(UI.skillLabel(prof) .. (note and ("　" .. note) or ""), c[1], c[2], c[3])
+    nameW = math.max(nameW, 72)
+    local profW = C.nameX + nameW + C.colGap + C.skillW + C.colGap + C.recipeW + C.pad
+    local w = math.max(C.minW, profW, ns.measure(f.name) + 2 * C.pad, ns.measure(f.facts) + 2 * C.pad,
+        math.min(C.maxW, ns.measure(f.rank) + 2 * C.pad))
+    w = math.min(w, math.max(C.maxW, profW))
+    f:SetWidth(w)
+    local inner = w - 2 * C.pad
+    f.rank:SetWidth(inner)
+    place(f.rank, x, y)
+    if str(m.guildRank) ~= "" then
+        local lines = math.max(1, math.ceil(ns.measure(f.rank) / inner))
+        if f.rank.GetStringHeight and (f.rank:GetStringHeight() or 0) > C.line * lines then
+            lines = math.ceil(f.rank:GetStringHeight() / C.line)
         end
-    else
-        for _, name in ipairs(names) do GameTooltip:AddLine(str(name), 0.9, 0.9, 0.9) end
+        y = y - C.line * lines
     end
-    GameTooltip:Show()
+    y = y - C.gap
+    place(f.head.role, x, y); y = y - C.line
+    if p and Pr then
+        local main = p.main and Pr.ROLE_NAME[p.main]
+        showIf(f.mainIcon, main ~= nil)
+        if main then ns.GameIcons.set(f.mainIcon, ns.ProfileUI.GAME[p.main]); place(f.mainIcon, x, y + 1) end
+        f.mainText:SetText("主職責 " .. (main or (p.state == "unknown" and Pr.UNKNOWN_NAME or Pr.UNSET_NAME)))
+        place(f.mainText, x + (main and (C.roleIcon + 6) or 0), y)
+        roleTexts[#roleTexts + 1] = f.mainText:GetText()
+        y = y - C.line - 2
+        place(f.canLabel, x, y)
+        f.canLabel:Show()
+        local cx, n = x + ns.measure(f.canLabel) + 10, 0
+        for _, r in ipairs(Pr.ROLES) do
+            if p.can[r] then
+                n = n + 1
+                if n <= 3 then
+                    ns.GameIcons.set(f.canIcon[n], ns.ProfileUI.GAME[r])
+                    place(f.canIcon[n], cx, y + 1); f.canIcon[n]:Show()
+                    f.canText[n]:SetText(Pr.ROLE_NAME[r])
+                    place(f.canText[n], cx + C.canIcon + 4, y); f.canText[n]:Show()
+                    cx = cx + C.canIcon + 4 + ns.measure(f.canText[n]) + 12
+                end
+            end
+        end
+        for i = n + 1, 3 do f.canIcon[i]:Hide(); f.canText[i]:Hide() end
+        if n == 0 then
+            f.canText[1]:SetText(p.state == "unknown" and Pr.UNKNOWN_NAME or "無")
+            place(f.canText[1], cx, y); f.canText[1]:Show()
+        end
+        local age = Pr.ageText(p.at)
+        f.age:SetText(age or "")
+        place(f.age, x + inner - ns.measure(f.age), y)
+        y = y - C.line
+    else
+        f.mainIcon:Hide(); f.canLabel:Hide(); f.mainText:SetText(""); f.age:SetText("")
+        for i = 1, 3 do f.canIcon[i]:Hide(); f.canText[i]:Hide() end
+    end
+    y = y - C.gap
+    -- 專業: column heads on the section line, then fixed columns.
+    local recipeR = w - C.pad
+    local skillR = recipeR - C.recipeW - C.colGap
+    place(f.head.prof, x, y)
+    f.skillHead:SetWidth(C.skillW); place(f.skillHead, skillR - C.skillW, y)
+    f.recipeHead:SetWidth(C.recipeW); place(f.recipeHead, recipeR - C.recipeW, y)
+    local anyNumbers = false
+    for _, e in ipairs(profs) do if e.skill ~= "" or e.recipes ~= "" then anyNumbers = true end end
+    showIf(f.skillHead, anyNumbers); showIf(f.recipeHead, anyNumbers)
+    y = y - C.line
+    for i, r in ipairs(f.rows) do
+        local e = profs[i]
+        local on = e ~= nil
+        showIf(r.name, on); showIf(r.skill, on); showIf(r.recipes, on)
+        if on then
+            if Icons.setProfessionIcon(r.icon, e.prof) then place(r.icon, C.iconX, y + 1) end
+            r.name:SetWidth(nameW)
+            local c = e.secondary and SECONDARY_COLOR or TEXT_COLOR
+            r.name:SetTextColor(c[1], c[2], c[3])
+            place(r.name, C.nameX, y)
+            r.skill:SetText(e.skill); r.skill:SetWidth(C.skillW); place(r.skill, skillR - C.skillW, y)
+            r.recipes:SetText(e.recipes); r.recipes:SetWidth(C.recipeW); place(r.recipes, recipeR - C.recipeW, y)
+            y = y - C.line
+        else
+            r.icon:Hide()
+        end
+    end
+    if #profs == 0 then y = y - 2 end
+    f:SetHeight(-y + C.pad)
+    f.roleTexts = roleTexts
+    return f
+end
+
+-- The card's words, one line each (同步與診斷 and the offline tests): a
+-- profession row reads 「鍛造 280 / 300　配方 2 個」.
+function UI.rosterCardText()
+    if not (card and card:IsShown()) then return "" end
+    local out = {}
+    local function add(fs) local t = fs and fs:IsShown() ~= false and str(fs:GetText()) or ""; if t ~= "" then out[#out + 1] = t end end
+    add(card.name); add(card.facts); add(card.rank); add(card.mainText)
+    local can = {}
+    for i = 1, 3 do if card.canText[i]:IsShown() then can[#can + 1] = str(card.canText[i]:GetText()) end end
+    if card.canLabel:IsShown() then out[#out + 1] = "可支援 " .. table.concat(can, "、") .. (str(card.age:GetText()) ~= "" and ("　" .. card.age:GetText()) or "") end
+    for _, r in ipairs(card.rows) do
+        if r.name:IsShown() then
+            local t = str(r.name:GetText())
+            if str(r.skill:GetText()) ~= "" then t = t .. " " .. r.skill:GetText() end
+            if str(r.recipes:GetText()) ~= "" then t = t .. "　配方 " .. r.recipes:GetText() .. " 個" end
+            out[#out + 1] = t
+        end
+    end
+    return table.concat(out, "\n")
+end
+
+-- The card above the row (like the old tooltip, ANCHOR_TOP).
+function UI.showRosterCard(row)
+    if GameTooltip and GameTooltip.Hide then GameTooltip:Hide() end
+    local f = UI.fillRosterCard(row)
+    f:ClearAllPoints()
+    f:SetPoint("BOTTOM", row, "TOP", 0, 2)
+    if f.SetClampedToScreen then f:SetClampedToScreen(true) end
+    f:Show()
+    return f
+end
+
+-- Tooltip for a row: one profession when slot is given (GameTooltip, above
+-- that icon), else the member card (GF-UI-I). Never both.
+function UI.showRowTooltip(row, slot)
+    if slot then
+        UI.hideRosterCard()
+        ns.tooltipAbove(row, slot.x0 or 0) -- right above that icon (GF-001-D21)
+        ns.Professions.addTooltipLines(GameTooltip, slot.entry.prof, row.memberGuid)
+        GameTooltip:Show()
+        return GameTooltip
+    end
+    return UI.showRosterCard(row)
 end
 
 -- While the cursor is over a row: redraw the tooltip when it moves onto

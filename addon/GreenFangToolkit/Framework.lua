@@ -103,10 +103,12 @@ F.DEFAULT_ENTRY = {
 
 -- The game's own icons, each with fallbacks (MANUAL §3uie).
 F.ENTRY_ICON = {
-    profile = { "Interface\\Icons\\INV_Misc_Head_Human_01", "Interface\\Icons\\INV_Misc_Note_01" },
-    -- GF-UI-F: a group of people (the game's group-finder icon), then the
-    -- guild tabard; never a book (冒險指南 is the book).
-    directory = { "Interface\\Icons\\INV_Misc_GroupLooking", "Interface\\Icons\\INV_Shirt_GuildTabard_01",
+    -- GF-UI-J (owner, 0.16.2): the game's own orc head (a Horde guild), then the human head.
+    profile = { "Interface\\Icons\\INV_Misc_Head_Orc_01", "Interface\\Icons\\INV_Misc_Head_Human_01",
+        "Interface\\Icons\\INV_Misc_Note_01" },
+    -- GF-UI-F: a group of people; GF-UI-J (owner): the Horde battle standard first,
+    -- then the group-finder heads, then the guild tabard; never a book (冒險指南 is the book).
+    directory = { "Interface\\Icons\\INV_BannerPVP_01", "Interface\\Icons\\INV_Misc_GroupLooking", "Interface\\Icons\\INV_Shirt_GuildTabard_01",
         "Interface\\Icons\\INV_Misc_Note_02" },
     crafting = { "Interface\\Icons\\Trade_BlackSmithing", "Interface\\Icons\\INV_Hammer_20" },
     logistics = { "Interface\\Icons\\INV_Box_01", "Interface\\Icons\\INV_Misc_Bag_08" },
@@ -275,7 +277,7 @@ local function createWindow()
     nav:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -32)
     nav:SetSize(F.NAV_WIDTH - 14, F.PANEL_HEIGHT + F.SUBTAB_H - 44)
     -- GF-UI-D: the module list is a faint panel with a line on its right.
-    nav.bg = ns.Theme.fill(nav, ns.Theme.C.side or ns.Theme.C.panel, "BACKGROUND") -- GF-UI-G: #2B3225
+    nav.bg = ns.Theme.fill(nav, ns.Theme.C.side or ns.Theme.C.panel, "BACKGROUND") -- GF-UI-G / GF-UI-J: #292724
     nav.line = ns.Theme.vline(nav, 0, 0, 0, nil, true)
     f.nav = nav
     -- GF-UI-E: the sub-tab row over the page, with a thin line under it.

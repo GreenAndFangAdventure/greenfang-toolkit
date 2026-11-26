@@ -395,10 +395,14 @@ Adv.ledger = ns.Ledger.new({
     id = "adventure", prefix = Adv.PREFIX, burst = 6, refill = 0.5, loginDelay = 35,
     validAuthor = validAuthor, validGroup = function(g) return g == "T" or g == "W" or g == "A" end,
     validValue = validValue, selfAuthor = function() return S().selfAuthor() end, changeDelay = 2,
-    onChange = function() cache.version = -1; if Adv.onChanged then Adv.onChanged() end end,
+    onChange = function() cache.version = -1; if Adv.onChanged then Adv.onChanged() end; Adv.changed() end,
     mergeSelf = function(g, v) return Adv.mergeSelf(g, v) end,
 })
 local led = Adv.ledger
+-- GF-014-02: more than one listener (Adv.onChanged stays the page's own): WorkerMatch.
+local changeHooks = {}
+function Adv.onChange(fn) changeHooks[#changeHooks + 1] = fn end
+function Adv.changed() for _, fn in ipairs(changeHooks) do pcall(fn) end end
 
 local function listOf(a, g)
     local rec = a and led:get(a, g)
@@ -1951,6 +1955,7 @@ function Adv.onEnterWorld()
     here = Adv.currentDungeon()
     if here then Adv.checkAuto() end
     if Adv.onChanged then Adv.onChanged() end
+    Adv.changed() -- GF-014-02
     if not here then return 0 end
     local n = 0
     for _, v in pairs(Adv.all()) do
