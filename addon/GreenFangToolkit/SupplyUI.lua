@@ -843,6 +843,8 @@ local function hookLinks()
     local function onLink(link)
         if form and form:IsShown() and form.itemBox and form.itemBox.HasFocus and form.itemBox:HasFocus() then
             UI.formFromText(link)
+        elseif UI.pickLink then
+            UI.pickLink(link)
         end
     end
     if type(ChatEdit_InsertLink) == "function" then pcall(hooksecurefunc, "ChatEdit_InsertLink", onLink) end
@@ -1016,6 +1018,9 @@ UI.PICK_ROWS = 10
 UI.PICK_W = 500
 UI.PICK_SOURCES = { { key = "bag", text = "背包", w = 80 }, { key = "all", text = "全部", w = 80 } }
 UI.PICK_EMPTY = { bag = "背包裡沒有可交易的物品", all = "找不到可交易的物品" }
+-- GF-009-12: 全部 without the catalog AddOn (links, IDs and drops still work).
+UI.PICK_NO_CATALOG = "沒有物品目錄"
+UI.PICK_POS = "%d-%d／共 %d"
 UI.PICK_COL = { icon = 2, name = 42, nameW = 230, type = 280, typeW = 140 }
 UI.PICK_FILTER = { searchLabel = 12, search = 56, searchW = 150, class = 216, sub = 356, filterW = 130 }
 local pickState = { offset = 0, items = {}, base = {}, source = "bag", text = "", class = nil, subclass = nil }
@@ -1040,8 +1045,12 @@ local function drawPicker()
         local b = picker.rows[i]
         local it = pickState.items[pickState.offset + i]
         if it then
-            setItemIcon(b.icon, it.itemID)
-            b.name:SetText((Supply.itemLabel(it.itemID)))
+            -- GF-009-12: catalog rows show the catalog's name and icon until
+            -- the client knows the item (no server request per row).
+            if not (it.info.icon and ns.Icons.set(b.icon, it.info.icon)) then setItemIcon(b.icon, it.itemID) end
+            if b.icon.SetTexCoord then b.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93) end
+            b.icon:Show()
+            b.name:SetText(it.info.name or (Supply.itemLabel(it.itemID)))
             b.kind:SetText(L.typeText(it.info))
             b.count:SetText(it.count and ("x" .. it.count) or "")
             b.item = it
@@ -1051,11 +1060,23 @@ local function drawPicker()
             b:Hide()
         end
     end
-    picker.empty:SetText(#pickState.items == 0 and (UI.PICK_EMPTY[pickState.source] or "") or "")
+    local empty = UI.PICK_EMPTY[pickState.source] or ""
+    local Cat = ns.SupplyCatalog
+    local catStatus = Cat and Cat.status()
+    if pickState.source == "all" and (catStatus == "missing" or catStatus == "bad") then empty = UI.PICK_NO_CATALOG end
+    picker.empty:SetText(#pickState.items == 0 and empty or "")
+    picker.pos:SetText(UI.pickPosText())
     picker.sources.select(pickState.source)
     picker.class.value, picker.sub.value = pickState.class, pickState.subclass
     picker.class.refreshText(); picker.sub.refreshText()
     W.setEnabled(picker.sub, pickState.class ~= nil)
+end
+
+-- 「1-10／共 5414」: which rows are shown (the list is never cut short).
+function UI.pickPosText()
+    local n = #pickState.items
+    if n == 0 then return "" end
+    return string.format(UI.PICK_POS, pickState.offset + 1, math.min(n, pickState.offset + UI.PICK_ROWS), n)
 end
 
 -- Read the list again (source or search changed); the class filter stays
@@ -1088,6 +1109,19 @@ function UI.pickSubclass(subclassID)
     drawPicker()
     return pickState.items
 end
+UI.PICK_ID_LINE = "物品編號 %d"
+-- GF-009-12: the item on the cursor (bags, or any game window that can put an
+-- item on the cursor) into the form, the same path as 拖到物品欄.
+function UI.pickDrop()
+    if type(GetCursorInfo) ~= "function" then return false end
+    local kind, itemID = GetCursorInfo()
+    if kind ~= "item" or type(itemID) ~= "number" then return false end
+    if type(ClearCursor) == "function" then ClearCursor() end
+    setFormItem(itemID)
+    if picker then picker:Hide() end
+    return true
+end
+
 -- Row i of the visible list into the form.
 function UI.pickChoose(i)
     local it = pickState.items[pickState.offset + i]
@@ -1100,7 +1134,7 @@ end
 local searchToken = 0
 local function buildPicker()
     local f = CreateFrame("Frame", UI.PICKER_NAME, UIParent)
-    f:SetSize(UI.PICK_W, UI.PICK_ROWS * 40 + 136)
+    f:SetSize(UI.PICK_W, UI.PICK_ROWS * 40 + 160)
     f:SetFrameStrata("TOOLTIP")
     -- Under the filters' drop-down menus (those sit at level 100).
     if f.SetFrameLevel then f:SetFrameLevel(50) end
@@ -1136,6 +1170,10 @@ local function buildPicker()
     end, function(value) UI.pickSubclass(value) end, "全部子類")
     f.empty = label(f, "", ns.LABEL_FONT)
     f.empty:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -126)
+    f.pos = label(f, "", ns.DISABLED_FONT)
+    f.pos:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 12)
+    -- GF-009-12: an item dropped on the finder is chosen like a row.
+    f:SetScript("OnReceiveDrag", function() UI.pickDrop() end)
     f.rows = {}
     local C = UI.PICK_COL
     for i = 1, UI.PICK_ROWS do
@@ -1156,7 +1194,10 @@ local function buildPicker()
         b.count = label(b, "", ns.LABEL_FONT)
         b.count:SetPoint("RIGHT", b, "RIGHT", -6, 0)
         b:SetScript("OnClick", function() UI.pickChoose(i) end)
-        b:SetScript("OnEnter", function(self) if self.item then itemTooltip(self, self.item.itemID) end end)
+        b:SetScript("OnEnter", function(self)
+            if self.item then itemTooltip(self, self.item.itemID, { string.format(UI.PICK_ID_LINE, self.item.itemID) }) end
+        end)
+        b:SetScript("OnReceiveDrag", function() UI.pickDrop() end)
         b:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
         if b.EnableMouseWheel then b:EnableMouseWheel(true) end
         b:SetScript("OnMouseWheel", function(_, delta)
@@ -1186,6 +1227,15 @@ function UI.openPicker(source)
     return picker
 end
 function UI.picker() return picker end
+-- GF-009-12: Shift-click on an item while the finder's search box has focus:
+-- the link goes into the search (one row: that item).
+function UI.pickLink(link)
+    if not (picker and picker:IsShown() and picker.search.HasFocus and picker.search:HasFocus()) then return false end
+    if not L.itemFromText(link) then return false end
+    picker.search:SetText(link)
+    UI.pickSearch(link)
+    return true
+end
 -- Item data arrived: the open picker shows the newly known items (once per half second).
 function UI.pickerItemInfo()
     if picker and picker:IsShown() then UI.pickReload() end

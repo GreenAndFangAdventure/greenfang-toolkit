@@ -272,6 +272,16 @@ function L.itemInfo(itemID, noRequest)
         bindType = tonumber(bindType) }
 end
 
+-- GF-009-12: the client's data only when it already has the item
+-- (GetItemInfo on an unknown item asks the server, so the catalog search never
+-- calls it for those). Without C_Item.IsItemDataCachedByID: nil.
+function L.cachedInfo(itemID)
+    if type(C_Item) ~= "table" or type(C_Item.IsItemDataCachedByID) ~= "function" then return nil end
+    local okCall, yes = pcall(C_Item.IsItemDataCachedByID, itemID)
+    if not okCall or not yes then return nil end
+    return (L.itemInfo(itemID, true))
+end
+
 -- GF-UI-I: the form's preview of an ItemID: "ready" (name, type), "loading"
 -- (asked the server; GET_ITEM_INFO_RECEIVED redraws), "missing" (the client
 -- says no such item, or no answer within LOAD_WAIT seconds) or "blocked"
@@ -457,9 +467,39 @@ function L.catalog(opts)
     local exact = L.itemFromText(text) or (text:match("^%d+$") and tonumber(text)) or nil
     if exact then addID(set, order, exact, true) end
     local needle = (exact or text == "") and nil or fold(text)
-    local out = {}
+    local out, done = {}, {}
+    -- GF-009-12: 全部 also searches the whole item catalog (no CATALOG_MAX;
+    -- the finder pages). A row uses the client's data when the client already
+    -- has it (the game wins), else the catalog's name, class and icon; the
+    -- client is asked only when one item is previewed or chosen.
+    local Cat = ns.SupplyCatalog
+    local catOn = opts.source == "all" and Cat ~= nil and Cat.load()
+    if catOn then
+        local hits
+        if exact then
+            hits = {}
+            local rec = Cat.find(exact)
+            if rec then hits[1] = rec end
+        else
+            hits = Cat.search(needle and text or nil)
+        end
+        for _, h in ipairs(hits) do
+            local rec = type(h) == "table" and h or Cat.info(h)
+            local id = rec.itemID
+            local client = L.cachedInfo(id)
+            local info = client or rec
+            if L.tradeable(info) and (opts.class == nil or info.classID == opts.class)
+                and (opts.subclass == nil or info.subclassID == opts.subclass) then
+                local b = bag[id]
+                out[#out + 1] = { itemID = id, info = info, count = b and b.count or nil, bag = b ~= nil, catalog = true }
+            end
+            done[id] = true
+        end
+    end
     for _, id in ipairs(order) do
-        local info = L.itemInfo(id, not set[id])
+        -- A catalog item the search did not pick is not looked up again.
+        local skip = done[id] or (catOn and Cat.find(id) ~= nil)
+        local info = not skip and L.itemInfo(id, not set[id]) or nil
         if info and L.tradeable(info) then
             local okText = (exact and id == exact) or (not exact and (not needle or fold(info.name):find(needle, 1, true) ~= nil))
             local okClass = opts.class == nil or info.classID == opts.class
