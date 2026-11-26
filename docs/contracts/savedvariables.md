@@ -384,3 +384,8 @@ adventure = {
 - 戰鬥中不掃描、不寫入。
 - outbox 有大小上限（§2f），避免 SavedVariables 一直變大、拖慢載入。
 - 遵守 §2a 的通則：共通欄位、內容改變就換 `id`、空表格不寫鍵、字串鍵。
+
+## 附註：GF Sync 不讀的本機資料（0.16.6）
+
+- `GreenFangToolkitDB.supply.listings[<guid>].list[<id>]` 新增兩個選填欄位：`terms`（"negotiable"、"free"、"price"、"swap"；沒有＝未標示）和 `price`（每個的價格，單位銅，整數 1～2,147,483,647，只有 `terms = "price"` 時才有）。GF Sync 不讀 `supply`。
+- 公會內分享用 GFTKS 群組 `M`（交易條件）與 `T`（天賦），都不上傳。
