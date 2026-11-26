@@ -327,6 +327,14 @@ local function talents()
     c.serializationVersion = tostring(plain((select(2, Probe.try("C_Traits.GetLoadoutSerializationVersion")))))
     c.linkTypeTalentBuild = tostring(plain(Probe.resolve("LinkTypes.TalentBuild")))
     c.hasValidInspectData = Probe.try("C_Traits.HasValidInspectData")
+    -- GF-011: what the roster reads (points per group from node groupIDs),
+    -- and the chat functions the 「天賦連結」 action uses.
+    if ns.Talents then
+        local okT, line = pcall(ns.Talents.summaryLine)
+        c.gf011 = okT and line or ("err:" .. errText(line))
+    end
+    c.chatInsertLink = Probe.typeOf((type(ChatFrameUtil) == "table" and ChatFrameUtil.InsertLink) or _G.ChatEdit_InsertLink)
+    c.chatOpenChat = Probe.typeOf((type(ChatFrameUtil) == "table" and ChatFrameUtil.OpenChat) or _G.ChatFrame_OpenChat)
     -- Classic-style API (expected missing on Forever): existence only, no call.
     return c
 end

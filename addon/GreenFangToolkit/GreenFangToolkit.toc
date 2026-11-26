@@ -57,3 +57,4 @@ BankUI.lua
 SupplyCatalog.lua
 SupplyCatalogData.lua
 WorkerMatch.lua
+Talents.lua

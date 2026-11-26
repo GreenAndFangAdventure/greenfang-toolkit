@@ -15,6 +15,7 @@ TOC_FILES[#TOC_FILES + 1] = "BankUI.lua"
 TOC_FILES[#TOC_FILES + 1] = "SupplyCatalog.lua" -- GF-009-12 (appended, like the TOC)
 TOC_FILES[#TOC_FILES + 1] = "SupplyCatalogData.lua"
 TOC_FILES[#TOC_FILES + 1] = "WorkerMatch.lua" -- GF-014-02 (appended, like the TOC)
+TOC_FILES[#TOC_FILES + 1] = "Talents.lua" -- GF-011 (appended, like the TOC)
 wow.TOC_FILES = TOC_FILES
 
 ---------------------------------------------------------------------------
@@ -257,6 +258,7 @@ function wow.reset(opts)
         noSecureTemplate = opts.noSecureTemplate, -- client without SecureActionButtonTemplate
         noSpellAPI = opts.noSpellAPI,       -- C_Spell missing
         tradeSkill = opts.tradeSkill,       -- an open profession window (GF-001-D10)
+        talents = opts.talents,             -- GF-011: the trait-tree API (wow.installTalents)
     }
     wow.state = state
     wow.installGlobals()
@@ -728,6 +730,63 @@ function wow.installGlobals()
     if state.noClub then
         C_Club, C_CreatureInfo, GetPlayerInfoByGUID = nil, nil, nil
     end
+    wow.installTalents()
+end
+
+-- GF-011: Forever 1.60.1 (ui 16001, owner's probe 2026-11-26) has no
+-- classic talent API, and neither does the mock. state.talents (opts.talents)
+-- installs the trait-tree API the probe saw:
+--   { configID, treeID, specID, import, groups = { { id, name, icon } },
+--     nodes = { { id, group, ranks } }, noGroupIDs, noLink }
+-- Made-up IDs and names only.
+function wow.installTalents()
+    GetTalentInfo, GetTalentTabInfo, GetNumTalentTabs, GetActiveTalentGroup = nil, nil, nil, nil
+    GetUnspentTalentPoints, IsDualSpecUnlocked = nil, nil
+    C_ClassTalents, C_Traits, C_SpecializationInfo, LinkTypes = nil, nil, nil, nil
+    local t = state.talents
+    if not t then return end
+    state.talentReads = 0
+    C_SpecializationInfo = {
+        GetSpecialization = function() return 1 end,
+        GetSpecializationInfo = function() return t.specID or 0, "專精" end,
+        GetActiveSpecGroup = function() return 1 end,
+        GetCombatConfigIDForSpecGroup = function() return t.configID end,
+    }
+    C_ClassTalents = { GetActiveConfigID = function() return t.configID end }
+    local byId = {}
+    for _, n in ipairs(t.nodes or {}) do byId[n.id] = n end
+    C_Traits = {
+        GetConfigInfo = function(id)
+            if id ~= t.configID then return nil end
+            return { ID = id, type = 1, name = "", treeIDs = { t.treeID } }
+        end,
+        GetTreeNodes = function(tree)
+            state.talentReads = state.talentReads + 1
+            if tree ~= t.treeID then return {} end
+            local ids = {}
+            for _, n in ipairs(t.nodes or {}) do ids[#ids + 1] = n.id end
+            return ids
+        end,
+        GetNodeInfo = function(_, id)
+            local n = byId[id]
+            if not n then return nil end
+            return { ID = id, activeRank = n.ranks, ranksPurchased = n.ranks, posX = 0, posY = 0,
+                groupIDs = (not t.noGroupIDs) and { n.group } or {} }
+        end,
+        GetEntryInfo = function(_, e) return { definitionID = e, maxRanks = 5 } end,
+        GetDefinitionInfo = function(d) return { spellID = d } end,
+        GetGroupDisplayInfoByTreeID = function(tree)
+            local trees = t.trees or { [t.treeID] = t.groups }
+            local out = {}
+            for _, g in ipairs(trees[tree] or {}) do out[#out + 1] = { groupID = g.id, displayName = g.name, icon = g.icon } end
+            return out
+        end,
+        GetTreeCurrencyInfo = function() return { { spent = 0, spentInTree = 0 } } end,
+        GenerateImportString = function(id) return id == t.configID and t.import or nil end,
+        HasValidInspectData = function() return false end,
+        GetLoadoutSerializationVersion = function() return 2 end,
+    }
+    if not t.noLink then LinkTypes = { TalentBuild = "talentbuild" } end
 end
 
 ---------------------------------------------------------------------------

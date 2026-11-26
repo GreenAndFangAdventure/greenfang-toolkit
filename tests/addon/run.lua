@@ -4697,6 +4697,9 @@ assert(loadfile(ROOT .. "/tests/addon/catalog_dev_tests.lua"))()({ test = test, 
 -- GF-014-03: joinable slots, recheck after combat, chat, windows on the screen, drafts (tests/addon/gf01403_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gf01403_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-011: roster talents, the T share group, 天賦連結 (tests/addon/talents_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/talents_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------
 
