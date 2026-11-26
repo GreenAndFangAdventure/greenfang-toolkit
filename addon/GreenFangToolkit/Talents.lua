@@ -280,6 +280,83 @@ function Talents.insertLink(guid, name)
 end
 
 ---------------------------------------------------------------------------
+-- GF-011-B 「天賦樹」 (owner 0.16.5: 「天賦我以為可以打開天賦樹?」): the game's
+-- own talent window. Forever's code (WoWBlzCode Forever, 1.60.1):
+-- ItemRefHandlers.lua handles a talentbuild link with
+-- PlayerSpellsUtil.InspectLoadout("<specID>:<level>:<import>"), which loads
+-- Blizzard_PlayerSpells (LoadOnDemand) and calls
+-- PlayerSpellsFrame:SetInspectString -> TalentsFrame:ViewLoadout: read-only,
+-- the spec comes from the import string's own header (any class). When
+-- ViewLoadout refuses the string, the frame drops the inspect and would show
+-- the player's own tree, so that case falls back to the chat link.
+-- Own character: PlayerSpellsUtil.OpenToClassTalentsTab() (the normal window).
+-- Never in combat (the window is a UI panel; loading it mid-fight is refused).
+---------------------------------------------------------------------------
+
+Talents.TREE_LABEL = "天賦樹"
+Talents.TREE_TIP = { combat = "戰鬥中不能開", nodata = "沒有收到天賦", noimport = "沒有匯出字串", noui = "這個用戶端開不了天賦視窗" }
+
+local function selfGuid() return ns.Profile and ns.Profile.selfGuid() or nil end
+
+-- How "天賦樹" would open for this member: "own", "view", "ref", "chat", or
+-- nil, why (Talents.TREE_TIP key). No combat check here (UI greys it there).
+function Talents.treeMode(guid)
+    guid = str(guid)
+    if guid ~= "" and guid == selfGuid() then
+        if fn("PlayerSpellsUtil.OpenToClassTalentsTab") or fn("TogglePlayerSpellsFrame") or fn("ToggleTalentFrame") then return "own" end
+        return nil, "noui"
+    end
+    local t = Talents.of(guid)
+    if not t then return nil, "nodata" end
+    if not t.import then return nil, "noimport" end
+    if fn("PlayerSpellsUtil.InspectLoadout") then return "view" end
+    if fn("SetItemRef") and Talents.canLink(t) then return "ref" end
+    if Talents.canLink(t) then return "chat" end
+    return nil, "noui"
+end
+
+local function inspecting()
+    local f = PlayerSpellsFrame
+    if type(f) ~= "table" or type(f.IsInspecting) ~= "function" then return nil end
+    local ok, v = pcall(f.IsInspecting, f)
+    if not ok then return nil end
+    return v == true
+end
+
+-- Open it. Returns true, mode ("own", "view", "ref", "chat") or false, why.
+function Talents.openTree(guid, name)
+    if ns.inCombat() then return false, "combat" end
+    local mode, why = Talents.treeMode(guid)
+    if not mode then return false, why end
+    if mode == "own" then
+        for _, path in ipairs({ "PlayerSpellsUtil.OpenToClassTalentsTab", "PlayerSpellsUtil.ToggleClassTalentFrame",
+            "TogglePlayerSpellsFrame", "ToggleTalentFrame" }) do
+            local f = fn(path)
+            if f then
+                local ok = path == "TogglePlayerSpellsFrame" and pcall(f, 2) or pcall(f)
+                if ok then return true, "own" end
+            end
+        end
+        return false, "noui"
+    end
+    local t = Talents.of(guid)
+    local data = string.format("%d:%d:%s", t.specID or 0, t.level or 1, t.import)
+    if mode == "view" then
+        local ok = pcall(fn("PlayerSpellsUtil.InspectLoadout"), data)
+        if ok and inspecting() ~= false then return true, "view" end
+        -- Refused (bad string, other serialization version): close the own tree it fell back to.
+        if PlayerSpellsFrame and HideUIPanel then pcall(HideUIPanel, PlayerSpellsFrame) end
+    elseif mode == "ref" then
+        local link = Talents.link(guid, name)
+        local ok = pcall(SetItemRef, Talents.LINK_TYPE .. ":" .. data, link, "LeftButton")
+        if ok then return true, "ref" end
+    end
+    local okC = Talents.insertLink(guid, name)
+    if okC then return true, "chat" end
+    return false, "noui"
+end
+
+---------------------------------------------------------------------------
 -- Diagnostics and /gftk probe
 ---------------------------------------------------------------------------
 

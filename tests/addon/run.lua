@@ -4700,6 +4700,9 @@ assert(loadfile(ROOT .. "/tests/addon/gf01403_tests.lua"))()({ test = test, eq =
 -- GF-011: roster talents, the T share group, 天賦連結 (tests/addon/talents_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/talents_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-011-B: 天賦樹 (the game's talent window) and 製作 on accepted orders (tests/addon/gf011b_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf011b_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 -- GF-008-B: the sleeping-bag guide, normal mode only, the world-map pin (tests/addon/sleepingbag_map_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/sleepingbag_map_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
