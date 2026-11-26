@@ -101,6 +101,7 @@ local function withTip(f)
     if not f or not f.HookScript then return f end
     f:HookScript("OnEnter", function(self)
         if self.tip and GameTooltip then
+            self.gfSupplyTip = true -- GF-009-13: hidden with its window (UI.hideTip)
             GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:AddLine(self.tip, 1, 1, 1, true); GameTooltip:Show()
         end
     end)
@@ -187,6 +188,7 @@ UI.setItemIcon = setItemIcon
 
 local function itemTooltip(owner, itemID, extra)
     if not GameTooltip then return end
+    owner.gfSupplyTip = true
     GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
     local shown = false
     if itemID and type(GameTooltip.SetItemByID) == "function" then shown = pcall(GameTooltip.SetItemByID, GameTooltip, itemID) end
@@ -656,6 +658,9 @@ local function build(p)
     UI.statePanel = statePanel
     -- A screenshot preview never outlives the page.
     if p.HookScript then p:HookScript("OnHide", function() state.preview = nil end) end
+    -- GF-009-13: the form and the finder never outlive the page (the window's
+    -- X, another module, /gftk); an unsaved form is kept as a draft.
+    if p.HookScript then p:HookScript("OnHide", function() UI.closeWithPage() end) end
     -- GF-UI-I: Th.vline's second y counts from the page's bottom; the old call
     -- gave the list's bottom from the top, so the line ran out of the window.
     -- Anchor the top and give the height instead.
@@ -753,8 +758,90 @@ function UI.closeForm(force)
     if not form then return true end
     if not force and UI.formDirty() then UI.askDiscard(); return false end
     formState.initial = nil
+    if force then UI.draft = nil end
     form.gfRawHide(form)
+    UI.afterFormHide()
     return true
+end
+
+---------------------------------------------------------------------------
+-- GF-009-13: windows, ESC and drafts. ESC closes the finder, then the form
+-- (asking first when it changed), then the window. When the page goes away
+-- first (the window's X, another module), the form closes without asking and
+-- its contents are kept: the next 「＋刊登」 (or the same 修改) gets them back.
+---------------------------------------------------------------------------
+
+function UI.hideTip()
+    if GameTooltip and GameTooltip.GetOwner then
+        local o = GameTooltip:GetOwner()
+        if o and o.gfSupplyTip and GameTooltip.Hide then GameTooltip:Hide() end
+    end
+end
+function UI.afterFormHide()
+    local p = UI.picker and UI.picker()
+    if p and p:IsShown() then p:Hide() end
+    UI.hideTip()
+end
+local function draftOf()
+    return { editingID = formState.editing and formState.editing.id or nil, direction = formState.direction,
+        itemID = formState.itemID, bagInfo = formState.bagInfo, days = formState.days,
+        qty = form.qty:GetText(), note = form.note:GetText(), itemText = form.itemBox:GetText() }
+end
+function UI.closeWithPage()
+    local p = UI.picker and UI.picker()
+    if p and p:IsShown() then p:Hide() end
+    if form and form:IsShown() then
+        if UI.formDirty() then UI.draft = draftOf() end
+        formState.initial = nil
+        form.gfRawHide(form)
+    end
+    UI.hideTip()
+end
+local function draftFits(d, listing)
+    if not d then return false end
+    if listing then return d.editingID == listing.id end
+    return d.editingID == nil
+end
+UI.DRAFT_BACK = "已還原上次沒送出的內容"
+
+-- Where the form and the finder go (UIParent units from the bottom left):
+-- the finder right of the form, else left of it; when neither fits, the form
+-- moves so both fit side by side; on a screen narrower than both, the finder
+-- covers the form's right side. Nothing is placed off screen.
+UI.FORM_W, UI.FORM_H, UI.FORM_Y = 600, 470, 40
+UI.PICK_GAP, UI.SCREEN_EDGE = 4, 8
+function UI.layoutPair(sw, sh, fw, fh, pw, ph, formLeft, formTop)
+    local E, gap = UI.SCREEN_EDGE, UI.PICK_GAP
+    local function clampX(x, w) return math.max(E, math.min(x, sw - w - E)) end
+    local function clampTop(t, h) return math.max(math.min(t, sh - E), math.min(sh - E, h + E)) end
+    formLeft, formTop = clampX(formLeft, fw), clampTop(formTop, fh)
+    local px
+    if formLeft + fw + gap + pw <= sw - E then
+        px = formLeft + fw + gap
+    elseif formLeft - gap - pw >= E then
+        px = formLeft - gap - pw
+    elseif fw + gap + pw <= sw - 2 * E then
+        formLeft = math.floor((sw - (fw + gap + pw)) / 2)
+        px = formLeft + fw + gap
+    else
+        px = clampX(sw - pw - E, pw)
+    end
+    return formLeft, formTop, px, clampTop(formTop, ph)
+end
+function UI.screenSize()
+    local w = UIParent and UIParent.GetWidth and tonumber((UIParent:GetWidth())) or nil
+    local h = UIParent and UIParent.GetHeight and tonumber((UIParent:GetHeight())) or nil
+    if not w or w <= 0 or not h or h <= 0 then return 1365, 768 end
+    return w, h
+end
+-- The form's left / top: the client's when it has laid the form out, else
+-- where we put it.
+function UI.formRect(sw, sh)
+    local l = form and form.GetLeft and tonumber((form:GetLeft())) or nil
+    local t = form and form.GetTop and tonumber((form:GetTop())) or nil
+    if l and t then return l, t end
+    if UI.formAt then return UI.formAt[1], UI.formAt[2] end
+    return (sw - UI.FORM_W) / 2, sh / 2 + UI.FORM_Y + UI.FORM_H / 2
 end
 
 local function discardDialog()
@@ -784,7 +871,8 @@ function UI.askDiscard()
     return W.confirm(UI.DISCARD_TEXT, function() UI.closeForm(true) end)
 end
 
-UI.PREVIEW_TEXT = { loading = "物品資料載入中", missing = "找不到這個物品", bad = "請貼物品連結或輸入物品編號" }
+UI.PREVIEW_TEXT = { loading = "物品資料載入中", missing = "找不到這個物品", bad = "請貼物品連結或輸入物品編號",
+    timeout = "物品資料逾時，請稍後再試" } -- GF-009-13: timeout / missing / blocked are three messages
 local loadToken = 0
 local function setFormItem(itemID, bagInfo, waited)
     formState.itemID, formState.bagInfo = itemID, bagInfo
@@ -794,12 +882,13 @@ local function setFormItem(itemID, bagInfo, waited)
         local pv = L.preview(itemID, waited)
         formState.preview = pv.state
         setItemIcon(form.itemIcon, itemID)
-        form.itemName:SetText(pv.name or (pv.state == "missing" and UI.PREVIEW_TEXT.missing) or (Supply.itemLabel(itemID)))
+        form.itemName:SetText(pv.name or ((pv.state == "missing" or pv.state == "timeout") and UI.PREVIEW_TEXT[pv.state])
+            or (Supply.itemLabel(itemID)))
         -- GF-UI-H: the type comes from the item (classID / subclassID), never a pick.
         formState.category = L.categoryFor(pv.info, formState.editing and formState.editing.category or "other")
         form.typeText:SetText(pv.typeText or "")
-        local problem = not formState.editing and L.itemProblem(itemID, bagInfo) or nil
-        if pv.state == "missing" and not formState.editing then problem = UI.PREVIEW_TEXT.missing end
+        local problem = not formState.editing and L.itemProblem(itemID, bagInfo, formState.direction) or nil
+        if (pv.state == "missing" or pv.state == "timeout") and not formState.editing then problem = UI.PREVIEW_TEXT[pv.state] end
         formMessage(problem)
         if pv.state == "loading" then
             loadToken = loadToken + 1
@@ -853,7 +942,8 @@ local function hookLinks()
     end
 end
 
--- An item held on the cursor (dragged from the bags).
+-- An item held on the cursor (dragged from the bags or another window). The
+-- form's slot and the finder share it (GF-009-13: one resolve path).
 local function takeCursorItem()
     if type(GetCursorInfo) ~= "function" then return false end
     local kind, itemID = GetCursorInfo()
@@ -862,10 +952,18 @@ local function takeCursorItem()
     setFormItem(itemID)
     return true
 end
+UI.takeCursorItem = takeCursorItem
+-- GF-009-13: 方向 changed: 供應 looks at the bag stacks again.
+function UI.formRecheck()
+    if form and form:IsShown() and formState.itemID and not formState.editing then
+        setFormItem(formState.itemID, formState.bagInfo, formState.preview == "timeout")
+    end
+end
 
 local function buildForm()
-    local f = ns.popupWindow(UI.FORM_NAME, 600, 470)
-    f:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
+    local f = ns.popupWindow(UI.FORM_NAME, UI.FORM_W, UI.FORM_H)
+    f:SetPoint("CENTER", UIParent, "CENTER", 0, UI.FORM_Y)
+    if f.SetClampedToScreen then f:SetClampedToScreen(true) end
     f.TitleText:SetText("刊登")
     local x, y = 24, -48
     local function row(text)
@@ -875,7 +973,7 @@ local function buildForm()
     end
     row("方向")
     f.dirs = Th.tabStrip(f, { { key = "need", text = "徵求" }, { key = "offer", text = "供應" } }, 104, y,
-        function(key) formState.direction = key end)
+        function(key) formState.direction = key; UI.formRecheck() end)
     y = y - 50
     row("物品")
     f.slot = CreateFrame("Button", nil, f)
@@ -976,8 +1074,25 @@ function UI.openForm(listing, force)
     if listing then f.itemBox:Hide() else f.itemBox:Show() end
     setFormItem(listing and listing.itemID or nil)
     formMessage("")
+    -- GF-009-13: back in the middle (the finder may have moved it aside).
+    f:ClearAllPoints()
+    f:SetPoint("CENTER", UIParent, "CENTER", 0, UI.FORM_Y)
+    UI.formAt = nil
     f:Show()
     formState.initial = formSnapshot()
+    -- GF-009-13: what was in it when the page closed comes back (still unsaved).
+    local d = UI.draft
+    if not force and draftFits(d, listing) then
+        UI.draft = nil
+        formState.direction, formState.days = d.direction, d.days
+        f.dirs.select(d.direction)
+        f.days.select(d.days)
+        f.qty:SetText(d.qty or "")
+        f.note:SetText(d.note or "")
+        if not listing then f.itemBox:SetText(d.itemText or "") end
+        setFormItem(d.itemID, d.bagInfo)
+        if (f.msg:GetText() or "") == "" then formMessage(UI.DRAFT_BACK) end
+    end
     return true
 end
 
@@ -1016,6 +1131,7 @@ function UI.form() return form end
 local picker
 UI.PICK_ROWS = 10
 UI.PICK_W = 500
+function UI.pickHeight() return UI.PICK_ROWS * 40 + 160 end
 UI.PICK_SOURCES = { { key = "bag", text = "背包", w = 80 }, { key = "all", text = "全部", w = 80 } }
 UI.PICK_EMPTY = { bag = "背包裡沒有可交易的物品", all = "找不到可交易的物品" }
 -- GF-009-12: 全部 with a damaged catalog file (links, IDs and drops still work).
@@ -1083,11 +1199,14 @@ end
 -- Read the list again (source or search changed); the class filter stays
 -- while it still has items.
 function UI.pickReload()
+    local Cat = ns.SupplyCatalog
+    local t0 = Cat and Cat.clock()
     pickState.base = L.catalog({ source = pickState.source, text = pickState.text })
     local hasClass = false
     for _, c in ipairs(L.catalogClasses(pickState.base)) do if c.value == pickState.class then hasClass = true end end
     if not hasClass then pickState.class, pickState.subclass = nil, nil end
     drawPicker()
+    if t0 and pickState.source == "all" then Cat.noteList(Cat.clock() - t0) end
     return pickState.items
 end
 
@@ -1114,11 +1233,7 @@ UI.PICK_ID_LINE = "物品編號 %d"
 -- GF-009-12: the item on the cursor (bags, or any game window that can put an
 -- item on the cursor) into the form, the same path as 拖到物品欄.
 function UI.pickDrop()
-    if type(GetCursorInfo) ~= "function" then return false end
-    local kind, itemID = GetCursorInfo()
-    if kind ~= "item" or type(itemID) ~= "number" then return false end
-    if type(ClearCursor) == "function" then ClearCursor() end
-    setFormItem(itemID)
+    if not takeCursorItem() then return false end
     if picker then picker:Hide() end
     return true
 end
@@ -1127,7 +1242,8 @@ end
 function UI.pickChoose(i)
     local it = pickState.items[pickState.offset + i]
     if not it then return false end
-    setFormItem(it.itemID, { isBound = false })
+    -- GF-009-13: no made-up bag info; 供應 checks the real bag stacks.
+    setFormItem(it.itemID, it.bag and { isBound = false } or nil)
     if picker then picker:Hide() end
     return true
 end
@@ -1135,7 +1251,9 @@ end
 local searchToken = 0
 local function buildPicker()
     local f = CreateFrame("Frame", UI.PICKER_NAME, UIParent)
-    f:SetSize(UI.PICK_W, UI.PICK_ROWS * 40 + 160)
+    f:SetSize(UI.PICK_W, UI.pickHeight())
+    if f.SetClampedToScreen then f:SetClampedToScreen(true) end
+    if f.HookScript then f:HookScript("OnHide", function() UI.hideTip() end) end
     f:SetFrameStrata("TOOLTIP")
     -- Under the filters' drop-down menus (those sit at level 100).
     if f.SetFrameLevel then f:SetFrameLevel(50) end
@@ -1217,8 +1335,24 @@ end
 function UI.openPicker(source)
     if not picker then buildPicker() end
     picker:ClearAllPoints()
-    if form and form:IsShown() then picker:SetPoint("TOPLEFT", form, "TOPRIGHT", 4, 0)
-    else picker:SetPoint("CENTER", UIParent, "CENTER", 0, 0) end
+    -- GF-009-13: placed from the screen size, so it never runs off a narrow
+    -- screen or a large UI scale (UI.layoutPair).
+    local sw, sh = UI.screenSize()
+    local ph = UI.pickHeight()
+    if form and form:IsShown() then
+        local fl, ft = UI.formRect(sw, sh)
+        local nl, nt, px, pt = UI.layoutPair(sw, sh, UI.FORM_W, UI.FORM_H, UI.PICK_W, ph, fl, ft)
+        if math.abs(nl - fl) > 0.5 or math.abs(nt - ft) > 0.5 then
+            form:ClearAllPoints()
+            form:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", nl, nt)
+            UI.formAt = { nl, nt }
+        end
+        picker:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", px, pt)
+        UI.pickAt = { px, pt }
+    else
+        picker:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+        UI.pickAt = { (sw - UI.PICK_W) / 2, (sh + ph) / 2 }
+    end
     pickState.source = source == "all" and "all" or "bag"
     pickState.text, pickState.class, pickState.subclass, pickState.offset = "", nil, nil, 0
     picker.search:SetText("")

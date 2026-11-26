@@ -1,0 +1,9 @@
+## Interface: 16001
+## Title: 綠皮冒險工具箱（開發用）
+## Notes: 會長專用的物品名稱掃描（/gftkdev）。不在公會發布包裡，會友不用裝。
+## Author: 綠皮與獠牙冒險事務所
+## SavedVariables: GreenFangToolkitDevDB
+## X-License: MIT
+
+CatalogScanData.lua
+CatalogScan.lua

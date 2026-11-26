@@ -14,7 +14,6 @@ TOC_FILES[#TOC_FILES + 1] = "Bank.lua" -- GF-012 (appended, like the TOC)
 TOC_FILES[#TOC_FILES + 1] = "BankUI.lua"
 TOC_FILES[#TOC_FILES + 1] = "SupplyCatalog.lua" -- GF-009-12 (appended, like the TOC)
 TOC_FILES[#TOC_FILES + 1] = "SupplyCatalogData.lua"
-TOC_FILES[#TOC_FILES + 1] = "CatalogScan.lua"
 TOC_FILES[#TOC_FILES + 1] = "WorkerMatch.lua" -- GF-014-02 (appended, like the TOC)
 wow.TOC_FILES = TOC_FILES
 

@@ -976,11 +976,46 @@ function UI.workerTooltipLines(w, author)
     if #slots > 0 then
         group("時段")
         for _, sl in ipairs(slots) do
-            local len = (sl.d and sl.d > 0) and ("   預計 " .. math.floor(sl.d / 3600 + 0.5) .. " 小時") or ""
+            local len = (sl.d and sl.d > 0) and ("   預計 " .. UI.lengthText(sl.d)) or "" -- GF-014-03: the whole length
             add(UI.slotText(sl, 16) .. len)
         end
     end
     return out
+end
+
+-- GF-014-03: a slot's length in full: "2 小時" / "1 小時 30 分" / "45 分" (never rounded).
+function UI.lengthText(d)
+    d = math.floor((tonumber(d) or 0) / 60 + 0.5)
+    local h, m = math.floor(d / 60), d % 60
+    if h > 0 and m > 0 then return h .. " 小時 " .. m .. " 分" end
+    if h > 0 then return h .. " 小時" end
+    return m .. " 分"
+end
+
+-- GF-014-03: the screen in UIParent units (nil when unknown). At UI scale s the
+-- game's UIParent is 768 / s high and as wide as the aspect ratio makes it:
+-- 1280x720 and 1920x1080 are both 1365x768 at 1.0 and 2133x1200 at 0.64.
+UI.SCREEN_MARGIN = 16
+function UI.screenSize()
+    local w = ns.num((UIParent and UIParent.GetWidth and UIParent:GetWidth()))
+    local h = ns.num((UIParent and UIParent.GetHeight and UIParent:GetHeight()))
+    if not (w and h and w >= 300 and h >= 300) then return nil end
+    return w, h
+end
+-- A floating window on the screen whole: clamped, and smaller (SetScale) when
+-- it is larger than the screen. w, h: the size the caller just gave it.
+function UI.fitScreen(f, w, h)
+    if not f then return f end
+    if f.SetClampedToScreen then f:SetClampedToScreen(true) end
+    local W, H = UI.screenSize()
+    local s = 1
+    if W and w and h and w > 0 and h > 0 then
+        local m = 2 * UI.SCREEN_MARGIN
+        s = math.min(1, (W - m) / w, (H - m) / h)
+    end
+    if f.SetScale then f:SetScale(s) end
+    f.gfFit = { w = w, h = h, scale = s, clamped = true }
+    return f
 end
 
 -- How many tooltip lines fit on the screen (UIParent's height; 768 when unknown).
@@ -1073,11 +1108,28 @@ function UI.openWorkerDetail(lines)
         fs:Show()
     end
     for i = #(lines or {}) + 1, #f.texts do f.texts[i]:Hide() end
+    -- GF-014-03: as wide as the widest line (nothing cut, the 時段 lengths
+    -- included) and never larger than the screen; the lines scroll.
+    local widest = 0
+    for i = 1, #(lines or {}) do
+        local fs = f.texts[i]
+        local wd = ns.num((ns.measure and ns.measure(fs)) or (fs.GetStringWidth and fs:GetStringWidth())) or 0
+        if wd > widest then widest = wd end
+    end
+    local W, H = UI.screenSize()
+    local m = 2 * UI.SCREEN_MARGIN
+    local fw = math.max(UI.DETAIL_W, math.ceil(widest) + 80)
+    local fh = math.min(UI.DETAIL_H, math.max(200, #(lines or {}) * (UI.TIP_LINE_H + 2) + 60))
+    if W then fw, fh = math.min(fw, W - m), math.min(fh, H - m) end
+    f:SetSize(fw, fh)
+    f.content:SetWidth(fw - 60)
+    f.contentWidth, f.widest = fw - 60, widest
     f.content:SetHeight(math.max(1, #(lines or {}) * (UI.TIP_LINE_H + 2)))
     if f.scroll.SetVerticalScroll then f.scroll:SetVerticalScroll(0) end
     f.lines = lines
     f:ClearAllPoints()
     f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    UI.fitScreen(f, fw, fh)
     f:Show()
     return f
 end
@@ -1303,6 +1355,7 @@ function UI.scrollToRow(i)
 end
 
 function UI.focus(id)
+    UI.closeFloating() -- GF-014-03: the jump shows the row, nothing left on top of it (drafts kept)
     local tab, v = UI.locate(id)
     if not tab then
         UI.focusId = nil
@@ -1410,6 +1463,9 @@ local function build(p)
     UI.emptyLine = p:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT)
     UI.emptyLine:SetPoint("TOP", p, "TOP", 0, -200)
     ns.Diag.smallButton(p, "BOTTOMRIGHT", -24, 10)
+    -- GF-014-03: the page goes (another page, the main window closed): its small
+    -- windows go with it; a form keeps its draft.
+    p:HookScript("OnHide", function() UI.closeFloating() end)
     panel = p
 end
 
@@ -1649,6 +1705,7 @@ function UI.timePicker(owner, opts)
     picker.done:SetPoint("TOPRIGHT", picker, "TOPRIGHT", -14, y)
     y = y - 40
     picker:SetSize(14 + 56 + 12 * 44 + 14, -y + 6)
+    picker.gfW, picker.gfH = 14 + 56 + 12 * 44 + 14, -y + 6
     -- The current choice.
     local sel = { start = opts.start, minute = 0, dur = opts.dur }
     if opts.start then
@@ -1659,7 +1716,7 @@ function UI.timePicker(owner, opts)
     picker.mark()
     picker:ClearAllPoints()
     picker:SetPoint("TOPLEFT", owner or UIParent, "BOTTOMLEFT", 0, -4)
-    if picker.SetClampedToScreen then picker:SetClampedToScreen(true) end
+    UI.fitScreen(picker, picker.gfW, picker.gfH) -- GF-014-03
     picker:Show()
     return picker
 end
@@ -2074,6 +2131,7 @@ function UI.submitTicket(d)
     -- GF-002-I (R-17.5): 重開 put the new one up: the ended ticket leaves my list.
     if id and d.reopenOf then A().forget(d.reopenOf); d.reopenOf = nil end
     if id and popup then popup:Hide() end
+    if id then UI.dropDraft("ticket") end -- GF-014-03: saved, nothing to keep
     if not id and popup then
         UI.markField(popup, UI.SUBMIT_FIELD[why])
         popup.result:SetText(UI.SUBMIT_FIELD[why] and "" or (tex("no") .. " " .. (UI.SUBMIT_ERROR[why] or "")))
@@ -2160,6 +2218,7 @@ local function layoutTicket(f, lines, extra)
     label("備註", rows[6]); f.note:ClearAllPoints(); f.note:SetPoint("TOPLEFT", f, "TOPLEFT", X + 6, rows[6])
     f.lfgCheck:ClearAllPoints(); f.lfgCheck:SetPoint("TOPLEFT", f, "TOPLEFT", FX, rows[7])
     f:SetHeight(-rows[7] + 110)
+    UI.fitScreen(f, f.width, -rows[7] + 110) -- GF-014-03: many slots + the editor at 768 high
 end
 
 local function drawTicket()
@@ -2217,13 +2276,17 @@ end
 -- opts: a view to edit (my own open ticket), or nil for a new one.
 -- GF-002-I (R-17.5): mode "reopen": the same contents as v, a new time (現在 to start).
 function UI.openTicket(v, mode)
-    draft = v and UI.draftFrom(v) or UI.newDraft()
+    -- GF-014-03: a draft the form lost without 開單 (another window, the bell's
+    -- jump, the main window closed, ESC) comes back for the same ticket.
+    draft = (mode ~= "reopen" and UI.takeDraft("ticket", UI.ticketDraftKey(v)))
+        or (v and UI.draftFrom(v) or UI.newDraft())
     if v and mode == "reopen" then
         draft.editId, draft.reopenOf = nil, v.id
         draft.slots = { { now = true } }
     end
     if not popup then
         local f = ns.popupWindow(UI.TICKET_NAME, 820, 470)
+        f:HookScript("OnHide", function() UI.keepDraft("ticket") end) -- GF-014-03
         ns.Theme.formPanel(f) -- GF-UI-G: the opaque form colour
         f:SetPoint("CENTER", 0, 40)
         f:EnableMouse(true)
@@ -2400,6 +2463,7 @@ function UI.dungeonGrid(owner, onClick, isOn, onQuest, returnTo, showLfg)
         grid.done = O.textButton(grid, tex("yes", 20) .. " 完成", function() grid:Hide() end, 110)
         grid.done:SetPoint("BOTTOMRIGHT", grid, "BOTTOMRIGHT", -20, 14)
         grid:SetSize(32 + C * W + 24, UI.GRID_TOP + UI.GRID_ROWS * H + 60)
+        grid.gfW, grid.gfH = 32 + C * W + 24, UI.GRID_TOP + UI.GRID_ROWS * H + 60 -- GF-014-03
         grid:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
         grid:HookScript("OnHide", function(self)
             local back = self.returnTo
@@ -2482,6 +2546,7 @@ function UI.dungeonGrid(owner, onClick, isOn, onQuest, returnTo, showLfg)
     grid.draw()
     -- The window it was opened from steps aside (nothing is covered).
     grid.returnTo = returnTo
+    UI.fitScreen(grid, grid.gfW, grid.gfH) -- GF-014-03
     grid:Show()
     if returnTo and returnTo:IsShown() then returnTo:Hide() end
     return grid
@@ -2824,6 +2889,7 @@ function UI.questPicker(owner, opts)
             local width = 32 + cols * UI.QP_COL_W
             local height = (qpicker.pages > 1 and UI.QP_MAX_Y or math.max(maxY - top, 90 - top)) + 60
             qpicker:SetSize(width, height)
+            UI.fitScreen(qpicker, width, height) -- GF-014-03
             qpicker.done:ClearAllPoints()
             qpicker.done:SetPoint("BOTTOMRIGHT", qpicker, "BOTTOMRIGHT", -16, 12)
             -- Pages: ◀ 1/3 ▶ at the bottom left (only with more than one).
@@ -2845,7 +2911,7 @@ function UI.questPicker(owner, opts)
     qpicker.title:SetText(opts.title or "任務")
     qpicker:ClearAllPoints()
     qpicker:SetPoint("TOPLEFT", owner or UIParent, owner and "BOTTOMLEFT" or "CENTER", 0, -4)
-    if qpicker.SetClampedToScreen then qpicker:SetClampedToScreen(true) end
+    UI.fitScreen(qpicker, qpicker.gfFit and qpicker.gfFit.w, qpicker.gfFit and qpicker.gfFit.h) -- GF-014-03
     qpicker:Show()
     qpicker.draw()
     return qpicker
@@ -2987,6 +3053,7 @@ function UI.drawWorker()
     local extra = UI.placeSlotEditor(f, X, y - slotLines * UI.CHIP_LINE - 2)
     y = y - slotLines * UI.CHIP_LINE - 10 - extra
     f:SetHeight(-y + 70)
+    UI.fitScreen(f, 740, -y + 70) -- GF-014-03
     for _, r in ipairs(A().ROLES) do
         O.setSelected(f.mainRoles[r], wdraft.main == r)
         O.setSelected(f.altRoles[r], wdraft.alt == r)
@@ -3005,9 +3072,11 @@ local drawWorker = function() UI.drawWorker() end
 
 UI.WORKER_FIELDS = { "地城", "任務", "職責", "副職責", "時段" }
 function UI.openWorker(mode)
-    wdraft = UI.newWorkerDraft(mode)
+    wdraft = (mode ~= "reopen" and UI.takeDraft("worker", UI.workerDraftKey(mode))) or UI.newWorkerDraft(mode) -- GF-014-03
+    wdraft.draftMode = mode
     if not wpopup then
         local f = ns.popupWindow(UI.WORKER_NAME, 740, 420)
+        f:HookScript("OnHide", function() UI.keepDraft("worker") end) -- GF-014-03
         ns.Theme.formPanel(f) -- GF-UI-G: the opaque form colour
         f:SetPoint("CENTER", 0, 40)
         f:EnableMouse(true)
@@ -3069,6 +3138,7 @@ function UI.saveWorker(d)
     for _, ds in ipairs(d.slots or {}) do o.slots[#o.slots + 1] = UI.slotData(ds) end
     local ok = A().setWorker(o)
     if wpopup then wpopup:Hide() end
+    if ok then UI.dropDraft("worker") end -- GF-014-03
     UI.refresh()
     return ok
 end
@@ -3213,7 +3283,7 @@ function UI.slotChooser(owner, opts)
     chooser:SetSize(600, 44 + n * 44 + 56)
     chooser:ClearAllPoints()
     chooser:SetPoint("TOPLEFT", owner or UIParent, owner and "BOTTOMLEFT" or "CENTER", 0, -4)
-    if chooser.SetClampedToScreen then chooser:SetClampedToScreen(true) end
+    UI.fitScreen(chooser, 600, 44 + n * 44 + 56) -- GF-014-03
     chooser:Show()
     return chooser
 end
@@ -3457,6 +3527,7 @@ function UI.openCalendar()
         calendar = f
     end
     calendar.page, calendar.day = 0, 0
+    UI.fitScreen(calendar, 40 + 7 * (UI.CAL_CELL_W + 4), 640) -- GF-014-03
     calendar:Show()
     UI.drawCalendar()
     return calendar
@@ -3508,7 +3579,7 @@ function UI.openRules(owner)
     ns.Widgets.drawFlow(rules, UI.rulesRows())
     rules:ClearAllPoints()
     if owner then rules:SetPoint("TOPRIGHT", owner, "BOTTOMRIGHT", 0, -4) else rules:SetPoint("CENTER", UIParent, "CENTER", 0, 40) end
-    if rules.SetClampedToScreen then rules:SetClampedToScreen(true) end
+    UI.fitScreen(rules) -- GF-014-03: clamped (a small card)
     rules:Show()
     return rules
 end
@@ -3546,3 +3617,60 @@ A().onChanged = function()
         if ns.Framework.isModuleShown("adventure") then UI.refresh() end
     end)
 end
+
+---------------------------------------------------------------------------
+-- GF-014-03: windows that belong to this page, and drafts that survive them.
+---------------------------------------------------------------------------
+
+-- Every small window of 冒險業務 (the forms keep their drafts, see keepDraft).
+-- (only those made so far: each is made the first time it opens)
+function UI.floatingFrames()
+    local out = {}
+    for _, f in pairs({ detail, chooser, picker, qpicker, grid, rules, calendar, popup, wpopup }) do out[#out + 1] = f end
+    return out
+end
+function UI.closeFloating()
+    local n = 0
+    for _, f in ipairs(UI.floatingFrames()) do
+        if f.IsShown and f:IsShown() then
+            if f == grid then f.returnTo = nil end
+            f:Hide(); n = n + 1
+        end
+    end
+    return n
+end
+
+-- A form closed without 開單 / 登記 keeps its draft for UI.DRAFT_KEEP; the same
+-- form (a new ticket, the same ticket unchanged, my worker ticket unchanged)
+-- opens with it again. Saving drops it.
+UI.DRAFT_KEEP = 30 * 60
+local keptDrafts = {}
+function UI.ticketDraftKey(v)
+    if not v then return "new" end
+    return tostring(v.id) .. "@" .. tostring(v.edited or v.created or "")
+end
+function UI.workerDraftKey(mode)
+    local mine = A().myWorker()
+    return tostring(mode or "") .. "@" .. tostring(mine and mine.expires or "none")
+end
+function UI.keepDraft(kind)
+    local d = kind == "ticket" and draft or wdraft
+    if not d then return end
+    local key
+    if kind == "ticket" then
+        local v = d.editId and A().get(d.editId)
+        key = d.editId and UI.ticketDraftKey(v or { id = d.editId }) or "new"
+        if d.reopenOf then return end -- 重開 always starts from the ended ticket
+    else
+        key = UI.workerDraftKey(d.draftMode)
+    end
+    keptDrafts[kind] = { key = key, draft = d, at = ns.now() }
+end
+function UI.takeDraft(kind, key)
+    local k = keptDrafts[kind]
+    keptDrafts[kind] = nil
+    if k and k.key == key and ns.now() - k.at <= UI.DRAFT_KEEP then return k.draft end
+    return nil
+end
+function UI.dropDraft(kind) keptDrafts[kind] = nil end
+function UI.keptDraft(kind) return keptDrafts[kind] end

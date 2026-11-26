@@ -131,7 +131,7 @@ test("fresh install creates schema v2 defaults", function()
     local db = GreenFangToolkitDB
     eq(db.schema, "gf.toolkit", "schema")
     eq(db.schemaVersion, 2, "schemaVersion")
-    eq(db.addonVersion, "0.16.3", "addonVersion")
+    eq(db.addonVersion, "0.16.4", "addonVersion")
     eq(db.sync.enabled, true, "sync.enabled default")
     eq(db.sync.noticeShown, false, "noticeShown before login")
     eq(#db.sync.outbox, 0, "outbox empty")
@@ -157,7 +157,7 @@ test("TOC declares the agreed names and loads every file", function()
     ok(toc:find("## Interface: 16001", 1, true), "Interface")
     ok(toc:find("## Title: 綠皮冒險工具箱", 1, true), "Title")
     ok(toc:find("## Author: 綠皮與獠牙冒險事務所", 1, true), "Author")
-    ok(toc:find("## Version: 0.16.3", 1, true), "Version")
+    ok(toc:find("## Version: 0.16.4", 1, true), "Version")
     ok(toc:find("## SavedVariables: GreenFangToolkitDB\r?\n"), "SavedVariables")
     local listed = {}
     for line in toc:gmatch("[^\r\n]+") do
@@ -429,7 +429,7 @@ test("unknown fields in an existing v2 table are preserved", function()
         sync = { enabled = false, noticeShown = true, outbox = {} },
     } })
     eq(GreenFangToolkitDB.futureModule.keep, true, "unknown field kept")
-    eq(GreenFangToolkitDB.addonVersion, "0.16.3", "addonVersion updated")
+    eq(GreenFangToolkitDB.addonVersion, "0.16.4", "addonVersion updated")
     eq(GreenFangToolkitDB.sync.enabled, true, "old off ignored (D-015)")
 end)
 
@@ -479,7 +479,7 @@ test("TSV/JSON export keep the v0.3.1 format", function()
     local s = ns.Roster.current()
     local json = ns.Export.jsonParts(s)
     eq(#json, 1, "one part")
-    ok(json[1]:find('^{"schema":"gfguildroster.report","schemaVersion":1,"addonVersion":"0.16.3"'), "json header")
+    ok(json[1]:find('^{"schema":"gfguildroster.report","schemaVersion":1,"addonVersion":"0.16.4"'), "json header")
     ok(json[1]:find('"part":1,"partCount":1', 1, true), "parts")
     ok(json[1]:find('"onlineAtCapture":true', 1, true), "member online in manual export")
     ok(not json[1]:find('"guid":', 1, true), "no guid in v1 export")
@@ -2677,7 +2677,7 @@ test("D10 diag window: sections, sharing stats, export moved here, /gftk sync st
     ok(has(all, "GF Sync 只是補充來源"), "site note")
     ok(has(all, "記錄 ") and has(all, "這次登入：送出"), "sharing statistics")
     ok(has(all, "掃描時間："), "roster scan")
-    ok(has(all, "工具箱 0.16.3"), "version")
+    ok(has(all, "工具箱 0.16.4"), "version")
     wow.click(ns.Diag.exportJSONButton)
     ok(_G.GreenFangToolkit_ExportWindow and _G.GreenFangToolkit_ExportWindow:IsShown(), "export from the window")
     GreenFangToolkitDB.settings.minimapAngle = 10
@@ -4690,6 +4690,12 @@ assert(loadfile(ROOT .. "/tests/addon/uij_tests.lua"))()({ test = test, eq = eq,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 -- GF-014-02: 職工單配對 notices and their switches (tests/addon/workermatch_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/workermatch_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-009-13: the dev-only GreenFangToolkit_Dev AddOn, /gftkdev catalogscan (tests/addon/catalog_dev_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/catalog_dev_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-014-03: joinable slots, recheck after combat, chat, windows on the screen, drafts (tests/addon/gf01403_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf01403_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------

@@ -13,6 +13,7 @@ ns.SupplyCatalog = Cat
 Cat.SCHEMA = 2
 
 local data            -- { id, name, kind, icon } after decoding, or nil
+local renamed         -- [index] = the game's name, when it differs (GF-009-13)
 local status = "idle" -- idle / ok / missing / bad
 local stats = { decodes = 0, searches = 0, lastMs = nil, decodeMs = nil, memKB = nil }
 
@@ -69,7 +70,7 @@ local byID
 function Cat.info(i)
     if not data or not data.id[i] then return nil end
     local k, icon = data.kind[i], data.icon[i]
-    return { itemID = data.id[i], name = data.name[i], classID = math.floor(k / 100), subclassID = k % 100,
+    return { itemID = data.id[i], name = renamed[i] or data.name[i], classID = math.floor(k / 100), subclassID = k % 100,
         icon = icon > 0 and icon or nil, catalog = true }
 end
 -- Index of an ItemID in the catalog, or nil.
@@ -94,6 +95,18 @@ function Cat.kindOf(i)
     return math.floor(k / 100), k % 100
 end
 
+-- GF-009-13: the game's own name wins over the catalog's (a newer client may
+-- have renamed an item). A name the client gave us is searched as well.
+-- Only names the client already had are noted (never asked for).
+renamed = {}
+function Cat.noteName(itemID, name)
+    local i = data and type(name) == "string" and name ~= "" and Cat.index(itemID)
+    if not i then return false end
+    if name == data.name[i] then renamed[i] = nil else renamed[i] = name end
+    return true
+end
+function Cat.gameName(i) return renamed[i] end
+
 -- Indexes whose name contains needle (plain text; nil or "" = all), in
 -- catalog order (class, subclass, name). No limit: the finder pages.
 function Cat.search(needle)
@@ -105,7 +118,8 @@ function Cat.search(needle)
     else
         local find = string.find
         for i = 1, #names do
-            if find(names[i], needle, 1, true) then out[#out + 1] = i end
+            local game = renamed[i]
+            if find(names[i], needle, 1, true) or (game and find(game, needle, 1, true)) then out[#out + 1] = i end
         end
     end
     stats.searches = stats.searches + 1
@@ -113,23 +127,15 @@ function Cat.search(needle)
     return out
 end
 
--- The scan list for /gftk catalogscan (CatalogScan.lua): sorted ItemIDs.
-function Cat.scanIDs()
-    local src = ns.SupplyCatalogData
-    local s = type(src) == "table" and src.scan or nil
-    local out, last = {}, 0
-    if type(s) ~= "string" then return out end
-    for gap in s:gmatch("[^,]+") do
-        last = last + (tonumber(gap, 36) or 0)
-        out[#out + 1] = last
-    end
-    return out
-end
-
 function Cat.stats() return stats end
+function Cat.noteList(ms)
+    stats.listMs = ms
+    if not stats.listMax or ms > stats.listMax then stats.listMax = ms end
+end
+Cat.clock = clock
 
 function Cat.resetSession()
-    data, status, byID = nil, "idle", nil
+    data, status, byID, renamed = nil, "idle", nil, {}
     stats = { decodes = 0, searches = 0, lastMs = nil, decodeMs = nil, memKB = nil }
 end
 
@@ -143,6 +149,11 @@ function Cat.diagText()
             stats.memKB and string.format("%.0f", stats.memKB) or "?")
     end
     if stats.lastMs then lines[#lines + 1] = string.format("搜尋 %d 次，上次 %.1f 毫秒", stats.searches, stats.lastMs) end
+    -- GF-009-13: the whole 找物品 list (search, rows, sort, the 10 rows drawn).
+    if stats.listMs then lines[#lines + 1] = string.format("清單上次 %.1f 毫秒（最慢 %.1f）", stats.listMs, stats.listMax or stats.listMs) end
+    local L = ns.SupplyListings
+    local r = L and L.requestStats and L.requestStats()
+    if r then lines[#lines + 1] = string.format("物品請求 %d 次，其中名稱搜尋時 %d 次", r.all, r.nameSearch) end
     return table.concat(lines, "\n")
 end
 

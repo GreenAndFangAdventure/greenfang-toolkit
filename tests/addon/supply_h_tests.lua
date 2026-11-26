@@ -49,6 +49,7 @@ return function(T)
             GetItemIconByID = function(id) return G.items[id] and 134939 or nil end,
             GetItemNameByID = function(id) return G.items[id] and G.items[id].name or nil end,
             RequestLoadItemDataByID = function(id) G.asked[id] = true end,
+            IsItemDataCachedByID = function(id) return G.items[id] ~= nil end, -- GF-009-13
         }
         ChatFrame_SendTellWithMessage = function() end
     end
@@ -121,7 +122,8 @@ return function(T)
         ok(not has(all, RING) and not has(all, QITEM), "拾取綁定 and quest items never listed")
         ok(not has(all, NOCACHE), "an unknown ID from the price store is not shown")
         ok(not G.asked[NOCACHE], "and the price store never asks the server")
-        ok(G.asked[ns.SupplyRules.list[1].order[1]], "the small sources ask for missing item data")
+        -- GF-009-13 (was: the small sources ask): 全部 never asks the server about a cold item.
+        ok(not G.asked[ns.SupplyRules.list[1].order[1]], "全部 never asks for missing item data")
         -- Sorted by type: 消耗品 (0) before 配方 (9).
         local pos = {}
         for i, e in ipairs(all) do pos[e.itemID] = i end

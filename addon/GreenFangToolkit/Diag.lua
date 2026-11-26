@@ -166,7 +166,7 @@ local SECTIONS = {
         return (ns.Notify and ns.Notify.diagText() or "") .. (ns.SupplyRadar and ("｜" .. ns.SupplyRadar.diagText()) or "") end },
     -- GF-012: 公會黑庫 phase 1 (who is guild master, the custodian list; no stock yet).
     { title = "臨時黑箱（GF-012）", text = function() return ns.Bank and ns.Bank.diagText() or "" end },
-    -- GF-009-12: the 找物品 item catalog (LoadOnDemand AddOn).
+    -- GF-009-12: the 找物品 item catalog (SupplyCatalogData.lua; GF-009-13: requests, list time).
     { title = "物品目錄（GF-009-12）", text = function() return ns.SupplyCatalog and ns.SupplyCatalog.diagText() or "" end },
 }
 
