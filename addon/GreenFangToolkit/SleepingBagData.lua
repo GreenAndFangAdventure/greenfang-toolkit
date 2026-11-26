@@ -10,6 +10,9 @@
 -- Step fields:
 --   id, zone, zoneEN        map area
 --   x, y                    map coordinates (nil = not known yet)
+--   mapID                   GF-008-B: the zone's uiMapID for the world-map pin
+--                           (classic IDs, unconfirmed on Forever; the map code
+--                           checks the name and falls back to a search by name)
 --   landmark                what you will see there
 --   object, objectEN        thing to interact with (Chinese name not confirmed)
 --   action                  what to do
@@ -37,6 +40,7 @@ ns.SleepingBagRoutes.Horde = {
         {
             id = "barrens",
             zone = "貧瘠之地", zoneEN = "The Barrens",
+            mapID = 1413, -- GF-008-B: classic uiMapID (待實地驗證; checked by name at run time)
             x = 46, y = 74,
             landmark = "南貧瘠之地路邊一座燒毀的塔樓廢墟",
             object = "燒毀的殘骸", objectEN = "Burned-Out Remains",
@@ -52,6 +56,7 @@ ns.SleepingBagRoutes.Horde = {
         {
             id = "to-stranglethorn",
             zone = "荊棘谷", zoneEN = "Stranglethorn Vale",
+            mapID = 1434, -- GF-008-B: classic uiMapID (待實地驗證; checked by name at run time)
             landmark = "格羅姆高營地，或南端的藏寶海灣",
             action = "這一步只是移動：選一條路線前往荊棘谷。",
             travel = "路線一：奧格瑪外的飛艇塔搭往格羅姆高營地的飛艇，離西部荒野比較近。"
@@ -66,6 +71,7 @@ ns.SleepingBagRoutes.Horde = {
         {
             id = "westfall",
             zone = "西部荒野", zoneEN = "Westfall",
+            mapID = 1436, -- GF-008-B: classic uiMapID (待實地驗證; checked by name at run time)
             x = 37, y = 50,
             landmark = "西部荒野東側的亞歷斯頓農場（Alexston Farmstead）",
             object = "釘住的木板", objectEN = "Nailed Plank",
@@ -94,6 +100,7 @@ ns.SleepingBagRoutes.Horde = {
         {
             id = "stonetalon-litter",
             zone = "石爪山脈", zoneEN = "Stonetalon Mountains",
+            mapID = 1442, -- GF-008-B: classic uiMapID (待實地驗證; checked by name at run time)
             landmark = "烈日石居附近山坡小路通往的一處小營地",
             object = "口袋裡的雜物", objectEN = "Pocket Litter",
             action = "點擊營地裡的雜物交任務，會拿到打火石、木柴和一把工具。"
@@ -109,6 +116,7 @@ ns.SleepingBagRoutes.Horde = {
         {
             id = "stonetalon-mound",
             zone = "石爪山脈", zoneEN = "Stonetalon Mountains",
+            mapID = 1442, -- GF-008-B: classic uiMapID (待實地驗證; checked by name at run time)
             landmark = "營地往東不遠處山坡上的土堆",
             object = "一堆泥土", objectEN = "Mound of Dirt",
             action = "點擊土堆交任務，拿到弓箭／槍械類的獎勵，並接下前往東部王國的任務。",
@@ -136,6 +144,7 @@ ns.SleepingBagRoutes.Horde = {
         {
             id = "loch-modan",
             zone = "洛克莫丹", zoneEN = "Loch Modan",
+            mapID = 1432, -- GF-008-B: classic uiMapID (待實地驗證; checked by name at run time)
             x = 49, y = 12,
             landmark = "洛克莫丹北邊的石壁水壩（Stonewrought Dam）",
             object = "雕刻的小雕像", objectEN = "Carved Figurine",
@@ -149,6 +158,7 @@ ns.SleepingBagRoutes.Horde = {
         {
             id = "thoradin-wall",
             zone = "希爾斯布萊德丘陵", zoneEN = "Hillsbrad Foothills",
+            mapID = 1424, -- GF-008-B: classic uiMapID (待實地驗證; checked by name at run time)
             landmark = "希爾斯布萊德與阿拉希高地交界的索拉丁之牆",
             object = "信差的包包、匆忙捲起的背包", objectEN = "Messenger Bag / Hastily Rolled-Up Satchel",
             action = "爬上牆頂走到平台，先點信差的包包交任務，再點下方的背包完成最後一個任務，拿到舒適睡袋。",

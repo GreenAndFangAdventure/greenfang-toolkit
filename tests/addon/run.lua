@@ -660,7 +660,7 @@ test("sleepingbag: RPG hides coordinates until revealed; normal shows all", func
     SlashCmdList.GREENFANGTOOLKIT("sleepingbag")
     local SB = ns.SleepingBag
     eq(SB.state().mode, "rpg", "RPG by default")
-    local text = SB.pageText()
+    local text = SB.pageText("rpg") -- GF-008-B: the page shows normal mode; the RPG text still exists
     ok(text:find("南貧瘠之地", 1, true), "landmark shown")
     ok(not text:find("46, 74", 1, true), "coordinates hidden in RPG")
     ok(text:find("待實地驗證", 1, true), "unverified tag")
@@ -4696,6 +4696,9 @@ assert(loadfile(ROOT .. "/tests/addon/catalog_dev_tests.lua"))()({ test = test, 
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 -- GF-014-03: joinable slots, recheck after combat, chat, windows on the screen, drafts (tests/addon/gf01403_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gf01403_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-008-B: the sleeping-bag guide, normal mode only, the world-map pin (tests/addon/sleepingbag_map_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/sleepingbag_map_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------
