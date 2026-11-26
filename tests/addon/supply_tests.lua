@@ -664,7 +664,7 @@ return function(T)
         ok(not ns.Supply.canContact(mine) and not ns.Supply.contact(mine), "not ourselves")
     end))
 
-    test("GF-009 page: the form lists by link, ESC and X close it, a click outside does not; the bag picker closes outside", done(function()
+    test("GF-009 page: the form lists by link, ESC and X close it, a click outside does not; the picker (GF-009-14: a window) too", done(function()
         local ns = login({ auto = false, items = itemsWith(), bag = { { SCROLL, 1 }, { BOP, 1, true } } })
         ns.Framework.open("supply")
         local UI = ns.SupplyUI
@@ -679,10 +679,12 @@ return function(T)
         local shownRows = 0
         for _, b in ipairs(p.rows) do if b:IsShown() then shownRows = shownRows + 1 end end
         eq(shownRows, 1, "only the unbound item")
+        -- GF-009-14 (was: a click outside closed it): the picker is a window in
+        -- DIALOG (the IME candidates above it), so no click-outside layer.
         local blocker = ns.clickBlocker()
-        ok(blocker and blocker:IsShown(), "click-outside blocker")
-        blocker._scripts.OnClick(blocker)
-        ok(not p:IsShown(), "a click outside closes the picker")
+        ok(not (blocker and blocker:IsShown()), "no click-outside layer over the picker")
+        wow.pressEscape()
+        ok(not p:IsShown(), "ESC closes the picker")
         ok(f:IsShown(), "the form stays (it holds typed text)")
         f.qty:SetText("2")
         local l = UI.submitForm()

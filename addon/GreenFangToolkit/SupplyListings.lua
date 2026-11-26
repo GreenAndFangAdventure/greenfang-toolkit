@@ -45,6 +45,43 @@ local byCode, byKey = {}, {}
 for _, c in ipairs(L.CATEGORIES) do byCode[c.code] = c; byKey[c.key] = c end
 function L.categoryText(key) return byKey[key] and byKey[key].text or "其他" end
 L.DIRECTION_TEXT = { need = "徵求", offer = "供應" }
+
+-- GF-009-14 B: 交易條件 of a manual listing (gftks.md §3.2 group M, claude-pm
+-- 2026-11-27). 供應: the asking price; 徵求: what the player will pay. Per
+-- item, in copper, at most the client's money cap. A listing without terms
+-- (older AddOns, or no M record yet) reads 未標示.
+L.TERMS_GROUP = "M"
+L.PRICE_MAX = 2147483647
+L.TERMS = {
+    { key = "negotiable", code = "n", text = "面議" },
+    { key = "free", code = "f", text = "免費" },
+    { key = "price", code = "p", text = "訂價" },
+    { key = "swap", code = "x", text = "交換" },
+}
+L.DEFAULT_TERMS = "negotiable"
+L.UNMARKED = "未標示"
+local termsByKey, termsByCode = {}, {}
+for _, t in ipairs(L.TERMS) do termsByKey[t.key] = t; termsByCode[t.code] = t end
+L.termsByKey = termsByKey
+-- 「1金 20銀 5銅」 (zero parts left out; 0 = 「0銅」).
+function L.priceText(copper)
+    copper = math.floor(tonumber(copper) or 0)
+    local g, s, c = math.floor(copper / 10000), math.floor(copper / 100) % 100, copper % 100
+    local out = {}
+    if g > 0 then out[#out + 1] = g .. "金" end
+    if s > 0 then out[#out + 1] = s .. "銀" end
+    if c > 0 or #out == 0 then out[#out + 1] = c .. "銅" end
+    return table.concat(out, " ")
+end
+-- The terms as text: long 「每個 1金 20銀」 / short 「1金20銀」; 面議, 免費, 交換; 未標示.
+function L.termsText(terms, price, short)
+    local t = terms and termsByKey[terms]
+    if not t then return L.UNMARKED end
+    if t.key ~= "price" then return t.text end
+    local p = L.priceText(price)
+    if short then return (p:gsub(" ", "")) end
+    return "每個 " .. p
+end
 L.STATUS_TEXT = { active = "刊登中", closed = "已結束", cancelled = "已取消", expired = "已過期" }
 
 local stats = { rejected = 0, created = 0, updated = 0, ended = 0, deleted = 0 }
@@ -121,6 +158,48 @@ end
 
 local b36, unb36 = ns.Share.b36, ns.Share.unb36
 
+-- GF-009-14 B: group M, the author's terms for their active listings:
+-- 「1,<id>.<n|f|p|x>.<price>,…」 (version 1; ids and prices base 36; price only
+-- for p). An unknown letter leaves that listing 未標示; a bad price or shape
+-- rejects the record (not stored, not relayed).
+function L.encodeTerms(list)
+    local out = { "1" }
+    table.sort(list, function(x, y) return x.id < y.id end)
+    for _, l in ipairs(list) do
+        local t = l.terms and termsByKey[l.terms]
+        if t then
+            out[#out + 1] = b36(l.id) .. "." .. t.code .. "." .. (t.key == "price" and b36(l.price) or "")
+        end
+    end
+    return table.concat(out, ",")
+end
+function L.decodeTerms(_, v)
+    if type(v) ~= "string" or #v > 400 then stats.rejected = stats.rejected + 1; return nil end
+    local parts = {}
+    for x in (v .. ","):gmatch("([^,]*),") do parts[#parts + 1] = x end
+    local function bad() stats.rejected = stats.rejected + 1; return nil end
+    if parts[1] ~= "1" then return bad() end
+    local map, n = {}, 0
+    for i = 2, #parts do
+        local f = {}
+        for x in (parts[i] .. "."):gmatch("([^.]*)%.") do f[#f + 1] = x end
+        if #f ~= 3 then return bad() end
+        local id = unb36(f[1])
+        if not id or id < 1 or map[id] then return bad() end
+        local t, price = termsByCode[f[2]], nil
+        if t and t.key == "price" then
+            price = unb36(f[3])
+            if not price or price < 1 or price > L.PRICE_MAX then return bad() end
+        elseif t and f[3] ~= "" then
+            return bad()
+        end
+        map[id] = { terms = t and t.key or nil, price = price }
+        n = n + 1
+        if n > L.MAX_ACTIVE then return bad() end
+    end
+    return map
+end
+
 function L.encode(list)
     local out = {}
     table.sort(list, function(x, y) return x.id < y.id end)
@@ -166,6 +245,13 @@ ns.Share.registerGroup({
     match = function(g) return g == L.GROUP end,
     encode = function(_, d) return L.encode(d) end,
     decode = L.decode,
+})
+ns.Share.registerGroup({
+    name = "TERMS", -- GF-009-14 B
+    ["local"] = true,
+    match = function(g) return g == L.TERMS_GROUP end,
+    encode = function(_, d) return L.encodeTerms(d) end,
+    decode = L.decodeTerms,
 })
 
 ---------------------------------------------------------------------------
@@ -236,6 +322,12 @@ function L.publish()
     if Supply.manualOn() then
         for _, l in ipairs(L.ownActive()) do list[#list + 1] = l end
     end
+    -- GF-009-14 B: the terms (group M) go out with every listing change.
+    local copy = {}
+    for i, l in ipairs(list) do copy[i] = l end
+    local vm = L.encodeTerms(copy)
+    local recm = Share.get(a, L.TERMS_GROUP)
+    if (recm and recm.v ~= vm) or (not recm and #list > 0) then Share.ownRecord(L.TERMS_GROUP, vm) end
     local v = L.encode(list)
     local rec = Share.get(a, L.GROUP)
     if not rec and v == "" then return "none" end
@@ -679,9 +771,21 @@ function L.check(f, editing)
     if not validDays(days) then return nil, "有效期請選 3、7、14 或 30 天" end
     local note, why = L.cleanNote(f.note)
     if not note then return nil, why == "too-long" and ("備註最多 " .. L.NOTE_MAX .. " 字") or "備註有問題" end
+    -- GF-009-14 B: 交易條件 (a new listing: 面議; an old one edited without
+    -- choosing keeps 未標示).
+    local terms = f.terms
+    if terms == nil and not editing then terms = L.DEFAULT_TERMS end
+    if terms ~= nil and not termsByKey[terms] then return nil, "請選擇交易條件" end
+    local price
+    if terms == "price" then
+        price = tonumber(f.price)
+        if not price or price ~= math.floor(price) or price < 1 then return nil, "訂價請填每個的價格" end
+        if price > L.PRICE_MAX then return nil, "每個最多 " .. L.priceText(L.PRICE_MAX) end
+    end
     -- GF-UI-H: the category follows the item's class (never the player's pick).
     local cat = L.categoryFor((L.itemInfo(itemID, true)), f.category)
-    return { direction = f.direction, itemID = itemID, quantity = qty, days = days, note = note, category = cat }
+    return { direction = f.direction, itemID = itemID, quantity = qty, days = days, note = note, category = cat,
+        terms = terms, price = price }
 end
 
 -- The active listing of the same item and direction, if any (no silent sums).
@@ -704,7 +808,8 @@ function L.create(f)
     local id = m.nextID
     m.nextID = id + 1
     local l = { id = id, itemID = c.itemID, direction = c.direction, category = c.category, quantity = c.quantity,
-        note = c.note, days = c.days, createdAt = t, updatedAt = t, expiresAt = t + c.days * 86400, rev = 1, status = "active" }
+        note = c.note, days = c.days, createdAt = t, updatedAt = t, expiresAt = t + c.days * 86400, rev = 1, status = "active",
+        terms = c.terms, price = c.price }
     m.list[id] = l
     stats.created = stats.created + 1
     L.publish()
@@ -719,10 +824,12 @@ function L.update(id, f)
     if l.status ~= "active" then return nil, "這筆刊登已結束" end
     f.direction, f.itemID = l.direction, l.itemID
     f.days = f.days or l.days
+    if f.terms == nil then f.terms, f.price = l.terms, f.price or l.price end
     local c, why = L.check(f, true)
     if not c then return nil, why end
     local t = now()
     l.quantity, l.category, l.note, l.days = c.quantity, c.category, c.note, c.days
+    l.terms, l.price = c.terms, c.price
     l.expiresAt, l.updatedAt, l.rev = t + c.days * 86400, t, (l.rev or 1) + 1
     stats.updated = stats.updated + 1
     L.publish()
@@ -733,7 +840,8 @@ function L.renew(id, days)
     local m = mine()
     local l = m and m.list[id]
     if not l then return nil, "找不到這筆刊登" end
-    return L.update(id, { quantity = l.quantity, category = l.category, note = l.note, days = days or l.days })
+    return L.update(id, { quantity = l.quantity, category = l.category, note = l.note, days = days or l.days,
+        terms = l.terms, price = l.price })
 end
 
 -- status: "closed" (結束) or "cancelled" (取消).
@@ -796,9 +904,12 @@ function L.activeAll()
         local rec = groups[L.GROUP]
         local m = rec and a ~= selfA and Share.memberFor(a)
         if m then
+            local terms = Share.decoded(a, L.TERMS_GROUP) or {} -- GF-009-14 B
             for _, l in ipairs(Share.decoded(a, L.GROUP) or {}) do
                 if l.expiresAt > t and l.createdAt <= t + Share.FUTURE then
                     local e = ns.copy(l)
+                    local x = terms[l.id]
+                    e.terms, e.price = x and x.terms or nil, x and x.price or nil
                     -- the snapshot time is the author's last change of their listings
                     e.a, e.member, e.fresh, e.seenT = a, m, Supply.freshness(rec.t, math.huge), rec.t
                     out[#out + 1] = e

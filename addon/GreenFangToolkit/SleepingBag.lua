@@ -9,7 +9,8 @@
 -- mode is shown. The RPG code and the saved mode stay (SB.RPG_ON brings the
 -- switch back); a character saved in "rpg" keeps its mode and its step and
 -- simply sees normal mode. 看地圖 opens the world map on the step's zone with
--- a pin (SleepingBagMap.lua); steps without x / y have neither.
+-- a pin (SleepingBagMap.lua). GF-008-C (owner: 「每一步都應該要有地圖處」):
+-- every step has a map; a step without x / y opens its map without a pin.
 
 local _, ns = ...
 local str = ns.str
@@ -102,8 +103,14 @@ function SB.reveal()
     SB.refresh()
 end
 
+-- GF-008-C: the map's zone (a continent, the wall on the Arathi map), an
+-- approximate pin on a landmark, or why the map has no pin.
 local function coords(step)
-    if step.x and step.y then return string.format("%s（%d, %d）", step.zone, step.x, step.y) end
+    local zone = step.mapZone or step.zone
+    if step.x and step.y then
+        return string.format("%s（%d, %d）", zone, step.x, step.y) .. (step.approx and ("（大約：" .. step.approx .. "）") or "")
+    end
+    if step.noPin then return zone .. "（地圖不標位置：" .. step.noPin .. "）" end
     return step.zone .. "（座標待實地確認）"
 end
 
@@ -184,7 +191,7 @@ function SB.refresh()
     if mode == "rpg" and step ~= nil and not s.revealed[step.id] then revealButton:Show() else revealButton:Hide() end
     doneButton:SetEnabled(step ~= nil)
     backButton:SetEnabled(s.step > 1)
-    -- GF-008-B: 看地圖 only for a step with x / y on a map this client can show;
+    -- GF-008-B / C: 看地圖 for a step whose map this client can show (every step has one);
     -- not lit in combat (the world map cannot be opened then).
     local Map = ns.SleepingBagMap
     local can = Map and step and Map.canShow(step)

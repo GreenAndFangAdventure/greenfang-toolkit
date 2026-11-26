@@ -169,6 +169,7 @@ function Prof.hideFrom(owner, i)
     if ns.inCombat() then return end
     local set = sets[owner] or {}
     for k = i or 1, #set do
+        ns.hideTooltipOf(set[k])
         set[k]:Hide()
         set[k]:ClearAllPoints()
     end

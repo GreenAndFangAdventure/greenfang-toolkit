@@ -40,6 +40,7 @@ UI.BUTTON = {
     cancel = { icon = "cancel", tip = "取消" }, deal = { icon = "deal", tip = "成交" },
     ["return"] = { icon = "back", tip = "退回" }, deliver = { icon = "mail", tip = "已交付" },
     release = { icon = "cancel", tip = "退單" }, close = { icon = "deal", tip = "工匠結案", hammer = true },
+    craft = { icon = "making", tip = "製作" }, -- GF-011-B: opens the profession window (Recipes.openCraft)
 }
 -- Buttons that cancel something wait 5 seconds and can be undone (R-6.7).
 UI.DELAYED = { cancel = true, decline = true, release = true }
@@ -499,9 +500,16 @@ local function fillRow(row, data, i)
     setLabel(row.state, UI.STATE_NAME[v.state]) -- GF-002-D
     -- Buttons this viewer may press (R-6.2).
     local list = O().buttons(v, me)
+    if UI.showsCraft(v, me) and #list < #row.buttons then list[#list + 1] = "craft" end
     for j, b in ipairs(row.buttons) do
         local name = list[j]
-        if name then
+        if b.tex.SetTexCoord then b.tex:SetTexCoord(0, 1, 0, 1) end
+        if b.tex.SetDesaturated then b.tex:SetDesaturated(false) end
+        if b.SetEnabled then b:SetEnabled(true) end
+        if b.label and b.label.SetFontObject then b.label:SetFontObject(ns.LABEL_FONT) end
+        if name == "craft" then
+            UI.fillCraftButton(b, v)
+        elseif name then
             local spec = UI.BUTTON[name]
             local key = v.id .. "|" .. name
             if pendingPress[key] then setIcon(b.tex, "undo"); b.tip = "復原"
@@ -520,6 +528,31 @@ local function fillRow(row, data, i)
     local shown = {}
     for _, b in ipairs(row.buttons) do if b:IsShown() then shown[#shown + 1] = b end end
     UI.flow(row, shown, UI.ROW_BUTTON_X, 0, 16, "LEFT")
+end
+
+-- GF-011-B 「製作」: on an order I accepted (製作中, I am the crafter; a test
+-- order to myself too). Opens my profession window, the recipe selected
+-- when the client can; nothing is crafted for the player.
+function UI.showsCraft(v, me)
+    return v.state == "making" and v.skill ~= nil and (v.crafter == me or v.test == true)
+end
+function UI.fillCraftButton(b, v)
+    local R = ns.Recipes
+    local can, why = R.canCraft(v.skill)
+    if not Icons.setProfessionIcon(b.tex, { skillLineID = v.skill }) then setIcon(b.tex, "making") end
+    if b.tex.SetDesaturated then b.tex:SetDesaturated(not can) end
+    b.tip = can and R.CRAFT_LABEL or (R.CRAFT_LABEL .. "：" .. (R.CRAFT_TIP[why] or ""))
+    UI.setSwirl(b, nil)
+    setLabel(b, R.CRAFT_LABEL)
+    if b.label and b.label.SetFontObject then b.label:SetFontObject(can and ns.LABEL_FONT or ns.DISABLED_FONT) end
+    b.badge:Hide()
+    b:SetScript("OnClick", function()
+        local ok = R.openCraft(v.skill, v.recipe)
+        b.lastCraft = ok
+    end)
+    if b.SetEnabled then b:SetEnabled(can) end
+    b.action = "craft"
+    b:Show()
 end
 
 function UI.layoutRows()

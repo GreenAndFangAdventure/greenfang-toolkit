@@ -595,6 +595,78 @@ function Recipes.openOwn(id)
 end
 
 ---------------------------------------------------------------------------
+-- GF-011-B 「製作」 (owner 0.16.5: 「接了訂單，按下去應該要可直接開啟對應專業，
+-- 方便製作」): open this character's profession window, the order's recipe
+-- selected when the client can. Only opening the window: nothing is crafted.
+-- Forever's code (WoWBlzCode Forever 1.60.1): the profession window is the
+-- LoadOnDemand Blizzard_Professions (ProfessionsFrame);
+-- ProfessionsUtil.OpenProfessionFrameToRecipe(recipeID) is what the recipe
+-- tracker uses (opens the profession and selects the recipe), then
+-- C_TradeSkillUI.OpenRecipe(recipeID), then OpenProfessionUIToSkillLine /
+-- C_TradeSkillUI.OpenTradeSkill(skillLineID) (the window, no recipe).
+-- No GetNumTradeSkills / GetTradeSkillLine (they are not on Forever).
+---------------------------------------------------------------------------
+
+Recipes.CRAFT_LABEL = "製作"
+Recipes.CRAFT_TIP = { noprof = "你沒有這個專業", combat = "戰鬥中不能開", noui = "這個用戶端開不了專業視窗" }
+
+local function path(p)
+    local t = _G
+    for part in p:gmatch("[^%.]+") do
+        if type(t) ~= "table" then return nil end
+        t = t[part]
+    end
+    return type(t) == "function" and t or nil
+end
+
+-- Does this character have the profession (skillLineID)?
+function Recipes.hasProfession(skill)
+    skill = tonumber(skill)
+    if not skill then return false end
+    local list = ns.Data.ownProfessionsDetailed()
+    for _, p in ipairs(list or {}) do
+        if tonumber(p.skillLineID) == skill then return true end
+    end
+    return false
+end
+
+-- Can 「製作」 open it now? true, or false, why (Recipes.CRAFT_TIP key).
+function Recipes.canCraft(skill)
+    if not Recipes.hasProfession(skill) then return false, "noprof" end
+    if ns.inCombat() then return false, "combat" end
+    if not (path("ProfessionsUtil.OpenProfessionFrameToRecipe") or path("C_TradeSkillUI.OpenRecipe")
+        or path("OpenProfessionUIToSkillLine") or path("C_TradeSkillUI.OpenTradeSkill")) then
+        return false, "noui"
+    end
+    return true
+end
+
+-- Open it. Returns true, how ("recipe" = the recipe selected, "profession" =
+-- the window only) or false, why.
+function Recipes.openCraft(skill, recipe)
+    local can, why = Recipes.canCraft(skill)
+    if not can then return false, why end
+    recipe = tonumber(recipe)
+    if recipe then
+        for _, p in ipairs({ "ProfessionsUtil.OpenProfessionFrameToRecipe", "C_TradeSkillUI.OpenRecipe" }) do
+            local f = path(p)
+            if f then
+                local ok, r = pcall(f, recipe)
+                if ok and r ~= false then return true, "recipe" end
+            end
+        end
+    end
+    for _, p in ipairs({ "OpenProfessionUIToSkillLine", "C_TradeSkillUI.OpenTradeSkill" }) do
+        local f = path(p)
+        if f then
+            local ok, r = pcall(f, tonumber(skill))
+            if ok and r ~= false then return true, "profession" end
+        end
+    end
+    return false, "noui"
+end
+
+---------------------------------------------------------------------------
 -- 「配方」 page
 ---------------------------------------------------------------------------
 

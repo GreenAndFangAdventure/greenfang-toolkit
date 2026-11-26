@@ -816,9 +816,9 @@ end
 -- Outbox writes and shared data can come in bursts: redraw at most once a
 -- second (GF-001-D11).
 local function refreshSoon()
-    if panel and panel:IsShown() and ns.Framework.current() == "roster" then
+    if ns.isVisible(panel) and ns.Framework.current() == "roster" then
         ns.coalesce("roster-page", 1, function()
-            if panel and panel:IsShown() and ns.Framework.current() == "roster" then UI.refresh(false) end
+            if ns.isVisible(panel) and ns.Framework.current() == "roster" then UI.refresh(false) end
         end)
     end
 end
@@ -1086,7 +1086,7 @@ function UI.placeOwnButtons()
     local Prof = ns.Professions
     local ownRow
     -- The page, not the window: the window is shown right after the page.
-    if panel and panel:IsShown() and ns.Framework.current() == "roster" then
+    if ns.isVisible(panel) and ns.Framework.current() == "roster" then -- GF-011-B: not IsShown (closed window)
         for _, row in ipairs(rowWidgets) do
             if row:IsShown() and row.ownList then ownRow = row end
         end
@@ -1272,6 +1272,10 @@ function UI.memberMenuItems(m)
     end
     -- GF-011: the member's talents as a talentbuild link in the chat box.
     local T = ns.Talents
+    -- GF-011-B: 「天賦樹」 opens the game's own talent window (view-only for others).
+    if T and T.treeMode and T.treeMode(m.guid) then
+        items[#items + 1] = { text = T.TREE_LABEL, key = "talenttree", fn = function() T.openTree(m.guid, m.name) end }
+    end
     if T and T.canLink(T.of(m.guid)) then
         items[#items + 1] = { text = T.LINK_LABEL, key = "talentlink", fn = function() T.insertLink(m.guid, m.name) end }
     end
@@ -1585,7 +1589,11 @@ local function build(p)
     panel = p
     local f = p
     -- GF-009-13: the member card never stays on screen after the page closes (ESC, X).
-    if p.HookScript then p:HookScript("OnHide", function() UI.hideRosterCard() end) end
+    -- GF-011-B: and no hover tooltip of the page (a row's, a profession icon's) either.
+    if p.HookScript then p:HookScript("OnHide", function()
+        UI.hideRosterCard()
+        ns.hideTooltipOf(p)
+    end) end
     local G = ns.GuildAdmin
     local O = ns.OrdersUI
     local GI = ns.GameIcons
@@ -1714,6 +1722,9 @@ local function build(p)
     end)
     -- They live on UIParent: hide them with the page (in combat they already are).
     p:HookScript("OnHide", function() ns.Professions.hideFrom("roster", 1) end)
+    -- GF-011-B: placed only while the page is really on screen; the window shows
+    -- after the page (Framework.open), and its OnShow reaches the page here.
+    p:HookScript("OnShow", function() pcall(UI.placeOwnButtons) end)
     -- Bottom row: 診斷 on the right; the guild buttons left of it (refreshAdminButtons).
     syncIndicator = ns.Diag.smallButton(f, "BOTTOMRIGHT", -20, UI.BOTTOM_Y)
     UI.syncIndicator = syncIndicator

@@ -69,7 +69,9 @@ UI.HEADINGS = {
     guild = { "物品", "徵求／供應", "在線", "時效" },
     mine = { "物品", "數量", "狀態", "時效" },
 }
-UI.DETAIL_HEADINGS = { "成員", "數量", "在線", "時效", "來源" }
+UI.DETAIL_HEADINGS = { "成員", "數量", "在線", "時效", "條件" } -- GF-009-14 B: 來源 → 交易條件 (自動 rows say 自動)
+UI.NOTE_ICON = "Interface\\Buttons\\UI-GuildButton-PublicNote-Up" -- shown only when there is a note
+UI.NOTE_ICON_SIZE = 14
 -- 收集組 only where the lists come from the collection rules.
 UI.GROUP_TABS = { need = true, offer = true }
 UI.GROUP_X, UI.GROUP_W = 22, 170
@@ -163,6 +165,27 @@ function UI.freshShort(it)
 end
 
 -- One person line in the detail list.
+-- GF-009-14 B: the manual listing behind a person row (the largest one).
+function UI.manualOf(e) return e and e.manual or nil end
+-- Its tooltip lines: terms, the full note, the source.
+function UI.listingTipLines(e, withName)
+    local m = UI.manualOf(e)
+    local out = {}
+    local who = withName and e.member and (ns.shortName(e.member.name) .. "：") or ""
+    if m then
+        out[#out + 1] = who .. L.DIRECTION_TEXT[e.direction] .. " " .. (m.quantity or e.qty) .. "｜交易條件："
+            .. L.termsText(m.terms, m.price)
+        if m.note and m.note ~= "" then out[#out + 1] = (withName and "　" or "") .. "備註：" .. m.note end
+    end
+    if e.auto and not withName then out[#out + 1] = "來源：" .. sourceText(e) end
+    return out
+end
+function UI.condText(e)
+    local m = UI.manualOf(e)
+    if not m then return "自動" end
+    return L.termsText(m.terms, m.price, true)
+end
+
 function UI.personText(e)
     local name = e.member and ns.shortName(e.member.name) or "未知"
     -- GF-UI-H: automatic candidates read 可能提供 (manual ones 徵求／供應, below).
@@ -231,6 +254,10 @@ local function newRow(i)
     r.expand:SetSize(UI.EXPAND, UI.EXPAND)
     r.expand:SetPoint("LEFT", r, "LEFT", C.expand.x, 0)
     r.expand:Hide()
+    r.noteIcon = r:CreateTexture(nil, "OVERLAY") -- GF-009-14 B: only when there is a note
+    r.noteIcon:SetSize(UI.NOTE_ICON_SIZE, UI.NOTE_ICON_SIZE)
+    r.noteIcon:SetTexture(UI.NOTE_ICON)
+    r.noteIcon:Hide()
     r.icon = r:CreateTexture(nil, "ARTWORK")
     r.icon:SetSize(UI.ICON, UI.ICON)
     r.icon:SetPoint("LEFT", r, "LEFT", C.icon.x, 0)
@@ -268,9 +295,11 @@ function UI.listFor(kind)
             local days = left > 0 and math.max(1, math.ceil(left / 86400)) or 0
             local q = L.DIRECTION_TEXT[l.direction] .. " " .. l.quantity
             local st = L.STATUS_TEXT[l.status] or ""
+            local tip = { L.categoryText(l.category), "交易條件：" .. L.termsText(l.terms, l.price) }
+            if (l.note or "") ~= "" then tip[#tip + 1] = "備註：" .. l.note end
             out[#out + 1] = { itemID = l.itemID, listing = l, qty = q, qtyShort = q, match = st, matchShort = st,
                 fresh = l.status == "active" and ("剩 " .. days .. " 天") or "", expandable = true,
-                tip = { L.categoryText(l.category), l.note ~= "" and l.note or nil } }
+                tip = tip, hasNote = (l.note or "") ~= "" }
         end
         return out
     end
@@ -279,9 +308,17 @@ function UI.listFor(kind)
         if not rule or (rule.items and rule.items[it.itemID]) then
             local tip = {}
             if it.mine then tip[#tip + 1] = "來源：" .. sourceText(it.mine) end
+            -- GF-009-14 B: every viewable manual listing: terms and the full note.
+            local hasNote = false
+            for _, e in ipairs(it.others or {}) do
+                if UI.manualOf(e) then
+                    for _, line in ipairs(UI.listingTipLines(e, true)) do tip[#tip + 1] = line end
+                    if (UI.manualOf(e).note or "") ~= "" then hasNote = true end
+                end
+            end
             out[#out + 1] = { itemID = it.itemID, item = it, qty = UI.qtyText(kind, it), match = UI.matchText(kind, it),
                 qtyShort = UI.qtyShort(kind, it), matchShort = UI.matchShort(kind, it), fresh = UI.freshShort(it),
-                expandable = #it.others > 0, tip = tip }
+                expandable = #it.others > 0, tip = tip, hasNote = hasNote }
         end
     end
     return out
@@ -308,6 +345,9 @@ function UI.drawList()
             r.qty:SetText(data.qtyShort or data.qty or "")
             r.match:SetText(data.matchShort or data.match or "")
             r.fresh:SetText(data.fresh or "")
+            r.noteIcon:ClearAllPoints()
+            r.noteIcon:SetPoint("BOTTOMRIGHT", r.icon, "BOTTOMRIGHT", 4, -4)
+            if data.hasNote then r.noteIcon:Show() else r.noteIcon:Hide() end
             local open = state.selected == state.offset + i
             r.sel.set(open)
             if data.expandable then
@@ -416,6 +456,24 @@ local function newDetailRow(i)
     r.on = cell("on", ns.LABEL_FONT)
     r.fresh = cell("fresh", ns.LABEL_FONT)
     r.src = cell("src", ns.DISABLED_FONT)
+    -- GF-009-14 B: the note icon before the terms; the whole row's tooltip
+    -- shows the terms and the full note.
+    r.noteIcon = r:CreateTexture(nil, "OVERLAY")
+    r.noteIcon:SetSize(UI.NOTE_ICON_SIZE, UI.NOTE_ICON_SIZE)
+    r.noteIcon:SetTexture(UI.NOTE_ICON)
+    r.noteIcon:SetPoint("RIGHT", r.src, "LEFT", -2, 0)
+    r.noteIcon:Hide()
+    if r.EnableMouse then r:EnableMouse(true) end
+    r:SetScript("OnEnter", function(self)
+        if not (self.tipLines and #self.tipLines > 0 and GameTooltip) then return end
+        self.gfSupplyTip = true
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        for i, line in ipairs(self.tipLines) do
+            if i == 1 then GameTooltip:AddLine(line, 1, 0.82, 0) else GameTooltip:AddLine(line, 1, 1, 1, true) end
+        end
+        GameTooltip:Show()
+    end)
+    r:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
     r.contact = Th.button(r, "聯絡", 72, ns.BUTTON_H)
     r.contact:SetPoint("RIGHT", r, "RIGHT", 0, 0)
     r.contact:SetScript("OnClick", function(self) if self.entry then Supply.contact(self.entry) end end)
@@ -426,6 +484,7 @@ local function newDetailRow(i)
     return r
 end
 
+function UI.detailRowList() return detailRows end
 local function hideDetailRows(from)
     for i = from, #detailRows do detailRows[i]:Hide() end
 end
@@ -488,13 +547,17 @@ function UI.drawDetail()
         listingButtons(l)
         if detailHeader then detailHeader:Hide() end
         hideDetailRows(1)
-        if l.note and l.note ~= "" then
-            local r = detailRows[1] or newDetailRow(1)
-            r.name:SetText("備註")
-            r.what:SetText("")
+        -- GF-009-14 B: 交易條件, then the full note (when there is one).
+        local lines = { { "交易條件", L.termsText(l.terms, l.price) } }
+        if l.note and l.note ~= "" then lines[#lines + 1] = { "備註", l.note } end
+        for i, ln in ipairs(lines) do
+            local r = detailRows[i] or newDetailRow(i)
+            r.name:SetText(ln[1])
             r.on:SetText(""); r.fresh:SetText(""); r.src:SetText("")
+            r.noteIcon:Hide()
             r.what:SetWidth(330)
-            r.what:SetText(l.note)
+            r.what:SetText(ln[2])
+            r.tipLines = { ln[1], ln[2] }
             r.contact:Hide()
             r:Show()
         end
@@ -516,7 +579,10 @@ function UI.drawDetail()
             r.what:SetText(what)
             r.on:SetText(on)
             r.fresh:SetText(fresh)
-            r.src:SetText(sourceText(e))
+            r.src:SetText(UI.condText(e))
+            local m = UI.manualOf(e)
+            if m and (m.note or "") ~= "" then r.noteIcon:Show() else r.noteIcon:Hide() end
+            r.tipLines = UI.listingTipLines(e, false)
             r.contact.entry = e
             r.contact:Show()
             W.setEnabled(r.contact, Supply.canContact(e))
@@ -747,7 +813,9 @@ local function formMessage(text) if form then form.msg:SetText(text or "") end e
 local function formSnapshot()
     if not form then return nil end
     return table.concat({ tostring(formState.direction), tostring(formState.itemID), tostring(formState.category),
-        tostring(formState.days), tostring(form.qty:GetText() or ""), tostring(form.note:GetText() or "") }, "|")
+        tostring(formState.days), tostring(form.qty:GetText() or ""), tostring(form.note:GetText() or ""),
+        tostring(formState.terms), tostring(form.gold:GetText() or ""), tostring(form.silver:GetText() or ""),
+        tostring(form.copper:GetText() or "") }, "|")
 end
 function UI.formDirty()
     return form ~= nil and form:IsShown() and formState.initial ~= nil and formSnapshot() ~= formState.initial
@@ -785,7 +853,9 @@ end
 local function draftOf()
     return { editingID = formState.editing and formState.editing.id or nil, direction = formState.direction,
         itemID = formState.itemID, bagInfo = formState.bagInfo, days = formState.days,
-        qty = form.qty:GetText(), note = form.note:GetText(), itemText = form.itemBox:GetText() }
+        qty = form.qty:GetText(), note = form.note:GetText(), itemText = form.itemBox:GetText(),
+        pickPos = formState.pickPos, terms = formState.terms,
+        gold = form.gold:GetText(), silver = form.silver:GetText(), copper = form.copper:GetText() }
 end
 function UI.closeWithPage()
     local p = UI.picker and UI.picker()
@@ -808,7 +878,8 @@ UI.DRAFT_BACK = "已還原上次沒送出的內容"
 -- the finder right of the form, else left of it; when neither fits, the form
 -- moves so both fit side by side; on a screen narrower than both, the finder
 -- covers the form's right side. Nothing is placed off screen.
-UI.FORM_W, UI.FORM_H, UI.FORM_Y = 600, 470, 40
+UI.FORM_W, UI.FORM_H, UI.FORM_Y = 600, 570, 40 -- GF-009-14 B: +交易條件, +每個 price row
+UI.EDIT_STRATA, UI.FORM_LEVEL, UI.PICK_LEVEL = "DIALOG", 100, 140 -- GF-009-14: IME above edit-box windows
 UI.PICK_GAP, UI.SCREEN_EDGE = 4, 8
 function UI.layoutPair(sw, sh, fw, fh, pw, ph, formLeft, formTop)
     local E, gap = UI.SCREEN_EDGE, UI.PICK_GAP
@@ -827,6 +898,13 @@ function UI.layoutPair(sw, sh, fw, fh, pw, ph, formLeft, formTop)
         px = clampX(sw - pw - E, pw)
     end
     return formLeft, formTop, px, clampTop(formTop, ph)
+end
+-- GF-009-14 A: a dragged-to place, kept inside the screen (left, top).
+function UI.clampPos(sw, sh, w, h, left, top)
+    local E = UI.SCREEN_EDGE
+    left = math.max(E, math.min(left, sw - w - E))
+    top = math.max(math.min(top, sh - E), math.min(sh - E, h + E))
+    return left, top
 end
 function UI.screenSize()
     local w = UIParent and UIParent.GetWidth and tonumber((UIParent:GetWidth())) or nil
@@ -963,6 +1041,12 @@ end
 
 local function buildForm()
     local f = ns.popupWindow(UI.FORM_NAME, UI.FORM_W, UI.FORM_H)
+    -- GF-009-14 (Forever: the 注音 candidate list was hidden under the
+    -- finder): windows with edit boxes stay in DIALOG, so the client's IME
+    -- candidates draw above them; a high frame level keeps them above the
+    -- toolkit window (also DIALOG). Menus and tooltips stay in TOOLTIP.
+    f:SetFrameStrata(UI.EDIT_STRATA)
+    if f.SetFrameLevel then f:SetFrameLevel(UI.FORM_LEVEL) end
     f:SetPoint("CENTER", UIParent, "CENTER", 0, UI.FORM_Y)
     if f.SetClampedToScreen then f:SetClampedToScreen(true) end
     f.TitleText:SetText("刊登")
@@ -1018,6 +1102,39 @@ local function buildForm()
     if f.qty.SetNumeric then f.qty:SetNumeric(true) end
     if f.qty.SetMaxLetters then f.qty:SetMaxLetters(3) end
     y = y - 50
+    -- GF-009-14 B: 交易條件 (面議 for a new listing); only 訂價 opens the price.
+    row("交易條件")
+    local terms = {}
+    for _, t in ipairs(L.TERMS) do terms[#terms + 1] = { key = t.key, text = t.text, w = 76 } end
+    f.terms = Th.tabStrip(f, terms, 104, y, function(key) UI.setFormTerms(key) end)
+    y = y - 50
+    f.priceRow = CreateFrame("Frame", nil, f)
+    f.priceRow:SetPoint("TOPLEFT", f, "TOPLEFT", 24, y)
+    f.priceRow:SetSize(552, 34)
+    local pr = f.priceRow
+    pr.label = label(pr, "價格", ns.FIELD_FONT)
+    pr.label:SetPoint("TOPLEFT", pr, "TOPLEFT", 0, -6)
+    pr.each = label(pr, "每個", ns.LABEL_FONT)
+    pr.each:SetPoint("TOPLEFT", pr, "TOPLEFT", 80, -6)
+    local px = 124
+    local function coin(w, letters, unit)
+        local box = Th.editBox(pr, w, 30)
+        box:SetPoint("TOPLEFT", pr, "TOPLEFT", px, 0)
+        if box.SetNumeric then box:SetNumeric(true) end
+        if box.SetMaxLetters then box:SetMaxLetters(letters) end
+        local u = label(pr, unit, ns.LABEL_FONT)
+        u:SetPoint("LEFT", box, "RIGHT", 4, 0)
+        px = px + w + 30
+        return box
+    end
+    f.gold = coin(80, 6, "金")
+    f.silver = coin(44, 2, "銀")
+    f.copper = coin(44, 2, "銅")
+    pr.hint = label(pr, "", ns.DISABLED_FONT)
+    pr.hint:SetPoint("TOPLEFT", pr, "TOPLEFT", px + 4, -6)
+    pr.hint:SetText(UI.PRICE_HINT_TEXT)
+    f.priceRow:Hide()
+    y = y - 50
     row("有效期")
     local days = {}
     for _, d in ipairs(L.DAYS) do days[#days + 1] = { key = d, text = d .. " 天", w = 76 } end
@@ -1069,6 +1186,8 @@ function UI.openForm(listing, force)
     f.itemBox:SetText("")
     f.qty:SetText(tostring(listing and listing.quantity or 1))
     f.note:SetText(listing and listing.note or "")
+    -- GF-009-14 B: a new listing 面議; an old one keeps its terms (or none: 未標示).
+    UI.setFormTerms(listing and listing.terms or (not listing and L.DEFAULT_TERMS) or nil, listing and listing.price or nil)
     W.setEnabled(f.pick, listing == nil)
     W.setEnabled(f.find, listing == nil)
     for _, b in ipairs(f.dirs.buttons) do W.setEnabled(b, listing == nil) end
@@ -1092,6 +1211,9 @@ function UI.openForm(listing, force)
         f.note:SetText(d.note or "")
         if not listing then f.itemBox:SetText(d.itemText or "") end
         setFormItem(d.itemID, d.bagInfo)
+        formState.pickPos = d.pickPos
+        UI.setFormTerms(d.terms, nil)
+        f.gold:SetText(d.gold or ""); f.silver:SetText(d.silver or ""); f.copper:SetText(d.copper or "")
         if (f.msg:GetText() or "") == "" then formMessage(UI.DRAFT_BACK) end
     end
     return true
@@ -1099,9 +1221,12 @@ end
 
 function UI.submitForm()
     if not form then return nil end
+    local price, priceWhy
+    if formState.terms == "price" then price, priceWhy = UI.formPrice() end
+    if priceWhy then formMessage(priceWhy); return nil, priceWhy end
     local fields = { direction = formState.direction, itemID = formState.itemID, bagInfo = formState.bagInfo,
         category = formState.category, quantity = tonumber(form.qty:GetText()), days = formState.days,
-        note = form.note:GetText() }
+        note = form.note:GetText(), terms = formState.terms, price = price }
     local l, why, dup
     if formState.editing then l, why = L.update(formState.editing.id, fields)
     else l, why, dup = L.create(fields) end
@@ -1121,8 +1246,38 @@ end
 
 function UI.form() return form end
 
+-- GF-009-14 B: the form's 交易條件 and price (gold / silver / copper, per item).
+UI.PRICE_HINT = { offer = "我的開價", need = "我願意付" }
+UI.PRICE_HINT_TEXT = "供應＝開價，徵求＝願付"
+UI.SILVER_MAX_TEXT = "銀和銅各最多 99"
+function UI.setFormTerms(key, price)
+    formState.terms = key
+    if not form then return end
+    form.terms.select(key)
+    if price ~= nil then
+        price = math.floor(tonumber(price) or 0)
+        local g, s, c = math.floor(price / 10000), math.floor(price / 100) % 100, price % 100
+        form.gold:SetText(g > 0 and tostring(g) or ""); form.silver:SetText(s > 0 and tostring(s) or "")
+        form.copper:SetText(c > 0 and tostring(c) or "")
+    elseif key ~= "price" then
+        form.gold:SetText(""); form.silver:SetText(""); form.copper:SetText("")
+    end
+    if key == "price" then form.priceRow:Show() else form.priceRow:Hide() end
+end
+-- Copper per item from the three boxes, or nil and why (empty: nil).
+function UI.formPrice()
+    if not form then return nil end
+    local function n(box) return tonumber(box:GetText() or "") or 0 end
+    local g, s, c = n(form.gold), n(form.silver), n(form.copper)
+    if s > 99 or c > 99 then return nil, UI.SILVER_MAX_TEXT end
+    local total = g * 10000 + s * 100 + c
+    if total <= 0 then return nil, "訂價請填每個的價格" end
+    if total > L.PRICE_MAX then return nil, "每個最多 " .. L.priceText(L.PRICE_MAX) end
+    return total
+end
+
 ---------------------------------------------------------------------------
--- The item picker (a list: ESC, X and a click outside close it).
+-- The item picker (GF-009-14: a window: ESC, X, a pick or closing the form close it).
 -- GF-UI-H: two sources: 背包 (unbound bag items, as before) and 全部 (every
 -- item the client knows: L.catalog); a name / ItemID search; 類型 and 子類
 -- filters from the item's classID / subclassID. Untradeable items are never
@@ -1133,6 +1288,9 @@ local picker
 UI.PICK_ROWS = 10
 UI.PICK_W = 500
 function UI.pickHeight() return UI.PICK_ROWS * 40 + 160 end
+UI.PICK_BAR_W = 22   -- GF-009-14 A: the scroll bar right of the rows
+UI.PICK_TITLE = "找物品" -- one title for both sources
+UI.PICK_DRAG_H = 34
 UI.PICK_SOURCES = { { key = "bag", text = "背包", w = 80 }, { key = "all", text = "全部", w = 80 } }
 UI.PICK_EMPTY = { bag = "背包裡沒有可交易的物品", all = "找不到可交易的物品" }
 -- GF-009-12: 全部 with a damaged catalog file (links, IDs and drops still work).
@@ -1184,10 +1342,53 @@ local function drawPicker()
     if pickState.source == "all" and catStatus == "bad" then empty = UI.PICK_NO_CATALOG end
     picker.empty:SetText(#pickState.items == 0 and empty or "")
     picker.pos:SetText(UI.pickPosText())
+    UI.syncPickBar()
     picker.sources.select(pickState.source)
     picker.class.value, picker.sub.value = pickState.class, pickState.subclass
     picker.class.refreshText(); picker.sub.refreshText()
     W.setEnabled(picker.sub, pickState.class ~= nil)
+end
+
+-- GF-009-14 A: the scroll bar follows the list (the wheel, the arrows, a
+-- new search); dragging its thumb only moves the offset, the 10 rows are
+-- reused.
+local syncing = false
+function UI.pickMaxOffset() return math.max(0, #pickState.items - UI.PICK_ROWS) end
+function UI.syncPickBar()
+    local bar = picker and picker.bar
+    if not bar then return end
+    local max = UI.pickMaxOffset()
+    syncing = true
+    bar:SetMinMaxValues(0, max)
+    bar:SetValue(pickState.offset)
+    syncing = false
+    bar.gfMax, bar.gfValue = max, pickState.offset
+    W.setEnabled(picker.up, pickState.offset > 0)
+    W.setEnabled(picker.down, pickState.offset < max)
+    if max == 0 then bar:Hide() else bar:Show() end
+end
+function UI.pickScrollTo(offset)
+    offset = math.max(0, math.min(UI.pickMaxOffset(), math.floor((tonumber(offset) or 0) + 0.5)))
+    if offset == pickState.offset then UI.syncPickBar(); return offset end
+    pickState.offset = offset
+    drawPicker()
+    return offset
+end
+function UI.pickScrollBy(rows) return UI.pickScrollTo(pickState.offset + rows) end
+function UI.pickBarChanged(value)
+    if syncing then return end
+    UI.pickScrollTo(value)
+end
+
+-- GF-009-14 A: where the player dragged the finder (kept for this draft).
+function UI.pickRemember()
+    if not picker then return nil end
+    local l = picker.GetLeft and tonumber((picker:GetLeft())) or nil
+    local t = picker.GetTop and tonumber((picker:GetTop())) or nil
+    if not (l and t) then return nil end
+    formState.pickPos = { l, t }
+    UI.pickAt = { l, t }
+    return formState.pickPos
 end
 
 -- 「1-10／共 5414」: which rows are shown (the list is never cut short).
@@ -1255,13 +1456,30 @@ local function buildPicker()
     f:SetSize(UI.PICK_W, UI.pickHeight())
     if f.SetClampedToScreen then f:SetClampedToScreen(true) end
     if f.HookScript then f:HookScript("OnHide", function() UI.hideTip() end) end
-    f:SetFrameStrata("TOOLTIP")
-    -- Under the filters' drop-down menus (those sit at level 100).
-    if f.SetFrameLevel then f:SetFrameLevel(50) end
+    -- GF-009-14: DIALOG, not TOOLTIP (the IME candidates were hidden under
+    -- it); above the form; the filters' drop-down lists (TOOLTIP) stay above.
+    f:SetFrameStrata(UI.EDIT_STRATA)
+    if f.SetFrameLevel then f:SetFrameLevel(UI.PICK_LEVEL) end
+    if f.SetToplevel then f:SetToplevel(true) end
     Th.panel(f)
     f:EnableMouse(true)
-    f.title = label(f, "選物品", ns.FIELD_FONT)
+    f.title = label(f, UI.PICK_TITLE, ns.FIELD_FONT)
     f.title:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -10)
+    -- GF-009-14 A: drag by the title bar; the client keeps it on screen
+    -- (SetClampedToScreen); not saved in the game's layout file.
+    if f.SetMovable then f:SetMovable(true) end
+    f.drag = CreateFrame("Frame", nil, f)
+    f.drag:SetPoint("TOPLEFT", f, "TOPLEFT", 0, 0)
+    f.drag:SetPoint("TOPRIGHT", f, "TOPRIGHT", -(Th.CLOSE_SIZE or 28) - 4, 0)
+    f.drag:SetHeight(UI.PICK_DRAG_H)
+    f.drag:EnableMouse(true)
+    if f.drag.RegisterForDrag then f.drag:RegisterForDrag("LeftButton") end
+    f.drag:SetScript("OnDragStart", function() if f.StartMoving then f:StartMoving() end end)
+    f.drag:SetScript("OnDragStop", function()
+        if f.StopMovingOrSizing then f:StopMovingOrSizing() end
+        if f.SetUserPlaced then f:SetUserPlaced(false) end
+        UI.pickRemember()
+    end)
     f.close = Th.closeButton(f)
     f.sources = Th.tabStrip(f, UI.PICK_SOURCES, 12, -40, function(key) UI.pickSource(key) end)
     local P = UI.PICK_FILTER
@@ -1294,11 +1512,44 @@ local function buildPicker()
     f.pos:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 12)
     -- GF-009-12: an item dropped on the finder is chosen like a row.
     f:SetScript("OnReceiveDrag", function() UI.pickDrop() end)
+    -- GF-009-14 A: a scroll bar like the game's (arrows, a thumb to drag),
+    -- right of the rows; the wheel anywhere on the finder scrolls too.
+    local rowsTop, rowsH = -120, UI.PICK_ROWS * 40
+    local function arrow(dir, y)
+        local b = CreateFrame("Button", nil, f)
+        b:SetSize(18, 18)
+        b:SetPoint("TOPRIGHT", f, "TOPRIGHT", -8, y)
+        local base = "Interface\\Buttons\\UI-ScrollBar-Scroll" .. dir .. "Button-"
+        if b.SetNormalTexture then
+            b:SetNormalTexture(base .. "Up"); b:SetPushedTexture(base .. "Down")
+            b:SetDisabledTexture(base .. "Disabled"); b:SetHighlightTexture(base .. "Highlight")
+        end
+        return b
+    end
+    f.up = arrow("Up", rowsTop)
+    f.up:SetScript("OnClick", function() UI.pickScrollBy(-1) end)
+    f.down = arrow("Down", rowsTop - rowsH + 18)
+    f.down:SetScript("OnClick", function() UI.pickScrollBy(1) end)
+    f.bar = CreateFrame("Slider", nil, f)
+    f.bar:SetPoint("TOPRIGHT", f, "TOPRIGHT", -9, rowsTop - 18)
+    f.bar:SetSize(16, rowsH - 36)
+    if f.bar.SetOrientation then f.bar:SetOrientation("VERTICAL") end
+    if f.bar.SetThumbTexture then f.bar:SetThumbTexture("Interface\\Buttons\\UI-ScrollBar-Knob") end
+    if f.bar.SetValueStep then f.bar:SetValueStep(1) end
+    if f.bar.SetObeyStepOnDrag then f.bar:SetObeyStepOnDrag(true) end
+    f.bar.track = f.bar:CreateTexture(nil, "BACKGROUND")
+    f.bar.track:SetAllPoints()
+    f.bar.track:SetColorTexture(0, 0, 0, 0.35)
+    f.bar:SetMinMaxValues(0, 0)
+    f.bar:SetValue(0)
+    f.bar:SetScript("OnValueChanged", function(_, value) UI.pickBarChanged(value) end)
+    if f.EnableMouseWheel then f:EnableMouseWheel(true) end
+    f:SetScript("OnMouseWheel", function(_, delta) UI.pickScrollBy(-delta) end)
     f.rows = {}
     local C = UI.PICK_COL
     for i = 1, UI.PICK_ROWS do
         local b = CreateFrame("Button", nil, f)
-        b:SetSize(UI.PICK_W - 24, 38)
+        b:SetSize(UI.PICK_W - 24 - UI.PICK_BAR_W, 38)
         b:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -120 - (i - 1) * 40)
         b.icon = b:CreateTexture(nil, "ARTWORK")
         b.icon:SetSize(32, 32)
@@ -1320,14 +1571,14 @@ local function buildPicker()
         b:SetScript("OnReceiveDrag", function() UI.pickDrop() end)
         b:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
         if b.EnableMouseWheel then b:EnableMouseWheel(true) end
-        b:SetScript("OnMouseWheel", function(_, delta)
-            pickState.offset = math.max(0, math.min(math.max(0, #pickState.items - UI.PICK_ROWS), pickState.offset - delta))
-            drawPicker()
-        end)
+        b:SetScript("OnMouseWheel", function(_, delta) UI.pickScrollBy(-delta) end)
         f.rows[i] = b
     end
     f:Hide()
-    ns.escRegister(f, ns.ESC_LEVEL.grid)
+    -- GF-009-14: a window (above the form for ESC), not a menu: no
+    -- click-outside layer (TOOLTIP) over it. ESC, X, a pick or closing the
+    -- form close it.
+    ns.escRegister(f, ns.ESC_LEVEL.popup)
     picker = f
     return f
 end
@@ -1340,7 +1591,12 @@ function UI.openPicker(source)
     -- screen or a large UI scale (UI.layoutPair).
     local sw, sh = UI.screenSize()
     local ph = UI.pickHeight()
-    if form and form:IsShown() then
+    if form and form:IsShown() and formState.pickPos then
+        -- GF-009-14 A: dragged before in this draft: there (still on screen).
+        local px, pt = UI.clampPos(sw, sh, UI.PICK_W, ph, formState.pickPos[1], formState.pickPos[2])
+        picker:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", px, pt)
+        UI.pickAt = { px, pt }
+    elseif form and form:IsShown() then
         local fl, ft = UI.formRect(sw, sh)
         local nl, nt, px, pt = UI.layoutPair(sw, sh, UI.FORM_W, UI.FORM_H, UI.PICK_W, ph, fl, ft)
         if math.abs(nl - fl) > 0.5 or math.abs(nt - ft) > 0.5 then
@@ -1357,7 +1613,7 @@ function UI.openPicker(source)
     pickState.source = source == "all" and "all" or "bag"
     pickState.text, pickState.class, pickState.subclass, pickState.offset = "", nil, nil, 0
     picker.search:SetText("")
-    picker.title:SetText(pickState.source == "all" and "找物品" or "從背包選")
+    picker.title:SetText(UI.PICK_TITLE) -- GF-009-14 A: always 找物品 (背包 / 全部 are the tabs)
     UI.pickReload()
     picker:Show()
     return picker

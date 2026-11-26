@@ -131,7 +131,7 @@ test("fresh install creates schema v2 defaults", function()
     local db = GreenFangToolkitDB
     eq(db.schema, "gf.toolkit", "schema")
     eq(db.schemaVersion, 2, "schemaVersion")
-    eq(db.addonVersion, "0.16.5", "addonVersion")
+    eq(db.addonVersion, "0.16.6", "addonVersion")
     eq(db.sync.enabled, true, "sync.enabled default")
     eq(db.sync.noticeShown, false, "noticeShown before login")
     eq(#db.sync.outbox, 0, "outbox empty")
@@ -157,7 +157,7 @@ test("TOC declares the agreed names and loads every file", function()
     ok(toc:find("## Interface: 16001", 1, true), "Interface")
     ok(toc:find("## Title: 綠皮冒險工具箱", 1, true), "Title")
     ok(toc:find("## Author: 綠皮與獠牙冒險事務所", 1, true), "Author")
-    ok(toc:find("## Version: 0.16.5", 1, true), "Version")
+    ok(toc:find("## Version: 0.16.6", 1, true), "Version")
     ok(toc:find("## SavedVariables: GreenFangToolkitDB\r?\n"), "SavedVariables")
     local listed = {}
     for line in toc:gmatch("[^\r\n]+") do
@@ -429,7 +429,7 @@ test("unknown fields in an existing v2 table are preserved", function()
         sync = { enabled = false, noticeShown = true, outbox = {} },
     } })
     eq(GreenFangToolkitDB.futureModule.keep, true, "unknown field kept")
-    eq(GreenFangToolkitDB.addonVersion, "0.16.5", "addonVersion updated")
+    eq(GreenFangToolkitDB.addonVersion, "0.16.6", "addonVersion updated")
     eq(GreenFangToolkitDB.sync.enabled, true, "old off ignored (D-015)")
 end)
 
@@ -479,7 +479,7 @@ test("TSV/JSON export keep the v0.3.1 format", function()
     local s = ns.Roster.current()
     local json = ns.Export.jsonParts(s)
     eq(#json, 1, "one part")
-    ok(json[1]:find('^{"schema":"gfguildroster.report","schemaVersion":1,"addonVersion":"0.16.5"'), "json header")
+    ok(json[1]:find('^{"schema":"gfguildroster.report","schemaVersion":1,"addonVersion":"0.16.6"'), "json header")
     ok(json[1]:find('"part":1,"partCount":1', 1, true), "parts")
     ok(json[1]:find('"onlineAtCapture":true', 1, true), "member online in manual export")
     ok(not json[1]:find('"guid":', 1, true), "no guid in v1 export")
@@ -635,7 +635,7 @@ test("sleepingbag: Horde route data is complete and marked unverified", function
             and st.noFlightPath and st.rpgHint, "required fields on " .. st.id)
         eq(st.verified, false, "unverified: " .. st.id)
         ok(st.questID == nil, "no quest IDs yet")
-        if st.round == 1 and st.x then first3[#first3 + 1] = st.zone end
+        if st.round == 1 and st.x and not st.approx then first3[#first3 + 1] = st.zone end -- GF-008-C: the guide's coordinates
     end
     eq(table.concat(first3, ">"), "貧瘠之地>西部荒野", "round-1 stops with coordinates start Barrens then Westfall")
     eq(route.steps[5].zone, "石爪山脈", "third stop is Stonetalon")
@@ -670,7 +670,7 @@ test("sleepingbag: RPG hides coordinates until revealed; normal shows all", func
     text = SB.pageText()
     ok(text:find("【全部步驟】", 1, true), "full list in normal mode")
     ok(text:find("西部荒野（37, 50）", 1, true), "other steps' coordinates listed")
-    ok(text:find("座標待實地確認", 1, true), "unknown coordinates say so")
+    ok(text:find("地圖不標位置", 1, true), "GF-008-C: a step without a pin says why")
     ok(text:find("沒有飛行點時", 1, true), "alternative route shown")
 end)
 
@@ -2677,7 +2677,7 @@ test("D10 diag window: sections, sharing stats, export moved here, /gftk sync st
     ok(has(all, "GF Sync 只是補充來源"), "site note")
     ok(has(all, "記錄 ") and has(all, "這次登入：送出"), "sharing statistics")
     ok(has(all, "掃描時間："), "roster scan")
-    ok(has(all, "工具箱 0.16.5"), "version")
+    ok(has(all, "工具箱 0.16.6"), "version")
     wow.click(ns.Diag.exportJSONButton)
     ok(_G.GreenFangToolkit_ExportWindow and _G.GreenFangToolkit_ExportWindow:IsShown(), "export from the window")
     GreenFangToolkitDB.settings.minimapAngle = 10
@@ -4700,8 +4700,14 @@ assert(loadfile(ROOT .. "/tests/addon/gf01403_tests.lua"))()({ test = test, eq =
 -- GF-011: roster talents, the T share group, 天賦連結 (tests/addon/talents_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/talents_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-011-B: 天賦樹 (the game's talent window) and 製作 on accepted orders (tests/addon/gf011b_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf011b_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 -- GF-008-B: the sleeping-bag guide, normal mode only, the world-map pin (tests/addon/sleepingbag_map_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/sleepingbag_map_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-008-C: a map for every step, the raid target star (tests/addon/gf008c_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf008c_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------
