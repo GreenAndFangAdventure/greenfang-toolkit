@@ -635,7 +635,7 @@ test("sleepingbag: Horde route data is complete and marked unverified", function
             and st.noFlightPath and st.rpgHint, "required fields on " .. st.id)
         eq(st.verified, false, "unverified: " .. st.id)
         ok(st.questID == nil, "no quest IDs yet")
-        if st.round == 1 and st.x then first3[#first3 + 1] = st.zone end
+        if st.round == 1 and st.x and not st.approx then first3[#first3 + 1] = st.zone end -- GF-008-C: the guide's coordinates
     end
     eq(table.concat(first3, ">"), "貧瘠之地>西部荒野", "round-1 stops with coordinates start Barrens then Westfall")
     eq(route.steps[5].zone, "石爪山脈", "third stop is Stonetalon")
@@ -670,7 +670,7 @@ test("sleepingbag: RPG hides coordinates until revealed; normal shows all", func
     text = SB.pageText()
     ok(text:find("【全部步驟】", 1, true), "full list in normal mode")
     ok(text:find("西部荒野（37, 50）", 1, true), "other steps' coordinates listed")
-    ok(text:find("座標待實地確認", 1, true), "unknown coordinates say so")
+    ok(text:find("地圖不標位置", 1, true), "GF-008-C: a step without a pin says why")
     ok(text:find("沒有飛行點時", 1, true), "alternative route shown")
 end)
 
@@ -4702,6 +4702,9 @@ assert(loadfile(ROOT .. "/tests/addon/talents_tests.lua"))()({ test = test, eq =
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 -- GF-008-B: the sleeping-bag guide, normal mode only, the world-map pin (tests/addon/sleepingbag_map_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/sleepingbag_map_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-008-C: a map for every step, the raid target star (tests/addon/gf008c_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf008c_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------

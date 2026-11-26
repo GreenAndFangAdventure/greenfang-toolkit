@@ -109,10 +109,11 @@ return function(T)
         ok(pin._shown, "back on 貧瘠之地")
         wm:Hide(); ok(not pin._shown, "map closed: no pin")
         wm:Show(); ok(pin._shown, "map open again")
-        -- Step 2 has no x / y: no button, no pin.
+        -- Step 2 (GF-008-C: 格羅姆高營地, approximate): the pin moves there.
         SB.complete()
-        ok(b._shown == false, "no button without x / y")
-        ok(not pin._shown, "no pin without x / y")
+        ok(b._shown ~= false, "GF-008-C: step 2 has a map too")
+        eq(SB.showMap(), "canvas", "step 2 drawn")
+        eq(wm:GetMapID(), 1434, "荊棘谷")
         -- Step 3 (西部荒野 37, 50): the button again.
         SB.complete()
         ok(b._shown ~= false, "button on step 3")
