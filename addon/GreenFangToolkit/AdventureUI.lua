@@ -706,8 +706,15 @@ local function newRow(i)
         if v and v.leader == S().selfAuthor() and mouse == "RightButton" then
             ns.showMenu(self, UI.leaderMenu(v))
         end
+        -- GF-UI-J: a worker ticket taller than the screen: a click shows it all, scrolling.
+        if self.workerTip and mouse ~= "RightButton" and UI.workerTipTooTall(self.workerTip.lines) then
+            GameTooltip:Hide()
+            UI.openWorkerDetail(self.workerTip.lines)
+        end
     end)
     row:SetScript("OnEnter", function(self)
+        -- GF-UI-J: a worker ticket's row: everything it holds (the row cuts it to 「+N」).
+        if self.workerTip then return UI.workerTooltip(self, self.workerTip.lines) end
         local v = self.view
         if not v then return end
         local lines = UI.ticketTooltip(v)
@@ -916,7 +923,165 @@ local function fillWorker(row, w, author)
     fillWho(row, author)
     row.badge.set(A().whyWorker(w), UI.WHY_OPTS)
     grey(row, w.closed == true)
+    row.workerTip = { w = w, author = author, lines = UI.workerTooltipLines(w, author) }
 end
+
+---------------------------------------------------------------------------
+-- GF-UI-J (owner, 0.16.2): a worker ticket's row shows 「監獄、基地」, one quest
+-- and 「+3」; the mouse over it shows everything the ticket itself holds, in
+-- groups (who, roles, dungeons, zones, quests, slots), every +N spelled out.
+-- The tooltip goes to the side of the row with room. Taller than the screen:
+-- a click on the row opens the same lines in a window that scrolls.
+---------------------------------------------------------------------------
+
+-- Lines { text, color = { r, g, b }, head = true for a group name }.
+function UI.workerTooltipLines(w, author)
+    local out = {}
+    local C = ns.Theme.C
+    local function add(text, color, head) out[#out + 1] = { text = text, color = color or C.text, head = head } end
+    local function group(name) add(name, C.title, true) end
+    local m = author and A().member(author)
+    local cc = Icons.classColor(m and m.classToken)
+    add((m and m.name) or ns.shortName(author or "?"), { cc[1], cc[2], cc[3] }, true)
+    local why = A().whyWorker(w)
+    local status = (w.online == false and author ~= S().selfAuthor()) and "離線" or "在線"
+    add(((m and m.class) and (m.class .. "  ") or "") .. status .. "  " .. why.name, C.sub)
+    group("職責")
+    add(tex(w.main or "d", 18) .. " " .. (UI.ROLE_NAME[w.main or "d"] or "") ..
+        (w.alt and ("   副 " .. tex(w.alt, 16) .. " " .. (UI.ROLE_NAME[w.alt] or "")) or ""))
+    local ds = dungeonIds(w)
+    if #ds > 0 then
+        group("地城")
+        for _, id in ipairs(ds) do
+            local info = ns.AdventureData.byId[id]
+            add(((info and info.name) or tostring(id)) .. "  " .. UI.levelText(id))
+        end
+    end
+    local zones = w.zoneList or (type(w.zones) == "table" and w.zones[1] ~= nil and w.zones) or {}
+    if #zones > 0 then
+        group("區域")
+        for _, z in ipairs(zones) do add(z .. " 全區") end
+    end
+    local qs = questIds(w)
+    if w.allQuests or #qs > 0 then
+        group("任務")
+        if w.allQuests then add("日誌全部" .. (w.questCount and (" " .. w.questCount) or "")) end
+        for _, q in ipairs(qs) do
+            local name, lv = UI.questName(q, w.questNames)
+            local mark = UI.levelMark(lv)
+            add(name .. (mark ~= "" and ("  " .. mark) or ""))
+        end
+    end
+    local slots = w.slots or {}
+    if #slots > 0 then
+        group("時段")
+        for _, sl in ipairs(slots) do
+            local len = (sl.d and sl.d > 0) and ("   預計 " .. math.floor(sl.d / 3600 + 0.5) .. " 小時") or ""
+            add(UI.slotText(sl, 16) .. len)
+        end
+    end
+    return out
+end
+
+-- How many tooltip lines fit on the screen (UIParent's height; 768 when unknown).
+UI.TIP_LINE_H = 18
+function UI.workerTipMaxLines()
+    local h = ns.num((UIParent and UIParent.GetHeight and UIParent:GetHeight()))
+    if not h or h < 300 then h = 768 end
+    return math.floor((h - 60) / UI.TIP_LINE_H)
+end
+function UI.workerTipTooTall(lines) return #(lines or {}) > UI.workerTipMaxLines() end
+
+-- Which side of the owner has room: right of it on the left half of the screen,
+-- left of it on the right half; above it on the lower half, below on the upper.
+function UI.tipAnchor(owner)
+    local x, y
+    if owner.GetCenter then x, y = owner:GetCenter() end
+    x, y = ns.num(x), ns.num(y)
+    local w = ns.num((UIParent and UIParent.GetWidth and UIParent:GetWidth()))
+    local h = ns.num((UIParent and UIParent.GetHeight and UIParent:GetHeight()))
+    if not (x and y and w and h and w >= 300 and h >= 300) then return "TOPLEFT", "BOTTOMLEFT" end
+    local s, u = ns.num((owner:GetEffectiveScale())), ns.num((UIParent:GetEffectiveScale()))
+    if s and u and u > 0 then x, y = x * s / u, y * s / u end
+    local vert = y < h / 2 and "BOTTOM" or "TOP"
+    local ownerV = vert == "BOTTOM" and "TOP" or "BOTTOM"
+    if x > w / 2 then return vert .. "RIGHT", ownerV .. "RIGHT" end
+    return vert .. "LEFT", ownerV .. "LEFT"
+end
+
+function UI.workerTooltip(owner, lines)
+    if not (owner and lines and #lines > 0) then return nil end
+    GameTooltip:SetOwner(owner, "ANCHOR_NONE")
+    GameTooltip:ClearAllPoints()
+    local p, rp = UI.tipAnchor(owner)
+    GameTooltip:SetPoint(p, owner, rp, 0, 0)
+    owner.tipPoint = p
+    local max = UI.workerTipMaxLines()
+    local tall = #lines > max
+    local n = tall and (max - 1) or #lines
+    for i = 1, n do
+        local l = lines[i]
+        GameTooltip:AddLine(l.text, l.color[1], l.color[2], l.color[3])
+    end
+    if tall then
+        local c = ns.Theme.C.title
+        GameTooltip:AddLine(tex("arrow", 16) .. " +" .. (#lines - n) .. "  點列看全部", c[1], c[2], c[3])
+    end
+    if GameTooltip.SetClampedToScreen then GameTooltip:SetClampedToScreen(true) end
+    GameTooltip:Show()
+    return p, tall
+end
+
+-- The full lines in a window that scrolls (ESC, a click outside or the X closes it).
+UI.DETAIL_NAME = "GreenFangToolkit_WorkerDetail"
+UI.DETAIL_W, UI.DETAIL_H = 460, 520
+local detail
+function UI.openWorkerDetail(lines)
+    if not detail then
+        local T = ns.Theme
+        local f = CreateFrame("Frame", UI.DETAIL_NAME, UIParent)
+        f:SetFrameStrata("TOOLTIP")
+        if f.SetFrameLevel then f:SetFrameLevel(60) end
+        T.formPanel(f)
+        f:SetSize(UI.DETAIL_W, UI.DETAIL_H)
+        f:EnableMouse(true)
+        if f.SetClampedToScreen then f:SetClampedToScreen(true) end
+        ns.escRegister(f, ns.ESC_LEVEL.grid)
+        ns.Widgets.closeButton(f)
+        local sc = ns.createFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
+        sc:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -36)
+        sc:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -34, 14)
+        local content = CreateFrame("Frame", nil, sc)
+        content:SetSize(UI.DETAIL_W - 60, 1)
+        sc:SetScrollChild(content)
+        if sc.EnableMouseWheel then sc:EnableMouseWheel(true) end
+        f.scroll, f.content, f.texts = sc, content, {}
+        f:Hide()
+        detail = f
+    end
+    local f = detail
+    for i, l in ipairs(lines or {}) do
+        local fs = f.texts[i]
+        if not fs then
+            fs = ns.freeText(f.content:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
+            fs:SetPoint("TOPLEFT", f.content, "TOPLEFT", 0, -(i - 1) * (UI.TIP_LINE_H + 2))
+            f.texts[i] = fs
+        end
+        fs:SetFontObject(l.head and (ns.Theme.FONT.header or ns.FIELD_FONT) or ns.LABEL_FONT)
+        fs:SetText(l.text)
+        fs:SetTextColor(l.color[1], l.color[2], l.color[3])
+        fs:Show()
+    end
+    for i = #(lines or {}) + 1, #f.texts do f.texts[i]:Hide() end
+    f.content:SetHeight(math.max(1, #(lines or {}) * (UI.TIP_LINE_H + 2)))
+    if f.scroll.SetVerticalScroll then f.scroll:SetVerticalScroll(0) end
+    f.lines = lines
+    f:ClearAllPoints()
+    f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    f:Show()
+    return f
+end
+function UI.workerDetailFrame() return detail end
 
 local function plainDest(v)
     return (UI.destText(v):gsub("|T.-|t", ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("^%s+", ""))
@@ -927,7 +1092,7 @@ local function fillRow(row, data, i)
     -- GF-UI-G: the warm row pair of the theme (#272822 / #2E2D25).
     ns.Theme.stripe(row.bg, i)
     local parts = { row.att, row.dest, row.name, row.time, row.roles, row.cls, row.who, row.detail }
-    row.view, row.mine, row.lfg, row.worker, row.why = nil, nil, nil, nil, nil
+    row.view, row.mine, row.lfg, row.worker, row.why, row.workerTip = nil, nil, nil, nil, nil, nil
     row.delete:Hide()
     for _, s in ipairs(row.slots) do s:Hide() end
     row.badge:Hide()

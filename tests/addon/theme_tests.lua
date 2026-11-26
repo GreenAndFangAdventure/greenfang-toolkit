@@ -99,7 +99,7 @@ return function(T)
         eq(b.gfHover._layer, "HIGHLIGHT", "hover drawn by the client under the mouse")
         ok(b.gfFill._color[4] < 0.1, "see-through fill")
         Th.setSelected(b, true)
-        -- GF-UI-G: chosen = the olive fill #3B4630 and the brass line #B49B63 (never a flat yellow block).
+        -- GF-UI-G / GF-UI-J: chosen = the warm brown fill #3A332A and the brass line #B9925F (never a flat yellow block).
         eq(table.concat(b.gfEdges[1]._color, ",", 1, 3), table.concat(Th.C.selLine, ",", 1, 3), "brass line")
         eq(table.concat(b.gfFill._color, ",", 1, 3), table.concat(Th.C.selFill, ",", 1, 3), "olive fill")
         ok(b.gfFill._color[1] < 0.3 and b.gfFill._color[2] < 0.3, "dark, not yellow")

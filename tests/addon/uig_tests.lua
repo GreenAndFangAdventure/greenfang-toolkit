@@ -1,4 +1,4 @@
--- GF-UI-G: the 冒險業務 sample page — the olive / brass palette in Theme.lua,
+-- GF-UI-G: the 冒險業務 sample page — the palette (GF-UI-J: warm charcoal) in Theme.lua,
 -- the module and toolbar icons, and the time slot editor inside the 冒險單 /
 -- 職工單 forms (a drop-down 日期, one HH:MM 開始時間 list, 預計長度) that
 -- writes the form's draft only. Offline only (MANUAL §3uig has the in-game
@@ -46,12 +46,12 @@ return function(T)
             local want = ns.Theme.rgb(hex)
             for k = 1, 3 do ok(math.abs(c[k] - want[k]) < 0.002, what .. " " .. hex) end
         end
-        is(C.bg, "22251E", "windows"); is(C.main, "22251E", "main window"); ok(C.main[4] > C.bg[4], "the main window is more opaque")
-        is(C.side, "2B3225", "module list"); is(C.rowA, "272822", "row 1"); is(C.rowB, "2E2D25", "row 2")
-        is(C.form, "303329", "forms and lists"); eq(C.form[4], 1, "the form colour is opaque")
-        is(C.selFill, "3B4630", "chosen fill"); is(C.selLine, "B49B63", "chosen frame")
-        is(C.title, "CFB77E", "titles"); is(C.text, "E5DDC8", "text"); is(C.sub, "BEB5A0", "secondary text")
-        is(C.line, "535144", "lines")
+        is(C.bg, "232323", "windows"); is(C.main, "232323", "main window"); ok(C.main[4] > C.bg[4], "the main window is more opaque")
+        is(C.side, "292724", "module list"); is(C.rowA, "282624", "row 1"); is(C.rowB, "302D29", "row 2")
+        is(C.form, "302C28", "forms and lists"); eq(C.form[4], 1, "the form colour is opaque")
+        is(C.selFill, "3A332A", "chosen fill"); is(C.selLine, "B9925F", "chosen frame")
+        is(C.title, "CFB77E", "titles"); is(C.text, "E8DFD2", "text"); is(C.sub, "BEB4A4", "secondary text")
+        is(C.line, "4A4540", "lines")
         local U = ns.AdventureUI
         U.openTicket()
         local f = ticket(ns)
@@ -61,10 +61,10 @@ return function(T)
         -- A chosen theme button: the olive fill and the brass frame.
         local b = ns.Theme.button(UIParent, "x", 80)
         ns.Theme.setSelected(b, true)
-        is(b.gfFill._color, "3B4630", "chosen fill on a button"); is(b.gfEdges.c, "B49B63", "chosen frame on a button")
+        is(b.gfFill._color, "3A332A", "chosen fill on a button"); is(b.gfEdges.c, "B9925F", "chosen frame on a button")
         -- The module list is the side colour.
         ns.Framework.open()
-        is(_G[ns.Framework.WINDOW_NAME].nav.bg._color, "2B3225", "the module list fill")
+        is(_G[ns.Framework.WINDOW_NAME].nav.bg._color, "292724", "the module list fill")
         eq(ns.Framework.NAV_ICON, 22, "module icons 22 px")
         eq(_G[ns.Framework.WINDOW_NAME].gfOpaque._color[4], C.main[4], "the main window uses the more opaque fill")
     end)
@@ -72,8 +72,8 @@ return function(T)
     test("GF-UI-G icons: module list, toolbar, one clock for 現在 and a set time, three different art", function()
         local ns = login()
         local F, G = ns.Framework, ns.GameIcons
-        eq(F.ENTRY_ICON.profile[1], "Interface\\Icons\\INV_Misc_Head_Human_01", "職工檔案: one portrait")
-        eq(F.ENTRY_ICON.directory[1], "Interface\\Icons\\INV_Misc_GroupLooking", "職工名冊: a group")
+        eq(F.ENTRY_ICON.profile[1], "Interface\\Icons\\INV_Misc_Head_Orc_01", "職工檔案: one portrait (GF-UI-J: the orc)")
+        eq(F.ENTRY_ICON.directory[1], "Interface\\Icons\\INV_BannerPVP_01", "職工名冊: the Horde standard (GF-UI-J)")
         eq(F.ENTRY_ICON.logistics[1], "Interface\\Icons\\INV_Box_01", "物資調度: a box")
         eq(F.ENTRY_ICON.adventure[1], "Interface\\Icons\\INV_Misc_Map_01", "冒險業務: a map")
         eq(F.ENTRY_ICON.handbook[1], "Interface\\Icons\\INV_Misc_Book_11", "冒險指南: a book")
@@ -82,7 +82,7 @@ return function(T)
         ok(cal ~= F.ENTRY_ICON.handbook[1] and cal ~= F.ENTRY_ICON.directory[1], "行事曆 is neither the book nor the group")
         ok(not cal:find("Book", 1, true), "行事曆 is no book")
         eq(G.pick("rules")[1], "Interface\\FriendsFrame\\InformationIcon", "規則: the small i")
-        eq(G.pick("worker")[1], "Interface\\GossipFrame\\PetitionGossipIcon", "＋職工單 / 我的職工單: the recruiting sign")
+        eq(G.pick("worker")[1], "Interface\\Icons\\INV_Scroll_05", "＋職工單 / 我的職工單: the notice scroll (GF-UI-J)")
         local U = ns.AdventureUI
         local now = plain(U.slotText({ now = true })):gsub("%s", "")
         ok(U.slotText({ now = true }):find("PocketWatch_01", 1, true), "現在: the clock")
@@ -91,7 +91,7 @@ return function(T)
         eq(now, "現在", "現在 keeps its word")
         -- The toolbar uses those keys (20 px).
         ns.Framework.open(); ns.Framework.select("adventure")
-        ok(U.workerButton:GetText():find("PetitionGossipIcon", 1, true), "＋職工單 icon")
+        ok(U.workerButton:GetText():find("INV_Scroll_05", 1, true), "＋職工單 icon")
         ok(U.calendarButton:GetText():find("UI-Calendar-Button", 1, true), "行事曆 icon")
         ok(U.rulesButton:GetText():find("InformationIcon", 1, true), "規則 icon")
         ok(U.newButton:GetText():find("INV_Misc_Map_01", 1, true), "＋冒險單: the map")

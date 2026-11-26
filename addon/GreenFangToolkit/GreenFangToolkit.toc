@@ -57,3 +57,4 @@ BankUI.lua
 SupplyCatalog.lua
 SupplyCatalogData.lua
 CatalogScan.lua
+WorkerMatch.lua
