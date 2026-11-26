@@ -1018,7 +1018,7 @@ UI.PICK_ROWS = 10
 UI.PICK_W = 500
 UI.PICK_SOURCES = { { key = "bag", text = "背包", w = 80 }, { key = "all", text = "全部", w = 80 } }
 UI.PICK_EMPTY = { bag = "背包裡沒有可交易的物品", all = "找不到可交易的物品" }
--- GF-009-12: 全部 without the catalog AddOn (links, IDs and drops still work).
+-- GF-009-12: 全部 with a damaged catalog file (links, IDs and drops still work).
 UI.PICK_NO_CATALOG = "沒有物品目錄"
 UI.PICK_POS = "%d-%d／共 %d"
 UI.PICK_COL = { icon = 2, name = 42, nameW = 230, type = 280, typeW = 140 }
@@ -1029,8 +1029,9 @@ UI.pickState = pickState
 local function pickFiltered()
     local out = {}
     for _, e in ipairs(pickState.base) do
-        if (pickState.class == nil or e.info.classID == pickState.class)
-            and (pickState.subclass == nil or e.info.subclassID == pickState.subclass) then
+        local c, s = L.rowKind(e)
+        if (pickState.class == nil or c == pickState.class)
+            and (pickState.subclass == nil or s == pickState.subclass) then
             out[#out + 1] = e
         end
     end
@@ -1063,7 +1064,7 @@ local function drawPicker()
     local empty = UI.PICK_EMPTY[pickState.source] or ""
     local Cat = ns.SupplyCatalog
     local catStatus = Cat and Cat.status()
-    if pickState.source == "all" and (catStatus == "missing" or catStatus == "bad") then empty = UI.PICK_NO_CATALOG end
+    if pickState.source == "all" and catStatus == "bad" then empty = UI.PICK_NO_CATALOG end
     picker.empty:SetText(#pickState.items == 0 and empty or "")
     picker.pos:SetText(UI.pickPosText())
     picker.sources.select(pickState.source)

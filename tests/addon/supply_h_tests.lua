@@ -62,6 +62,9 @@ return function(T)
         wow.reset(opts)
         installGame(opts)
         local ns = wow.loadAddon(ADDON_DIR, opts.saved)
+        -- GF-009-12: these tests are about the finder without the item catalog
+        -- (tests/addon/catalog_tests.lua has the catalog).
+        ns.SupplyCatalogData = nil
         ns.Share.rand = function(a) return a end
         ns.Supply.rand = function(a) return a end
         ns.Supply.resetSession(); ns.SupplyListings.resetSession()

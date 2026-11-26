@@ -55,3 +55,5 @@ SupplyRadar.lua
 Bank.lua
 BankUI.lua
 SupplyCatalog.lua
+SupplyCatalogData.lua
+CatalogScan.lua

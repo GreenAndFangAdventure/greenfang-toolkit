@@ -445,6 +445,36 @@ function L.catalogIDs()
     return set, order
 end
 
+-- GF-009-12: a catalog row's info is made when read (rows on screen only).
+local CAT_ROW = { __index = function(t, k)
+    if k == "info" then return ns.SupplyCatalog.info(rawget(t, "ci")) end
+end }
+-- classID, subclassID of a finder row without making a catalog row's info.
+function L.rowKind(e)
+    local ci = rawget(e, "ci")
+    if ci and rawget(e, "info") == nil then return ns.SupplyCatalog.kindOf(ci) end
+    return e.info.classID, e.info.subclassID
+end
+-- Sort key: type, subtype, name, ItemID (catalog rows: the catalog's own).
+local function rowKey(e)
+    local ci = rawget(e, "ci")
+    if ci then
+        local Cat = ns.SupplyCatalog
+        local c, s = Cat.kindOf(ci)
+        return c, s, Cat.nameOf(ci), e.itemID
+    end
+    local info = e.info
+    return info.classID or 99, info.subclassID or 99, info.name, e.itemID
+end
+local function rowLess(x, y)
+    local cx, sx, nx, ix = rowKey(x)
+    local cy, sy, ny, iy = rowKey(y)
+    if cx ~= cy then return cx < cy end
+    if sx ~= sy then return sx < sy end
+    if nx ~= ny then return nx < ny end
+    return ix < iy
+end
+
 -- Lower case, for the name search (ASCII only; CJK has no case).
 local function fold(s) return str(s):lower() end
 
@@ -471,54 +501,64 @@ function L.catalog(opts)
     -- GF-009-12: 全部 also searches the whole item catalog (no CATALOG_MAX;
     -- the finder pages). A row uses the client's data when the client already
     -- has it (the game wins), else the catalog's name, class and icon; the
-    -- client is asked only when one item is previewed or chosen.
+    -- client is asked only when one item is previewed or chosen. Catalog rows
+    -- are small ({ itemID, ci }); their info table is made when it is read
+    -- (only the rows on screen), and they come in catalog order already.
     local Cat = ns.SupplyCatalog
     local catOn = opts.source == "all" and Cat ~= nil and Cat.load()
+    local function classOK(c, s)
+        return (opts.class == nil or c == opts.class) and (opts.subclass == nil or s == opts.subclass)
+    end
+    local catRows = {}
     if catOn then
         local hits
         if exact then
             hits = {}
-            local rec = Cat.find(exact)
-            if rec then hits[1] = rec end
+            local i = Cat.index(exact)
+            if i then hits[1] = i end
         else
             hits = Cat.search(needle and text or nil)
         end
-        for _, h in ipairs(hits) do
-            local rec = type(h) == "table" and h or Cat.info(h)
-            local id = rec.itemID
+        for _, i in ipairs(hits) do
+            local id = Cat.idOf(i)
             local client = L.cachedInfo(id)
-            local info = client or rec
-            if L.tradeable(info) and (opts.class == nil or info.classID == opts.class)
-                and (opts.subclass == nil or info.subclassID == opts.subclass) then
+            local okRow
+            if client then okRow = L.tradeable(client) and classOK(client.classID, client.subclassID)
+            else okRow = classOK(Cat.kindOf(i)) end
+            if okRow then
+                local row = { itemID = id, ci = i } -- two fields: the smallest table
+                if client then row.info = client else setmetatable(row, CAT_ROW) end
                 local b = bag[id]
-                out[#out + 1] = { itemID = id, info = info, count = b and b.count or nil, bag = b ~= nil, catalog = true }
+                if b then row.count, row.bag = b.count, true end
+                catRows[#catRows + 1] = row
             end
             done[id] = true
         end
     end
     for _, id in ipairs(order) do
         -- A catalog item the search did not pick is not looked up again.
-        local skip = done[id] or (catOn and Cat.find(id) ~= nil)
+        local skip = done[id] or (catOn and Cat.index(id) ~= nil)
         local info = not skip and L.itemInfo(id, not set[id]) or nil
         if info and L.tradeable(info) then
             local okText = (exact and id == exact) or (not exact and (not needle or fold(info.name):find(needle, 1, true) ~= nil))
-            local okClass = opts.class == nil or info.classID == opts.class
-            local okSub = opts.subclass == nil or info.subclassID == opts.subclass
-            if okText and okClass and okSub then
+            if okText and classOK(info.classID, info.subclassID) then
                 local b = bag[id]
                 out[#out + 1] = { itemID = id, info = info, count = b and b.count or nil, bag = b ~= nil }
             end
         end
     end
-    table.sort(out, function(x, y)
-        local cx, cy = x.info.classID or 99, y.info.classID or 99
-        if cx ~= cy then return cx < cy end
-        local sx, sy = x.info.subclassID or 99, y.info.subclassID or 99
-        if sx ~= sy then return sx < sy end
-        if x.info.name ~= y.info.name then return x.info.name < y.info.name end
-        return x.itemID < y.itemID
-    end)
-    return out
+    table.sort(out, rowLess)
+    if #catRows == 0 then return out end
+    -- Merge the (few) other rows into the catalog rows.
+    local merged, a, b = {}, 1, 1
+    while a <= #catRows or b <= #out do
+        if b > #out or (a <= #catRows and not rowLess(out[b], catRows[a])) then
+            merged[#merged + 1] = catRows[a]; a = a + 1
+        else
+            merged[#merged + 1] = out[b]; b = b + 1
+        end
+    end
+    return merged
 end
 
 -- The filters' choices for a list from L.catalog (without the class / subclass
@@ -526,7 +566,7 @@ end
 function L.catalogClasses(list)
     local seen, out = {}, {}
     for _, e in ipairs(list) do
-        local c = e.info.classID
+        local c = L.rowKind(e)
         if c ~= nil and not seen[c] then
             seen[c] = true
             out[#out + 1] = { value = c, text = L.className(c, e.info) }
@@ -539,8 +579,8 @@ function L.catalogSubclasses(list, classID)
     local seen, out = {}, {}
     if classID == nil then return out end
     for _, e in ipairs(list) do
-        local s = e.info.subclassID
-        if e.info.classID == classID and s ~= nil and not seen[s] then
+        local c, s = L.rowKind(e)
+        if c == classID and s ~= nil and not seen[s] then
             seen[s] = true
             out[#out + 1] = { value = s, text = L.subclassName(classID, s, e.info) or L.className(classID, e.info) }
         end

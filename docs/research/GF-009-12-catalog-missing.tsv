@@ -1,5 +1,5 @@
 # GF-009-12 catalog: tradeable items left out, build 1.60.1.71139. ItemID, ClassID, reason.
-# name = no zhTW name in the export (OLD / Deprecated placeholders or untranslated).
+# name = no zhTW name in the export or the scan (OLD / Deprecated placeholders or untranslated).
 184	1	name
 741	7	name
 761	0	name
