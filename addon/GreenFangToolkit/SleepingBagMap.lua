@@ -4,7 +4,8 @@
 --
 --   canvas    (chosen) a small frame on WorldMapFrame:GetCanvas() at x / y,
 --             shown only while the map shows that zone. Blizzard's own art
---             (the quest "!" icon), nothing bundled, no library.
+--             (GF-008-C: the raid target star, not a quest mark), nothing
+--             bundled, no library.
 --   waypoint  (fallback, only when there is no canvas) C_Map.SetUserWaypoint
 --             with UiMapPoint, then the map. It replaces the player's own
 --             waypoint, so it is never used when the canvas works.
@@ -12,8 +13,10 @@
 --
 -- The zone comes from the step's mapID (classic uiMapIDs) checked against
 -- C_Map.GetMapInfo's name; when the name differs, the zones under the world
--- map are searched by name (zhTW or English). Steps without x / y get no pin
--- and no button. Every position is 待實地驗證. Nothing is saved or sent.
+-- map are searched by name (zhTW or English). GF-008-C: every step has a map;
+-- a step without x / y (a long journey, a continent) opens its map without a
+-- pin, and the page says why. Every position is 待實地驗證. Nothing is saved
+-- or sent.
 
 local _, ns = ...
 local str = ns.str
@@ -24,8 +27,13 @@ ns.SleepingBagMap = M
 M.WORLD_MAP_ID = 947           -- Azeroth (classic)
 M.CONTINENTS = { 1414, 1415 }  -- Kalimdor, Eastern Kingdoms (classic)
 M.ZONE_TYPE = 3                -- Enum.UIMapType.Zone
-M.PIN_SIZE = 32
-M.PIN_TEXTURE = "Interface\\GossipFrame\\AvailableQuestIcon"
+M.CONTINENT_TYPE = 2           -- Enum.UIMapType.Continent
+M.PIN_SIZE = 28
+-- GF-008-C (owner: 「不要用驚嘆號或問號，會與實際任務搞混」): the raid target
+-- star, game art that no quest giver or turn-in uses. The single file first,
+-- else the same star from the four-by-two sheet.
+M.PIN_TEXTURE = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_1"
+M.PIN_SHEET = { file = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0, 0.25, 0, 0.25 } }
 
 -- The map APIs /gftk probe records (added to its list below).
 M.APIS = {
@@ -91,7 +99,9 @@ local function nameOf(id)
 end
 local function sameZone(name, step)
     name = str(name)
-    return name ~= "" and (name == step.zone or name == step.zoneEN)
+    if name == "" then return false end
+    if step.mapZone then return name == step.mapZone or name == step.mapZoneEN end -- GF-008-C
+    return name == step.zone or name == step.zoneEN
 end
 
 local found = {} -- zone name -> mapID (searched once a session)
@@ -106,7 +116,9 @@ function M.mapFor(step)
         local roots = { M.WORLD_MAP_ID }
         for _, c in ipairs(M.CONTINENTS) do roots[#roots + 1] = c end
         for _, root in ipairs(roots) do
-            local list = call(cm.GetMapChildrenInfo, root, M.ZONE_TYPE, true)
+            -- GF-008-C: a continent step looks among the continents.
+            local kind = (step.mapZone and step.noPin) and M.CONTINENT_TYPE or M.ZONE_TYPE
+            local list = call(cm.GetMapChildrenInfo, root, kind, true)
             for _, info in ipairs(type(list) == "table" and list or {}) do
                 if type(info) == "table" and sameZone(info.name, step) then hit = info.mapID; break end
             end
@@ -118,8 +130,18 @@ function M.mapFor(step)
 end
 function M.resetSession() found = {} end
 
+-- GF-008-C: every step has a map; the pin only where there is an x / y.
+function M.hasPin(step) return step ~= nil and step.x ~= nil and step.y ~= nil end
+function M.canOpen()
+    return type(rawget(_G, "OpenWorldMap")) == "function" or type(rawget(_G, "ToggleWorldMap")) == "function"
+end
 function M.canShow(step)
-    return step ~= nil and step.x ~= nil and step.y ~= nil and M.method() ~= nil and M.mapFor(step) ~= nil
+    if not (step and M.mapFor(step) ~= nil) then return false end
+    local how = M.method()
+    if how == "canvas" then return true end
+    -- A waypoint needs a point; a step without one still opens its map when the client can.
+    if how == "waypoint" then return M.hasPin(step) or M.canOpen() end
+    return false
 end
 
 ---------------------------------------------------------------------------
@@ -157,7 +179,10 @@ local function makePin()
         if pin.SetFrameStrata then pin:SetFrameStrata("HIGH") end
         pin.icon = pin:CreateTexture(nil, "OVERLAY")
         pin.icon:SetAllPoints(pin)
-        pin.icon:SetTexture(M.PIN_TEXTURE)
+        if pin.icon:SetTexture(M.PIN_TEXTURE) == false then
+            pin.icon:SetTexture(M.PIN_SHEET.file)
+            pin.icon:SetTexCoord(unpack(M.PIN_SHEET.coords))
+        end
         pin:EnableMouse(true)
         pin:SetScript("OnEnter", function(self)
             local cur = M.current
@@ -165,6 +190,7 @@ local function makePin()
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:AddLine("睡袋 第 " .. cur.index .. " 步", 1, 0.82, 0)
             GameTooltip:AddLine(str(cur.step.landmark), 1, 1, 1)
+            if cur.step.approx then GameTooltip:AddLine("大約：" .. cur.step.approx, 1, 1, 1) end
             GameTooltip:AddLine("待實地驗證", 0.7, 0.7, 0.7)
             GameTooltip:Show()
         end)
@@ -191,7 +217,7 @@ function M.pin() return pin end
 -- (The pin only exists after 看地圖; on another step it moves there, or goes.)
 function M.update(step, index)
     if M.current and M.current.step ~= step then
-        M.current = (step and M.canShow(step))
+        M.current = (step and M.hasPin(step) and M.canShow(step))
             and { mapID = M.mapFor(step), x = step.x, y = step.y, step = step, index = index or 1 } or nil
     end
     placePin()
@@ -211,12 +237,19 @@ local function openMap(mapID)
     if wm and fn(wm, "SetMapID") then call(wm.SetMapID, wm, mapID) end
 end
 
--- 看地圖: returns "canvas" / "waypoint", or false and why ("combat", "none").
+-- 看地圖: returns "canvas" / "waypoint" / "map" (no pin), or false and why ("combat", "none").
 function M.show(step, index)
     if ns.inCombat() then return false, "combat" end
     if not M.canShow(step) then return false, "none" end
     local mapID = M.mapFor(step)
     local how = M.method()
+    -- GF-008-C: no x / y: the map only, no pin.
+    if not M.hasPin(step) then
+        M.current = nil
+        placePin()
+        openMap(mapID)
+        return "map"
+    end
     M.current = { mapID = mapID, x = step.x, y = step.y, step = step, index = index or 1 }
     if how == "canvas" then
         makePin()

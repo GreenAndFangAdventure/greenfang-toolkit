@@ -13,6 +13,11 @@
 --   mapID                   GF-008-B: the zone's uiMapID for the world-map pin
 --                           (classic IDs, unconfirmed on Forever; the map code
 --                           checks the name and falls back to a search by name)
+--   approx                  GF-008-C: the pin is on this landmark, not on the
+--                           object itself (map knowledge; the guide gives none)
+--   mapZone, mapZoneEN      GF-008-C: the map's name when it is not the step's
+--                           zone (a continent, the wall on the Arathi map)
+--   noPin                   GF-008-C: why this step opens its map without a pin
 --   landmark                what you will see there
 --   object, objectEN        thing to interact with (Chinese name not confirmed)
 --   action                  what to do
@@ -57,6 +62,7 @@ ns.SleepingBagRoutes.Horde = {
             id = "to-stranglethorn",
             zone = "荊棘谷", zoneEN = "Stranglethorn Vale",
             mapID = 1434, -- GF-008-B: classic uiMapID (待實地驗證; checked by name at run time)
+            x = 32, y = 29, approx = "格羅姆高營地的飛艇塔", -- GF-008-C: map knowledge, not the guide (待實地驗證)
             landmark = "格羅姆高營地，或南端的藏寶海灣",
             action = "這一步只是移動：選一條路線前往荊棘谷。",
             travel = "路線一：奧格瑪外的飛艇塔搭往格羅姆高營地的飛艇，離西部荒野比較近。"
@@ -87,6 +93,9 @@ ns.SleepingBagRoutes.Horde = {
         {
             id = "to-kalimdor",
             zone = "返回卡林多", zoneEN = "Back to Kalimdor",
+            -- GF-008-C: the continent's map, no pin (爐石 or any boat / zeppelin).
+            mapID = 1414, mapZone = "卡林多", mapZoneEN = "Kalimdor",
+            noPin = "用爐石或飛艇、船回卡林多都可以，沒有固定地點",
             landmark = "奧格瑪或貧瘠之地",
             action = "這一步只是移動：回到卡林多。",
             travel = "用爐石最快；也可以原路搭飛艇或船回去。",
@@ -101,6 +110,7 @@ ns.SleepingBagRoutes.Horde = {
             id = "stonetalon-litter",
             zone = "石爪山脈", zoneEN = "Stonetalon Mountains",
             mapID = 1442, -- GF-008-B: classic uiMapID (待實地驗證; checked by name at run time)
+            x = 47, y = 61, approx = "烈日石居", -- GF-008-C: map knowledge, not the guide (待實地驗證)
             landmark = "烈日石居附近山坡小路通往的一處小營地",
             object = "口袋裡的雜物", objectEN = "Pocket Litter",
             action = "點擊營地裡的雜物交任務，會拿到打火石、木柴和一把工具。"
@@ -117,6 +127,7 @@ ns.SleepingBagRoutes.Horde = {
             id = "stonetalon-mound",
             zone = "石爪山脈", zoneEN = "Stonetalon Mountains",
             mapID = 1442, -- GF-008-B: classic uiMapID (待實地驗證; checked by name at run time)
+            x = 47, y = 61, approx = "烈日石居", -- GF-008-C: map knowledge, not the guide (待實地驗證)
             landmark = "營地往東不遠處山坡上的土堆",
             object = "一堆泥土", objectEN = "Mound of Dirt",
             action = "點擊土堆交任務，拿到弓箭／槍械類的獎勵，並接下前往東部王國的任務。",
@@ -130,6 +141,9 @@ ns.SleepingBagRoutes.Horde = {
         {
             id = "to-loch-modan",
             zone = "前往洛克莫丹", zoneEN = "To Loch Modan",
+            -- GF-008-C: the continent's map, no pin (a route across many zones).
+            mapID = 1415, mapZone = "東部王國", mapZoneEN = "Eastern Kingdoms",
+            noPin = "這一步是跨好幾區的長途移動，看大陸地圖找路線",
             landmark = "幽暗城＞銀松森林＞希爾斯布萊德丘陵＞阿拉希高地＞濕地＞洛克莫丹",
             action = "這一步只是移動，也是部落路線最危險的一段。",
             travel = "在奧格瑪外搭飛艇到幽暗城，往南穿過銀松森林，往東南進入希爾斯布萊德丘陵，"
@@ -158,7 +172,9 @@ ns.SleepingBagRoutes.Horde = {
         {
             id = "thoradin-wall",
             zone = "希爾斯布萊德丘陵", zoneEN = "Hillsbrad Foothills",
-            mapID = 1424, -- GF-008-B: classic uiMapID (待實地驗證; checked by name at run time)
+            -- GF-008-C: the wall is drawn on the Arathi Highlands map (its west edge).
+            mapID = 1417, mapZone = "阿拉希高地", mapZoneEN = "Arathi Highlands",
+            x = 20, y = 30, approx = "索拉丁之牆北段", -- GF-008-C: map knowledge, not the guide (待實地驗證)
             landmark = "希爾斯布萊德與阿拉希高地交界的索拉丁之牆",
             object = "信差的包包、匆忙捲起的背包", objectEN = "Messenger Bag / Hastily Rolled-Up Satchel",
             action = "爬上牆頂走到平台，先點信差的包包交任務，再點下方的背包完成最後一個任務，拿到舒適睡袋。",
