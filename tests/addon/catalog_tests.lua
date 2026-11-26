@@ -1,5 +1,6 @@
 -- GF-009-12: the 找物品 item catalog (SupplyCatalogData.lua in the main TOC,
--- decoded on the first 找物品 → 全部) and the owner-only /gftk catalogscan.
+-- decoded on the first 找物品 → 全部). GF-009-13: the scan moved to the dev-only
+-- GreenFangToolkit_Dev AddOn (tests/addon/catalog_dev_tests.lua).
 -- Uses the shipped data file itself (Forever build export) with a small fake
 -- game client below that knows nothing until an item is asked for.
 -- Offline only; not checked in the Forever client. Made-up player names only.
@@ -54,7 +55,7 @@ return function(T)
             GetContainerItemInfo = function(bag, slot)
                 local it = bag == 0 and G.bag[slot]
                 if not it then return nil end
-                return { itemID = it[1], stackCount = it[2], isBound = false, isLocked = false, iconFileID = 134939 }
+                return { itemID = it[1], stackCount = it[2], isBound = it[3] == true, isLocked = false, iconFileID = 134939 }
             end,
         }
         GetItemInfo = function(id)
@@ -99,7 +100,7 @@ return function(T)
         if opts.scan then ns.SupplyCatalogData.scan = opts.scan end
         ns.Share.rand = function(a) return a end
         ns.Supply.rand = function(a) return a end
-        ns.Supply.resetSession(); ns.SupplyListings.resetSession(); ns.SupplyCatalog.resetSession(); ns.CatalogScan.resetSession()
+        ns.Supply.resetSession(); ns.SupplyListings.resetSession(); ns.SupplyCatalog.resetSession()
         wow.fire("PLAYER_LOGIN")
         wow.fire("PLAYER_ENTERING_WORLD")
         wow.advance(opts.wait or 70)
@@ -145,7 +146,7 @@ return function(T)
         for _ = 1, 3 do withKB = withKB + loadCost(true); without = without + loadCost(false) end
         withKB, without = withKB / 3, without / 3
         local keep = runDataFile()
-        local strKB = #keep.scan
+        local strKB = 0 -- GF-009-13: no scan list in the guild file
         for _, v in pairs(keep.groups) do strKB = strKB + #v end
         strKB = strKB / 1024
         eq(keep.v, 2, "schema"); eq(keep.locale, "zhTW", "locale"); ok(keep.build ~= nil and keep.build ~= "", "build recorded")
@@ -340,11 +341,11 @@ return function(T)
         G.known[BRONZE] = { name = "青銅錠", classID = 7, sub = 7, bindType = 1 }
         UI.pickSearch("青銅錠")
         ok(not has(rowIDs(UI), BRONZE), "untradeable in the game: not in the list")
-        -- Unknown ID: missing after the wait.
+        -- Unknown ID, no answer: a timeout after the wait (GF-009-13: not "missing").
         UI.formFromText("990777")
         wow.advance(ns.SupplyListings.LOAD_WAIT + 1)
-        eq(UI.formState.preview, "missing", "no such item")
-        eq(UI.form().msg._text, UI.PREVIEW_TEXT.missing, "says so")
+        eq(UI.formState.preview, "timeout", "no answer in time")
+        eq(UI.form().msg._text, UI.PREVIEW_TEXT.timeout, "says so")
         UI.formFromText("not an item")
         eq(UI.form().msg._text, UI.PREVIEW_TEXT.bad, "bad text")
     end))
@@ -372,116 +373,316 @@ return function(T)
     end))
 
     ---------------------------------------------------------------------------
-    -- /gftk catalogscan (owner only)
+    -- GF-009-13: the release has no scan; cold cache; one resolve path;
+    -- bag stacks for 供應; screens, ESC and drafts.
     ---------------------------------------------------------------------------
 
-    local B36 = "0123456789abcdefghijklmnopqrstuvwxyz"
-    local function b36(n)
-        if n == 0 then return "0" end
-        local s = ""
-        while n > 0 do local r = n % 36; s = B36:sub(r + 1, r + 1) .. s; n = math.floor(n / 36) end
-        return s
-    end
-    local function pack(ids)
-        local out, last = {}, 0
-        for _, i in ipairs(ids) do out[#out + 1] = b36(i - last); last = i end
-        return table.concat(out, ",")
-    end
-    local SCAN_IDS = {}
-    for i = 1, 40 do SCAN_IDS[i] = 500000 + i * 3 end
-    local function scanServer()
-        local srv = {}
-        for i, id in ipairs(SCAN_IDS) do
-            if i % 10 ~= 0 then
-                srv[id] = { name = "掃描物品" .. i, classID = 7, sub = 5, quality = 1, ilvl = 10 + i, icon = 1000 + i }
-            end
-        end
-        return srv
-    end
-    -- The fake server answers every request one second later.
-    local function serve(seconds)
-        for _ = 1, seconds * 4 do
-            wow.advance(0.25)
-            for _, r in ipairs(G.requests) do
-                if not r.answered and wow.state.now - r.t >= 1 then
-                    r.answered = true
-                    answer(r.id)
-                end
-            end
-        end
-    end
+    local ROOT_DIR = ADDON_DIR:gsub("/addon/GreenFangToolkit$", "")
+    local function countKeys(t) local n = 0 for _ in pairs(t or {}) do n = n + 1 end return n end
+    local function readAll(path) local h = io.open(path, "rb"); if not h then return nil end local s = h:read("*a"); h:close(); return s end
 
-    test("GF-009-12 catalogscan: the shipped list is the export's unnamed IDs; hidden from help; off until typed", done(function()
+    test("GF-009-13 release: no CatalogScan, no scan list, no /gftk catalogscan; .pkgmeta leaves the dev AddOn out", done(function()
+        local toc = readAll(TOC_FILE)
+        ok(not toc:find("CatalogScan", 1, true), "not in the main TOC")
+        eq(readAll(ADDON_DIR .. "/CatalogScan.lua"), nil, "no CatalogScan.lua in the main folder")
+        eq(runDataFile().scan, nil, "no scan list in SupplyCatalogData.lua")
+        for line in toc:gmatch("[^\r\n]+") do
+            if line:match("^[%w_]+%.lua$") then
+                local body = readAll(ADDON_DIR .. "/" .. line) or ""
+                ok(not body:lower():find("catalogscan", 1, true), line .. ": no scan code")
+                ok(not body:find("gftkdev", 1, true), line .. ": no /gftkdev")
+            end
+        end
+        local pkg = readAll(ROOT_DIR .. "/.pkgmeta")
+        ok(pkg and pkg:find("\n  - addon/GreenFangToolkit_Dev", 1, true), ".pkgmeta ignores addon/GreenFangToolkit_Dev")
+        ok(readAll(ROOT_DIR .. "/addon/GreenFangToolkit_Dev/GreenFangToolkit_Dev.toc"), "the dev AddOn has its own TOC")
         local ns = login({})
-        local list = ns.SupplyCatalog.scanIDs()
-        ok(#list > 10000, "scan list: " .. #list)
-        for i = 2, #list do if list[i] <= list[i - 1] then error("not sorted at " .. i) end end
-        for _, id in ipairs(list) do if indexOf(id) then error("catalog item in the scan list: " .. id) end end
-        wow.clearPrinted()
-        ns.handleSlash("help")
-        for _, line in ipairs(wow.printed()) do ok(not tostring(line):find("catalogscan", 1, true), "not in help") end
-        wow.advance(600)
-        eq(ns.db.devCatalogScan, nil, "nothing runs unless typed")
-        eq(next(G.asked), nil, "no requests")
-        T.realPrint(string.format("     CATALOGSCAN GF-009-12: %d IDs, about %.0f minutes at 4 per second", #list, #list / 4 / 60))
+        eq(ns.CatalogScan, nil, "no scan module")
+        ns.handleSlash("catalogscan start")
+        wow.advance(120)
+        eq(ns.db.devCatalogScan, nil, "nothing saved")
+        eq(#G.requests, 0, "no requests")
+        eq(SlashCmdList.GFTKDEV, nil, "no /gftkdev in the guild AddOn")
     end))
 
-    test("GF-009-12 catalogscan: 4 per second, 8 waiting, combat and instance pause, stop / resume across logins, item fields only", done(function()
-        local ns = login({ scan = pack(SCAN_IDS), server = scanServer() })
-        local S = ns.CatalogScan
-        ns.handleSlash("catalogscan start")
-        ok(ns.db.devCatalogScan and ns.db.devCatalogScan.running, "started")
-        -- Rate: no answers for 5 s: at most 8 waiting, never more than 4 in any second.
-        local saved = G.server
-        wow.advance(5)
-        ok(#G.requests <= 8 and #G.requests >= 4, "8 waiting at most: " .. #G.requests)
-        for i = 5, #G.requests do ok(G.requests[i].t - G.requests[i - 4].t >= 1 - 1e-6, "4 per second") end
-        G.server = saved
-        local n0 = #G.requests
-        wow.enterCombat()
-        wow.advance(20)
-        eq(#G.requests, n0, "nothing asked in combat")
-        wow.leaveCombat()
-        G.instance = true
-        wow.advance(20)
-        eq(#G.requests, n0, "nothing asked in an instance")
-        G.instance = false
-        serve(6)
-        local d = ns.db.devCatalogScan
-        ok(d.pos > 8, "moving on after the pause: " .. d.pos)
-        -- Stop: nothing more.
-        ns.handleSlash("catalogscan stop")
-        local pos = d.pos
-        serve(3)
-        eq(ns.db.devCatalogScan.pos, pos, "stopped")
-        -- Start again, log out and in: it resumes a minute after login.
-        ns.handleSlash("catalogscan start")
-        local sv = wow.logout()
-        ns = login({ saved = sv, scan = pack(SCAN_IDS), server = scanServer(), wait = 1 })
-        d = ns.db.devCatalogScan
-        ok(d.running, "still on after login")
-        local p1 = d.pos
-        serve(30)
-        eq(ns.db.devCatalogScan.pos, p1, "waits after login")
-        serve(150)
-        d = ns.db.devCatalogScan
-        ok(not d.running and d.finished, "finished")
-        local got, none = 0, 0
-        for id, r in pairs(d.got) do
-            got = got + 1
-            eq(#r, 7, "seven fields")
-            ok(type(r[1]) == "string" and r[1]:find("掃描物品", 1, true) ~= nil, "name")
-            for k = 2, 7 do ok(type(r[k]) == "number", "number field " .. k) end
-            ok(has(SCAN_IDS, id), "an ID from the list")
+    test("GF-009-13 cold cache: 全部, a name, 類型 / 子類, paging and the filter menus send no item request", done(function()
+        for _, noCachedAPI in ipairs({ false, true }) do
+            local label = noCachedAPI and " (no IsItemDataCachedByID)" or ""
+            local ns = login({ bag = { { 2589, 3 } } })
+            G.known[2589] = { name = "亞麻布", classID = 7, sub = 5 } -- in the bags: the client has it
+            if noCachedAPI then C_Item.IsItemDataCachedByID = nil end
+            ns.Framework.open("supply")
+            local UI = ns.SupplyUI
+            UI.openForm()
+            -- Guild listings of cold items, outside and inside the catalog.
+            ns.SupplyListings.activeAll = function() return { { itemID = OFF_LIST }, { itemID = OFF_LIST + 1 }, { itemID = PATTERN } } end
+            G.asked, G.requests, G.infoIDs = {}, {}, {}
+            UI.openPicker("all")
+            local picker = UI.picker()
+            UI.pickSearch("布"); UI.pickSearch("青銅"); UI.pickSearch("")
+            ok(#UI.pickState.items > 3000, "the whole catalog" .. label)
+            local L = ns.SupplyListings
+            local classes = L.catalogClasses(UI.pickState.base)
+            UI.pickClass(9)
+            local subs = L.catalogSubclasses(UI.pickState.base, 9)
+            UI.pickSubclass(subs[1] and subs[1].value)
+            UI.pickClass(nil)
+            local wheel = picker.rows[1]:GetScript("OnMouseWheel")
+            wheel(picker.rows[1], -3); wheel(picker.rows[1], -100000); wheel(picker.rows[1], 50)
+            UI.pickSearch("藥水"); UI.pickClass(0); UI.pickSearch("秘銀")
+            ok(#classes > 3, "the 類型 menu" .. label)
+            eq(countKeys(G.asked), 0, "no item asked for" .. label)
+            eq(#G.requests, 0, "no RequestLoadItemDataByID" .. label)
+            for id in pairs(G.infoIDs) do ok(G.known[id], "GetItemInfo only for items the client has: " .. id .. label) end
+            eq(L.requestStats().nameSearch, 0, "the diagnostics count 0 requests in name searches" .. label)
+            ok(ns.SupplyCatalog.diagText():find("其中名稱搜尋時 0 次", 1, true), "and say so" .. label)
+            ok(ns.SupplyCatalog.diagText():find("清單上次", 1, true), "the list time is shown" .. label)
+            -- One typed ItemID is a deliberate request for that item only.
+            UI.pickSearch(tostring(OFF_LIST))
+            eq(countKeys(G.asked), 1, "a typed ID asks for that one" .. label)
+            ok(G.asked[OFF_LIST], "that one" .. label)
         end
-        for _ in pairs(d.none) do none = none + 1 end
-        eq(got, 36, "answers kept"); eq(none, 4, "no answer counted")
-        local allowed = { v = 1, locale = 1, build = 1, pos = 1, got = 1, none = 1, running = 1, finished = 1 }
-        for k in pairs(d) do ok(allowed[k], "only scan fields: " .. tostring(k)) end
-        ok(S.statusText():find("完成", 1, true) ~= nil or ns.CatalogScan.statusText():find("完成", 1, true) ~= nil, "status: 完成")
-        local text = wow.serializeSV("GreenFangToolkitDB", ns.db.devCatalogScan)
-        ok(not text:find("Player%-"), "no GUIDs")
-        ns.handleSlash("catalogscan reset")
-        eq(ns.db.devCatalogScan, nil, "reset forgets it")
+    end))
+
+    test("GF-009-13 the catalog's older name, the game's newer one: the game's is shown, searched and listed", done(function()
+        local NEW = "青銅錠（新版名稱）"
+        local ns = login({ bag = { { BRONZE, 4 } } })
+        G.known[BRONZE] = { name = NEW, classID = 7, sub = 7 }
+        local old = catalogTable().name[indexOf(BRONZE)]
+        ok(old ~= NEW and not old:find("新版", 1, true), "the catalog has the old name: " .. old)
+        local UI, picker = openFinder(ns)
+        UI.pickSearch("新版名稱")
+        ok(has(rowIDs(UI), BRONZE), "found by the game's name")
+        eq(picker.rows[1].name._text, NEW, "the row shows the game's name")
+        UI.pickSearch(old)
+        local idx
+        for k, it in ipairs(UI.pickState.items) do if it.itemID == BRONZE then idx = k; eq(it.info.name, NEW, "the old name finds it, the game's is shown") end end
+        ok(idx, "still found by the catalog's name")
+        UI.pickChoose(idx - UI.pickState.offset)
+        eq(UI.formState.preview, "ready", "ready")
+        eq(UI.form().itemName._text, NEW, "the form shows the game's name")
+        UI.form().qty:SetText("2")
+        local l = UI.submitForm()
+        ok(l and l.itemID == BRONZE, "listed by ItemID")
+    end))
+
+    test("GF-009-13 one resolve path: ID, link, drag (form and finder) give the same preview; timeout, not found and untradeable differ", done(function()
+        local COLD, GONE, NOPE, BOP = 990101, 990102, 990103, 990104
+        local ns = login({})
+        local L = ns.SupplyListings
+        G.known[BOP] = { name = "拾綁戒指", classID = 4, sub = 0, bindType = 1 }
+        G.exists[GONE] = false
+        local UI = openFinder(ns)
+        local f = UI.form()
+        local function via(way, id)
+            UI.setFormItem(nil)
+            if way == "id" then UI.formFromText(tostring(id))
+            elseif way == "link" then UI.formFromText("|cffffffff|Hitem:" .. id .. "::::::::|h[x]|h|r")
+            elseif way == "slot" then G.cursor = id; f.slot:GetScript("OnReceiveDrag")(f.slot)
+            else UI.openPicker("all"); G.cursor = id; UI.picker():GetScript("OnReceiveDrag")(UI.picker()) end
+            eq(UI.formState.itemID, id, way .. ": the item")
+            return UI.formState.preview, f.msg._text
+        end
+        local msgs = {}
+        for _, way in ipairs({ "id", "link", "slot", "finder" }) do
+            local st, msg = via(way, GONE)
+            eq(st, "missing", way .. ": the client says no such item"); eq(msg, UI.PREVIEW_TEXT.missing, way .. ": 找不到")
+            msgs.missing = msg
+            st, msg = via(way, BOP)
+            eq(st, "blocked", way .. ": bind on pickup"); ok(msg:find("不能交易", 1, true), way .. ": " .. msg)
+            msgs.blocked = msg
+            st = via(way, NOPE)
+            eq(st, "loading", way .. ": asked")
+            wow.fire("GET_ITEM_INFO_RECEIVED", NOPE, false)
+            eq(UI.formState.preview, "missing", way .. ": the server answered no")
+            eq(f.msg._text, UI.PREVIEW_TEXT.missing, way .. ": 找不到 after the answer")
+            L.failed[NOPE] = nil
+            st = via(way, COLD)
+            eq(st, "loading", way .. ": waiting")
+            wow.advance(L.LOAD_WAIT + 1)
+            eq(UI.formState.preview, "timeout", way .. ": no answer in time")
+            eq(f.msg._text, UI.PREVIEW_TEXT.timeout, way .. ": 逾時")
+            msgs.timeout = f.msg._text
+            local l = UI.submitForm()
+            ok(not l, way .. ": a timed-out item is not listed")
+        end
+        ok(msgs.missing ~= msgs.timeout and msgs.timeout ~= msgs.blocked and msgs.missing ~= msgs.blocked, "three different messages")
+    end))
+
+    test("GF-009-13 供應 looks at the bag stacks: all bound refused, one free fine, none in the bags fine; 徵求 unchanged", done(function()
+        local CLOTH = 2589
+        local ns = login({ bag = { { CLOTH, 2, true } } })
+        G.known[CLOTH] = { name = "亞麻布", classID = 7, sub = 5 }
+        local L = ns.SupplyListings
+        eq(L.bagBound(CLOTH), "bound", "every stack bound")
+        local UI = openFinder(ns)
+        local f = UI.form()
+        UI.formFromText(tostring(CLOTH))
+        eq(UI.formState.direction, "need", "徵求 first")
+        eq(f.msg._text, "", "徵求: my bags do not matter")
+        wow.click(f.dirs.buttons[2])
+        eq(UI.formState.direction, "offer", "供應")
+        eq(f.msg._text, L.BOUND_OFFER, "供應: the bound stack is refused at once")
+        f.qty:SetText("1")
+        local l, why = UI.submitForm()
+        ok(not l and why == L.BOUND_OFFER, "and on 刊登: " .. tostring(why))
+        G.bag[2] = { CLOTH, 1 }
+        eq(L.bagBound(CLOTH), "free", "one free stack")
+        UI.formRecheck()
+        eq(f.msg._text, "", "message cleared")
+        ok(UI.submitForm(), "供應 listed")
+        G.bag = {}
+        eq(L.bagBound(CLOTH), nil, "none in the bags")
+        G.known[PATTERN] = { name = "設計圖：秘銀短褲", classID = 9, sub = 3 }
+        ok(L.create({ direction = "offer", itemID = PATTERN, quantity = 1, days = 7, note = "" }), "供應 without a stack (it can be made)")
+        G.bag = { { CLOTH, 2, true } }
+        ok(L.create({ direction = "need", itemID = CLOTH, quantity = 1, days = 7, note = "" }), "徵求 with only bound stacks")
+    end))
+
+    -- UIParent at a resolution and UI scale: 768 / scale units high, the
+    -- screen's aspect wide (the client's rule).
+    local SCREENS = {
+        { "1280x720 @0.64", 1280, 720, 0.64 }, { "1280x720 @1.0", 1280, 720, 1.0 },
+        { "1920x1080 @0.64", 1920, 1080, 0.64 }, { "1920x1080 @1.0", 1920, 1080, 1.0 },
+        { "1024x768 @1.0 (4:3)", 1024, 768, 1.0 },
+    }
+    local function setScreen(pw, ph, scale)
+        local h = 768 / scale
+        local w = h * pw / ph
+        UIParent.GetWidth = function() return w end
+        UIParent.GetHeight = function() return h end
+        UIParent.GetEffectiveScale = function() return scale end
+        return w, h
+    end
+    -- left, bottom, right, top of a frame placed by CENTER / TOPLEFT on UIParent.
+    local function rectOf(f, w, h, sw, sh)
+        local p = f._points[#f._points]
+        if p[1] == "CENTER" and p[2] == UIParent then
+            local cx, cy = sw / 2 + (p[4] or 0), sh / 2 + (p[5] or 0)
+            return cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2
+        end
+        assert(p[1] == "TOPLEFT" and p[2] == UIParent and p[3] == "BOTTOMLEFT", "placed on UIParent: " .. tostring(p[1]))
+        return p[4], p[5] - h, p[4] + w, p[5]
+    end
+    local function inside(name, l, b, r, t, sw, sh)
+        ok(l >= 0 and b >= 0 and r <= sw + 0.01 and t <= sh + 0.01,
+            string.format("%s on screen: %.0f,%.0f-%.0f,%.0f in %.0fx%.0f", name, l, b, r, t, sw, sh))
+    end
+
+    test("GF-009-13 screens: form and 找物品 stay on screen at 1280x720 / 1920x1080 and UI scale 0.64 / 1.0 (and 4:3)", done(function()
+        for _, s in ipairs(SCREENS) do
+            local ns = login({})
+            local sw, sh = setScreen(s[2], s[3], s[4])
+            ns.Framework.open("supply")
+            local UI = ns.SupplyUI
+            UI.openForm()
+            local f = UI.form()
+            local a1, b1, c1, d1 = rectOf(f, UI.FORM_W, UI.FORM_H, sw, sh)
+            inside(s[1] .. " form alone", a1, b1, c1, d1, sw, sh)
+            UI.openPicker("all")
+            local fl, fb, fr, ft = rectOf(f, UI.FORM_W, UI.FORM_H, sw, sh)
+            local pl, pb, pr, pt = rectOf(UI.picker(), UI.PICK_W, UI.pickHeight(), sw, sh)
+            inside(s[1] .. " form", fl, fb, fr, ft, sw, sh)
+            inside(s[1] .. " 找物品", pl, pb, pr, pt, sw, sh)
+            if sw >= UI.FORM_W + UI.PICK_W + UI.PICK_GAP + 2 * UI.SCREEN_EDGE then
+                ok(pl >= fr or pr <= fl, s[1] .. ": side by side, not covering the form")
+            else
+                ok(pr <= sw, s[1] .. ": too narrow for both: the finder covers part of the form")
+            end
+            ok(math.abs(pt - ft) < 1, s[1] .. ": tops line up")
+            -- The form comes back to the middle next time.
+            UI.picker():Hide(); UI.closeForm(true); UI.openForm()
+            eq(f._points[#f._points][1], "CENTER", s[1] .. ": the form re-centred")
+            -- The finder alone (no form) in the middle.
+            UI.closeForm(true); UI.openPicker("bag")
+            local a2, b2, c2, d2 = rectOf(UI.picker(), UI.PICK_W, UI.pickHeight(), sw, sh)
+            inside(s[1] .. " 找物品 alone", a2, b2, c2, d2, sw, sh)
+            T.realPrint(string.format("     SCREEN GF-009-13 %-20s UIParent %4.0fx%4.0f: form %4.0f-%4.0f, 找物品 %4.0f-%4.0f", s[1], sw, sh, fl, fr, pl, pr))
+        end
+    end))
+
+    test("GF-009-13 layoutPair: right, left, moved to fit, or overlapped on a very narrow screen; always inside", function()
+        local ns = wow.loadAddon(ADDON_DIR)
+        local UI = ns.SupplyUI
+        local E = UI.SCREEN_EDGE
+        local cases = {
+            { 2133, 1200, 766, 1080, "right" },  -- room on the right
+            { 2133, 1200, 1500, 1080, "left" },  -- the form moved right by the player: left of it
+            { 1365, 768, 382, 659, "moved" },    -- 1280x720 @1.0: the form moves so both fit
+            { 1024, 768, 212, 659, "over" },     -- 4:3 @1.0: narrower than both
+            { 1365, 300, 382, 1000, "short" },   -- a short screen: pulled down / up
+        }
+        for _, c in ipairs(cases) do
+            local sw, sh = c[1], c[2]
+            local fl, ft, px, pt = UI.layoutPair(sw, sh, UI.FORM_W, UI.FORM_H, UI.PICK_W, UI.pickHeight(), c[3], c[4])
+            ok(fl >= E - 0.01 and fl + UI.FORM_W <= sw - E + 0.01, c[5] .. ": form x inside")
+            ok(px >= E - 0.01 and px + UI.PICK_W <= sw - E + 0.01, c[5] .. ": finder x inside")
+            ok(ft <= sh - E + 0.01 and pt <= sh - E + 0.01, c[5] .. ": tops inside")
+            if c[5] == "right" then eq(px, c[3] + UI.FORM_W + UI.PICK_GAP, "right of the form") end
+            if c[5] == "left" then eq(px, c[3] - UI.PICK_GAP - UI.PICK_W, "left of the form") end
+            if c[5] == "moved" then ok(fl < c[3] and px >= fl + UI.FORM_W, "the form moved left, the finder beside it") end
+            if c[5] == "over" then ok(px < fl + UI.FORM_W, "covers the form's right side") end
+        end
+    end)
+
+    test("GF-009-13 ESC, the window's X and tooltips: the finder, then the form (asks), then the window; nothing left behind; the draft comes back", done(function()
+        local srv = { [BRONZE] = { name = "青銅錠", classID = 7, sub = 7 } }
+        local ns = login({ server = srv })
+        G.known[BRONZE] = srv[BRONZE]
+        local UI, picker = openFinder(ns)
+        local f = UI.form()
+        local win = _G[ns.Framework.WINDOW_NAME]
+        UI.formFromText(tostring(BRONZE))
+        f.qty:SetText("7"); f.note:SetText("測試草稿")
+        UI.openPicker("all")
+        UI.pickSearch("青銅")
+        picker.rows[1]:GetScript("OnEnter")(picker.rows[1])
+        eq(GameTooltip:GetOwner(), picker.rows[1], "a row's tooltip")
+        -- ESC 1: the finder (and its tooltip).
+        wow.pressEscape()
+        ok(not picker:IsShown(), "ESC closes the finder first")
+        eq(GameTooltip:GetOwner(), nil, "its tooltip went with it")
+        ok(f:IsShown() and win:IsShown(), "form and window stay")
+        -- ESC 2: the form asks (unsaved changes); 繼續編輯 keeps everything.
+        wow.pressEscape()
+        ok(wow.popup() ~= nil, "asks before dropping the changes")
+        ok(f:IsShown(), "the form is still there")
+        wow.cancelPopup()
+        eq(f.qty:GetText(), "7", "quantity kept"); eq(f.note:GetText(), "測試草稿", "note kept")
+        -- The window's X while the form and the finder are open: nothing stays on screen.
+        UI.openPicker("all")
+        f.qty.tip = f.qty.tip or "數量"
+        win:Hide()
+        ok(not f:IsShown(), "the form closed with the window")
+        ok(not picker:IsShown(), "the finder closed with the window")
+        eq(wow.popup(), nil, "no question when the window went away")
+        ok(UI.draft ~= nil, "the form's contents are kept as a draft")
+        -- Back: ＋刊登 brings the draft back (still unsaved: ESC asks again).
+        ns.Framework.open("supply")
+        UI.openForm()
+        eq(UI.formState.itemID, BRONZE, "draft item"); eq(f.qty:GetText(), "7", "draft quantity"); eq(f.note:GetText(), "測試草稿", "draft note")
+        eq(f.msg._text, UI.DRAFT_BACK, "says it came back")
+        ok(UI.formDirty(), "still unsaved")
+        eq(UI.draft, nil, "used once")
+        -- Saving drops it for good.
+        ok(UI.submitForm(), "listed")
+        ns.Framework.open("supply"); UI.openForm()
+        eq(f.note:GetText(), "", "a new form after saving")
+        -- A discarded form leaves no draft.
+        f.note:SetText("丟掉"); wow.pressEscape(); wow.acceptPopup()
+        ok(not f:IsShown(), "discarded"); eq(UI.draft, nil, "no draft after 放棄")
+        -- The roster's member card goes with the window (ESC).
+        ns.Framework.open("roster")
+        local row
+        for _, r in ipairs(ns.UI.rows()) do if r:IsShown() and r.memberGuid then row = r; break end end
+        if row then
+            ns.UI.showRowTooltip(row, nil)
+            ok(ns.UI.rosterCard():IsShown(), "the member card")
+            wow.pressEscape()
+            ok(not win:IsShown(), "ESC closed the window")
+            ok(not ns.UI.rosterCard():IsShown(), "the member card is not left behind")
+        else
+            ok(false, "a roster row to hover")
+        end
     end))
 end

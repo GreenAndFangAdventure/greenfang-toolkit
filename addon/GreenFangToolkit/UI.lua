@@ -1535,6 +1535,8 @@ end
 local function build(p)
     panel = p
     local f = p
+    -- GF-009-13: the member card never stays on screen after the page closes (ESC, X).
+    if p.HookScript then p:HookScript("OnHide", function() UI.hideRosterCard() end) end
     local G = ns.GuildAdmin
     local O = ns.OrdersUI
     local GI = ns.GameIcons

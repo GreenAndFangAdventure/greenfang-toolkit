@@ -13,11 +13,13 @@ asked from the Forever client.
 Inputs: DB2 table exports (CSV with a header row) for one Forever client build:
     Item.csv              ID, ClassID, SubclassID, IconFileDataID
     ItemSparse.zhTW.csv   ID, Display_lang (zhTW), Bonding, OverallQualityID, ItemLevel
-    --scan (optional)     the owner's SavedVariables file after /gftk catalogscan:
-                          GreenFangToolkitDB.devCatalogScan.got = { [ItemID] = { name,
-                          classID, subclassID, bindType, quality, itemLevel, icon } }
-                          (the game client's own answers for IDs the export has no
-                          name for). Only that table is read.
+    --scan (optional)     the owner's GreenFangToolkit_Dev SavedVariables file
+                          (GreenFangToolkit_Dev.lua) after /gftkdev catalogscan:
+                          GreenFangToolkitDevDB.catalogScan / .catalogSample .got =
+                          { [ItemID] = { name, classID, subclassID, bindType, quality,
+                          itemLevel, icon } } (the game client's own answers for IDs
+                          the export has no name for). Only those tables are read;
+                          each run's locale must be zhTW and its client build --build.
 Only these columns are read. The exports and the SavedVariables file are never
 committed.
 
@@ -28,8 +30,20 @@ Included (everything else is left out):
     Other classes: quality >= 1, or quality 0 for trade goods / reagents / quest.
     Names without any CJK character (OLD / Deprecated placeholders, untranslated
     names) are left out.
-The data file also carries the scan list: every Item row with no name (no
-ItemSparse row, or a name without CJK), for /gftk catalogscan.
+GF-009-13: the scan list (every Item row with no name: no ItemSparse row, or a
+name without CJK) and a ~20 ID sample go to the dev-only AddOn
+addon/GreenFangToolkit_Dev/CatalogScanData.lua (--dev-out), never into the
+guild release.
+
+Data source and terms: the item names, classes and icon file IDs are Blizzard
+Entertainment's game data, read from the Forever client's DB2 tables Item and
+ItemSparse (zhTW) as exported by wago.tools (https://wago.tools/db2), build
+1.60.1.71139. They are Blizzard's, not ours: the AddOn's MIT licence covers our
+code, not this data. It is shipped only inside the free AddOn, so that the
+AddOn can find items by name, as AddOns commonly embed game data under
+Blizzard's UI Add-On Development Policy (free of charge, readable code).
+wago.tools is a third-party mirror and is not affiliated with Blizzard. See
+docs/research/GF-009-13-catalog-source.md.
 
 Update: export Item and ItemSparse (zhTW) again for the new Forever build, rerun
 with --build (and --scan once the owner has scanned), commit
@@ -45,12 +59,17 @@ import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DEFAULT_OUT = os.path.join(ROOT, "addon", "GreenFangToolkit", "SupplyCatalogData.lua")
+DEFAULT_DEV_OUT = os.path.join(ROOT, "addon", "GreenFangToolkit_Dev", "CatalogScanData.lua")
 DEFAULT_MISSING = os.path.join(ROOT, "docs", "research", "GF-009-12-catalog-missing.tsv")
 NO_TRADE = {1, 4, 5}
 GEAR = {2, 4}
 LOW_OK = {5, 7, 12}     # quality 0 still kept for these classes
 SCHEMA = 2
 B36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+TERMS = ("Blizzard Entertainment game data (Item, ItemSparse DB2), not covered by the AddOn's MIT licence; "
+         "shipped only inside the free AddOn. See docs/research/GF-009-13-catalog-source.md.")
+SAMPLE_KNOWN = (2841, 7975, 289334)   # 青銅錠, 設計圖：秘銀短褲, a Forever item
+SAMPLE_INVALID = (98765432, 99999999)  # no such item
 
 
 def _int(v, default=None):
@@ -175,28 +194,48 @@ class _Parser:
                 n += 1
 
 
+SCAN_RUNS = ("catalogScan", "catalogSample")
+
+
 def read_scan(text):
-    """{ItemID: (name, classID, subclassID, bind, quality, ilvl, icon)} from the SavedVariables file."""
-    m = re.search(r"^\s*GreenFangToolkitDB\s*=\s*", text, re.M)
+    """({ItemID: (name, classID, subclassID, bind, quality, ilvl, icon)}, [run meta]) from
+    the GreenFangToolkit_Dev SavedVariables file (GreenFangToolkitDevDB)."""
+    m = re.search(r"^\s*GreenFangToolkitDevDB\s*=\s*", text, re.M)
     if not m:
-        raise ValueError("no GreenFangToolkitDB in the file")
+        raise ValueError("no GreenFangToolkitDevDB in the file")
     p = _Parser(text[m.end():])
     assert p.take() == ("sym", "{")
     db = p.table()
-    scan = db.get("devCatalogScan") or {}
-    got = scan.get("got") or {}
-    out = {}
-    for k, rec in got.items():
-        if not isinstance(k, int) or not isinstance(rec, dict):
+    out, runs = {}, []
+    for key in SCAN_RUNS:
+        scan = db.get(key)
+        if not isinstance(scan, dict):
             continue
-        name = rec.get(1)
-        if not isinstance(name, str) or not name:
-            continue
-        vals = [rec.get(i) for i in range(2, 8)]
-        if not all(isinstance(x, int) for x in vals):
-            continue
-        out[k] = (name,) + tuple(vals)
-    return out, {"locale": scan.get("locale"), "build": scan.get("build"), "done": scan.get("finished")}
+        runs.append({"run": key, "locale": scan.get("locale"), "build": scan.get("build"),
+                     "list": scan.get("list"), "done": scan.get("finished")})
+        for k, rec in (scan.get("got") or {}).items():
+            if not isinstance(k, int) or not isinstance(rec, dict):
+                continue
+            name = rec.get(1)
+            if not isinstance(name, str) or not name:
+                continue
+            vals = [rec.get(i) for i in range(2, 8)]
+            if not all(isinstance(x, int) for x in vals):
+                continue
+            out[k] = (name,) + tuple(vals)
+    return out, runs
+
+
+def check_runs(runs, build):
+    """None when every run was made by a zhTW client of this build, else why not."""
+    if not runs:
+        return "no catalogScan / catalogSample run in the file"
+    for r in runs:
+        if r["locale"] != "zhTW":
+            return "%s: locale %s, not zhTW" % (r["run"], r["locale"])
+        if r["build"] != build or r["list"] not in (None, build):
+            return "%s: client build %s (list %s), not %s" % (r["run"], r["build"], r["list"], build)
+    return None
 
 
 # --------------------------------------------------------------------------
@@ -292,7 +331,7 @@ def clean(name):
     return name.replace("\t", " ").replace("\r", " ").replace("\n", " ")
 
 
-def render_data(entries, scan_ids, build, source, locale="zhTW"):
+def render_data(entries, build, source, locale="zhTW"):
     groups = {}
     for e in entries:
         groups.setdefault(e[2], []).append(e)
@@ -301,7 +340,8 @@ def render_data(entries, scan_ids, build, source, locale="zhTW"):
         "-- SupplyCatalogData (GF-009-12): the 找物品 item catalog. Written by",
         "-- scripts/build_item_catalog.py; do not edit by hand.",
         "-- Forever client build %s, locale %s, source: %s." % (build, locale, source),
-        "-- %d items; by ClassID %s. Scan list: %d IDs." % (len(entries), by_class, len(scan_ids)),
+        "-- Terms: %s" % TERMS,
+        "-- %d items; by ClassID %s." % (len(entries), by_class),
         "-- groups[ClassID]: one record per line, ItemID<TAB>SubclassID<TAB>icon file ID (0 = none)<TAB>zhTW name.",
         "-- Decoded by SupplyCatalog.lua the first time 找物品 → 全部 opens; item details and",
         "-- whether an item may be listed come from the game client.",
@@ -316,11 +356,42 @@ def render_data(entries, scan_ids, build, source, locale="zhTW"):
     for c in sorted(groups):
         body = "".join("%d\t%d\t%d\t%s\n" % (e[0], e[3], e[4], clean(e[1])) for e in groups[c])
         out.append("    [%d] = %s," % (c, long_string(body)))
-    out += ["  },",
-            "  -- /gftk catalogscan (owner only): Item rows with no name in the export, base-36 gaps.",
-            '  scan = "%s",' % pack_ids(scan_ids),
-            "}", ""]
+    out += ["  },", "}", ""]
     return "\n".join(out)
+
+
+def pick_sample(entries, scan_ids):
+    """About 20 IDs for the owner's first check: known catalog items, a spread of
+    the scan list, and IDs that do not exist."""
+    have = {e[0] for e in entries}
+    known = [i for i in SAMPLE_KNOWN if i in have]
+    ids = sorted(have)
+    for k in (1, 2, 3):
+        if len(known) >= 6 or not ids:
+            break
+        i = ids[len(ids) * k // 4]
+        if i not in known:
+            known.append(i)
+    spread = []
+    if scan_ids:
+        step = max(1, len(scan_ids) // 12)
+        spread = scan_ids[::step][:12]
+    return sorted(set(known) | set(spread) | set(SAMPLE_INVALID))
+
+
+def render_dev(scan_ids, sample_ids, build, locale="zhTW"):
+    return "\n".join([
+        "-- CatalogScanData (GF-009-13): the dev-only scan list for /gftkdev catalogscan.",
+        "-- Written by scripts/build_item_catalog.py; do not edit by hand. Not in the guild release.",
+        "-- Forever client build %s, locale %s. scan: %d IDs with no name in the export;" % (build, locale, len(scan_ids)),
+        "-- sample: %d IDs (catalog items, part of the scan list, IDs that do not exist). Base-36 gaps." % len(sample_ids),
+        "local _, D = ...",
+        "D.scanData = {",
+        '  build = "%s",' % build,
+        '  locale = "%s",' % locale,
+        '  scan = "%s",' % pack_ids(scan_ids),
+        '  sample = "%s",' % pack_ids(sample_ids),
+        "}", ""])
 
 
 def render_missing(missing, build):
@@ -344,17 +415,23 @@ def selftest():
     assert missing == [(7, 15, "name")], missing
     assert scan_ids == [7, 11, 12, 13], scan_ids  # 7: OLD name; 11-13: no ItemSparse row
     assert stats["no_sparse"] == 3 and stats["no_trade"] == 3 and stats["filtered"] == 1, stats
-    text = render_data(entries, scan_ids, "test", "selftest")
+    text = render_data(entries, "test", "selftest")
     assert '設計圖："秘銀"短褲]]' in text and "[=[" in text and "OLDThing" not in text
-    assert 'scan = "7,4,1,1"' in text, text[-80:]
+    assert "scan" not in text.split("ns.SupplyCatalogData")[1] and "Blizzard" in text
+    dev = render_dev(scan_ids, pick_sample(entries, scan_ids), "test")
+    assert 'scan = "7,4,1,1"' in dev, dev
+    assert "sample = " in dev
     # The scan fills 11 (material, an escaped name) and 12 (recipe); 13 is white gear (left out).
-    sv = ('GreenFangToolkitDB = {\n["devCatalogScan"] = {\n["locale"] = "zhTW",\n["got"] = {\n'
+    sv = ('GreenFangToolkitDevDB = {\n["catalogScan"] = {\n["locale"] = "zhTW",\n["build"] = "test",\n["list"] = "test",\n["got"] = {\n'
           '[11] = {\n"\\233\\138\\133\\231\\159\\179", -- [1]\n7, -- [2]\n5, -- [3]\n0, -- [4]\n1, -- [5]\n10, -- [6]\n555, -- [7]\n},\n'
           '[12] = {"圖樣：測試", 9, 4, 0, 2, 30, 0},\n[13] = {"白甲", 4, 1, 2, 1, 20, 1},\n'
           '[99] = {"沒有這列", 7, 5, 0, 1, 1, 1},\n},\n},\n["other"] = { a = 1, "x" },\n}\n')
-    scanned, meta = read_scan(sv)
+    scanned, runs = read_scan(sv)
     assert scanned[11] == ("銅石", 7, 5, 0, 1, 10, 555), scanned[11]
-    assert meta["locale"] == "zhTW"
+    assert check_runs(runs, "test") is None, runs
+    assert check_runs(runs, "1.60.1.71139") is not None
+    assert check_runs([dict(runs[0], locale="enUS")], "test") is not None
+    assert check_runs([], "test") is not None
     entries, missing, scan_ids, stats = select(item, sparse, scanned)
     ids = sorted(e[0] for e in entries)
     assert ids == [1, 2, 3, 9, 10, 11, 12], ids
@@ -373,6 +450,7 @@ def main(argv=None):
     ap.add_argument("--source", default="wago.tools DB2 CSV export (Item, ItemSparse zhTW)")
     ap.add_argument("--out", default=DEFAULT_OUT)
     ap.add_argument("--missing", default=DEFAULT_MISSING)
+    ap.add_argument("--dev-out", default=DEFAULT_DEV_OUT)
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args(argv)
     if a.selftest:
@@ -386,13 +464,17 @@ def main(argv=None):
     scanned, source = {}, a.source
     if a.scan:
         with open(a.scan, encoding="utf-8-sig", errors="replace") as f:
-            scanned, meta = read_scan(f.read())
-        if meta.get("locale") not in (None, "zhTW"):
-            sys.exit("scan locale is %s, not zhTW" % meta.get("locale"))
-        source += "; names for %d IDs from the owner's client (/gftk catalogscan)" % len(scanned)
+            scanned, runs = read_scan(f.read())
+        problem = check_runs(runs, a.build)
+        if problem:
+            sys.exit("scan not used: " + problem)
+        source += "; names for %d IDs from the owner's client (/gftkdev catalogscan)" % len(scanned)
     entries, missing, scan_ids, stats = select(item_text, sparse_text, scanned)
     with open(a.out, "w", encoding="utf-8", newline="\n") as f:
-        f.write(render_data(entries, scan_ids, a.build, source))
+        f.write(render_data(entries, a.build, source))
+    os.makedirs(os.path.dirname(a.dev_out), exist_ok=True)
+    with open(a.dev_out, "w", encoding="utf-8", newline="\n") as f:
+        f.write(render_dev(scan_ids, pick_sample(entries, scan_ids), a.build))
     os.makedirs(os.path.dirname(a.missing), exist_ok=True)
     with open(a.missing, "w", encoding="utf-8", newline="\n") as f:
         f.write(render_missing(missing, a.build))

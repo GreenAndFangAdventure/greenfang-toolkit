@@ -48,6 +48,12 @@ L.DIRECTION_TEXT = { need = "徵求", offer = "供應" }
 L.STATUS_TEXT = { active = "刊登中", closed = "已結束", cancelled = "已取消", expired = "已過期" }
 
 local stats = { rejected = 0, created = 0, updated = 0, ended = 0, deleted = 0 }
+-- GF-009-13: item data requests this session (RequestLoadItemDataByID, or a
+-- GetItemInfo the client did not have), and those made while 全部 searched by
+-- name (should stay 0; shown in 同步與診斷 for the Forever check).
+local requests = { all = 0, nameSearch = 0 }
+local inNameSearch = false
+function L.requestStats() return requests end
 L.stats = stats
 
 ---------------------------------------------------------------------------
@@ -260,11 +266,17 @@ function L.itemInfo(itemID, noRequest)
     local okCall, name, link, _, _, _, typeName, subTypeName, _, _, icon, _, classID, subclassID, bindType = pcall(getInfo, itemID)
     if not okCall then return nil, "unknown" end
     if type(name) ~= "string" or name == "" then
+        -- A GetItemInfo miss asks the server too: counted either way.
+        requests.all = requests.all + 1
+        if inNameSearch then requests.nameSearch = requests.nameSearch + 1 end
         if not noRequest and type(C_Item) == "table" and type(C_Item.RequestLoadItemDataByID) == "function" then
             ns.call(C_Item.RequestLoadItemDataByID, itemID)
         end
         return nil, "loading"
     end
+    -- GF-009-13: the game's name wins over the catalog's (noted, never asked).
+    local Cat = ns.SupplyCatalog
+    if Cat and Cat.loaded() then Cat.noteName(itemID, name) end
     return { itemID = itemID, name = name, link = type(link) == "string" and link or nil,
         icon = icon or Supply.itemIcon(itemID), classID = tonumber(classID), subclassID = tonumber(subclassID),
         typeName = type(typeName) == "string" and typeName ~= "" and typeName or nil,
@@ -284,9 +296,18 @@ end
 
 -- GF-UI-I: the form's preview of an ItemID: "ready" (name, type), "loading"
 -- (asked the server; GET_ITEM_INFO_RECEIVED redraws), "missing" (the client
--- says no such item, or no answer within LOAD_WAIT seconds) or "blocked"
--- (cannot be traded).
+-- says no such item) or "blocked" (cannot be traded).
+-- GF-009-13: "timeout" (no answer within LOAD_WAIT seconds) is not "missing":
+-- missing is only DoesItemExistByID = false or a GET_ITEM_INFO_RECEIVED with
+-- success = false. The one path for links, IDs, drops and finder picks
+-- (SupplyUI setFormItem).
 L.LOAD_WAIT = 5
+L.failed = {} -- [itemID] = true: the server said no such item
+function L.itemAnswer(itemID, success)
+    itemID = tonumber(itemID)
+    if not itemID then return end
+    if success == false then L.failed[itemID] = true else L.failed[itemID] = nil end
+end
 function L.itemExists(itemID)
     if type(C_Item) == "table" and type(C_Item.DoesItemExistByID) == "function" then
         local okCall, yes = pcall(C_Item.DoesItemExistByID, itemID)
@@ -300,7 +321,9 @@ function L.preview(itemID, waited)
         return { itemID = itemID, state = L.tradeable(info) and "ready" or "blocked", info = info, name = info.name,
             typeText = L.typeText(info) }
     end
-    if why == "loading" and L.itemExists(itemID) and not waited then return { itemID = itemID, state = "loading" } end
+    if why == "loading" and L.itemExists(itemID) and not L.failed[itemID] then
+        return { itemID = itemID, state = waited and "timeout" or "loading" }
+    end
     return { itemID = itemID, state = "missing" }
 end
 
@@ -309,13 +332,35 @@ end
 L.NO_TRADE_BIND = { [1] = true, [4] = true }
 function L.tradeable(info) return info ~= nil and not L.NO_TRADE_BIND[info.bindType or 0] end
 
+-- GF-009-13: the item in this character's bags: "bound" when every stack of
+-- it is bound, "free" when one is not, nil when there is none.
+function L.bagBound(itemID)
+    local C = type(C_Container) == "table" and C_Container or nil
+    if not C or type(C.GetContainerNumSlots) ~= "function" or type(C.GetContainerItemInfo) ~= "function" then return nil end
+    local bound = false
+    for bag = 0, Supply.BAGS do
+        local n = tonumber((ns.call(C.GetContainerNumSlots, bag))) or 0
+        for slot = 1, n do
+            local info = ns.call(C.GetContainerItemInfo, bag, slot)
+            if type(info) == "table" and tonumber(info.itemID) == itemID then
+                if info.isBound then bound = true else return "free" end
+            end
+        end
+    end
+    return bound and "bound" or nil
+end
+L.BOUND_OFFER = "背包裡的這個物品已綁定，不能供應"
+
 -- nil when it may be listed, else why not (text for the form). The same for
--- 徵求 and 供應.
-function L.itemProblem(itemID, fromBag)
+-- 徵求 and 供應, except that 供應 also looks at the stacks in the bags
+-- (GF-009-13: all of them bound: refused; none in the bags: allowed, it may
+-- still be made or fetched).
+function L.itemProblem(itemID, fromBag, direction)
     local info, why = L.itemInfo(itemID)
     if not info then return why == "loading" and "物品資料載入中，請稍後再試" or "無法辨識這個物品" end
     if not L.tradeable(info) then return "這個物品拾取綁定，不能交易" end
     if fromBag and fromBag.isBound then return "這個物品已綁定，不能交易" end
+    if direction == "offer" and L.bagBound(itemID) == "bound" then return L.BOUND_OFFER end
     return nil
 end
 
@@ -483,6 +528,14 @@ local function fold(s) return str(s):lower() end
 -- an item link; opts.class / opts.subclass the filters (nil = 全部).
 function L.catalog(opts)
     opts = opts or {}
+    local text0 = str(opts.text):gsub("^%s+", ""):gsub("%s+$", "")
+    inNameSearch = opts.source == "all" and not (L.itemFromText(text0) or text0:match("^%d+$"))
+    local okList, out = pcall(L.catalogList, opts)
+    inNameSearch = false
+    if not okList then error(out, 0) end
+    return out
+end
+function L.catalogList(opts)
     local bag = {}
     for _, b in ipairs(L.bagItems() or {}) do bag[b.itemID] = b end
     local set, order
@@ -511,6 +564,9 @@ function L.catalog(opts)
     end
     local catRows = {}
     if catOn then
+        -- GF-009-13: the game's names of what is in the bags (already in the
+        -- client) are searched too.
+        for id in pairs(bag) do L.cachedInfo(id) end
         local hits
         if exact then
             hits = {}
@@ -538,7 +594,16 @@ function L.catalog(opts)
     for _, id in ipairs(order) do
         -- A catalog item the search did not pick is not looked up again.
         local skip = done[id] or (catOn and Cat.index(id) ~= nil)
-        local info = not skip and L.itemInfo(id, not set[id]) or nil
+        local info
+        if not skip then
+            if opts.source == "all" and not bag[id] and id ~= exact then
+                -- GF-009-13: 全部 never asks the server about an item it does
+                -- not have (only one typed or linked ItemID is asked for).
+                info = L.cachedInfo(id)
+            else
+                info = L.itemInfo(id, not set[id])
+            end
+        end
         if info and L.tradeable(info) then
             local okText = (exact and id == exact) or (not exact and (not needle or fold(info.name):find(needle, 1, true) ~= nil))
             if okText and classOK(info.classID, info.subclassID) then
@@ -605,7 +670,7 @@ function L.check(f, editing)
     local itemID = tonumber(f.itemID)
     if not itemID then return nil, "請放入物品（物品連結或從背包選）" end
     if not editing then
-        local problem = L.itemProblem(itemID, f.bagInfo)
+        local problem = L.itemProblem(itemID, f.bagInfo, f.direction)
         if problem then return nil, problem end
     end
     local qty = tonumber(f.quantity)
@@ -767,6 +832,7 @@ end
 
 function L.resetSession()
     for k in pairs(stats) do stats[k] = 0 end
+    requests.all, requests.nameSearch = 0, 0
     sweeping = false
 end
 

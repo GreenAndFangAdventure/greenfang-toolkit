@@ -4691,6 +4691,9 @@ assert(loadfile(ROOT .. "/tests/addon/uij_tests.lua"))()({ test = test, eq = eq,
 -- GF-014-02: 職工單配對 notices and their switches (tests/addon/workermatch_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/workermatch_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-009-13: the dev-only GreenFangToolkit_Dev AddOn, /gftkdev catalogscan (tests/addon/catalog_dev_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/catalog_dev_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------
 

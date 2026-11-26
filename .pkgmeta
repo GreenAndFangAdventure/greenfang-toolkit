@@ -18,6 +18,7 @@ ignore:
   - .gitattributes
   - .gitignore
   - addon/GFGuildRoster
+  - addon/GreenFangToolkit_Dev
   - api
   - assets
   - bot

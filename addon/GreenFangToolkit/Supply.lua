@@ -412,13 +412,15 @@ local events = CreateFrame("Frame")
 Supply.EVENTS = { "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "BAG_UPDATE_DELAYED", "QUEST_LOG_UPDATE", "QUEST_ACCEPTED",
     "QUEST_TURNED_IN", "QUEST_REMOVED", "PLAYER_REGEN_ENABLED", "GET_ITEM_INFO_RECEIVED" }
 for _, e in ipairs(Supply.EVENTS) do pcall(events.RegisterEvent, events, e) end
-events:SetScript("OnEvent", function(_, event)
+events:SetScript("OnEvent", function(_, event, a, b)
     if event == "PLAYER_LOGIN" or event == "PLAYER_ENTERING_WORLD" then
         -- After the share login (Init.lua) so the guild and roster are known.
         if not Supply.started then
             ns.after(ns.Share.LOGIN_DELAY, function() Supply.start() end)
         end
     elseif event == "GET_ITEM_INFO_RECEIVED" then
+        -- GF-009-13: (itemID, success): success = false is "no such item".
+        if ns.SupplyListings and ns.SupplyListings.itemAnswer then ns.SupplyListings.itemAnswer(a, b) end
         if Supply.onItemInfo then Supply.onItemInfo() end
     elseif event == "PLAYER_REGEN_ENABLED" then
         -- Next frame: Init.lua clears the toolkit's combat flag after us.
