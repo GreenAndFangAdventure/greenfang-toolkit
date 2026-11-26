@@ -108,6 +108,7 @@ local function handleSlash(msg)
         Prices.fake(id, copper)
         ns.Diag.open()
     elseif cmd == "probe" and ns.Probe then ns.Probe.command(rest) -- GF-PROBE
+    elseif cmd == "catalogscan" and ns.CatalogScan then ns.CatalogScan.command(rest) -- GF-009-12, owner only (not in help)
     elseif ns.Framework.get(cmd) then
         ns.Framework.open(cmd)
     else

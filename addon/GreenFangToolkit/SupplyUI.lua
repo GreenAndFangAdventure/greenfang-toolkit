@@ -16,6 +16,11 @@ UI.ID = "supply"
 UI.ROW_H, UI.ICON = 44, 36
 UI.ROWS = 11
 UI.LIST_X, UI.LIST_W = 22, 540
+-- GF-UI-I (owner 0.16.2: 中間一條直線、右半邊空著): with nothing to show on
+-- the right (no row chosen, or a row without matches) the list takes the
+-- whole width and the divider goes away; the extra width goes to 物品.
+UI.LIST_W_WIDE = 1056
+function UI.listWidth() return UI.state and UI.state.wide and UI.LIST_W_WIDE or UI.LIST_W end
 UI.DETAIL_X, UI.DETAIL_W = 586, 492
 UI.DETAIL_ROWS = 9
 -- GF-UI-F: a column header over the list (物品 / 數量 / 可能提供 or 需要 / 時效),
@@ -28,6 +33,7 @@ UI.DETAIL_ROWS = 9
 UI.BAR_Y, UI.TOOL_Y = -40, -84
 UI.CHECK_X = { auto = 586, manual = 786 }
 UI.POST_W = 96
+UI.POST_TEXT = "＋刊登"
 UI.HEAD_Y, UI.HEAD_H = -128, 28
 UI.TOP = UI.HEAD_Y - UI.HEAD_H - 4
 UI.EXPAND = 16
@@ -189,6 +195,28 @@ local function itemTooltip(owner, itemID, extra)
     GameTooltip:Show()
 end
 
+-- Move a row's (or the header's) cells for list width w: 物品 grows, the
+-- other columns keep their width and move right.
+local COL_KEYS = { "name", "qty", "match", "fresh" }
+function UI.placeCells(owner, cells, w)
+    local d = w - UI.LIST_W
+    local C = UI.COL
+    for i, key in ipairs(COL_KEYS) do
+        local fs = cells[i]
+        if fs then
+            local x = key == "name" and (fs.gfHeadX or C.name.x) or (C[key].x + d)
+            local cw = key == "name" and ((fs.gfHeadW or C.name.w) + d) or C[key].w
+            fs:ClearAllPoints()
+            fs:SetPoint("LEFT", owner, "LEFT", x, 0)
+            fs:SetWidth(cw)
+        end
+    end
+end
+function UI.placeRow(r, w)
+    r:SetWidth(w)
+    UI.placeCells(r, { r.name, r.qty, r.match, r.fresh }, w)
+end
+
 local function newRow(i)
     local r = CreateFrame("Button", nil, panel)
     r:SetSize(UI.LIST_W, UI.ROW_H - 4)
@@ -217,6 +245,7 @@ local function newRow(i)
     r.qty = cell("qty", ns.FIELD_FONT, "RIGHT")
     r.match = cell("match", ns.LABEL_FONT)
     r.fresh = cell("fresh", ns.LABEL_FONT)
+    UI.placeRow(r, UI.listWidth())
     r:SetScript("OnClick", function(self) UI.select(self.index) end)
     r:SetScript("OnEnter", function(self)
         if self.itemID then itemTooltip(self, self.itemID, self.tipLines) end
@@ -409,9 +438,34 @@ local function listingButtons(l)
     detail.edit.listing, detail.renew.listing, detail.finish.listing, detail.delete.listing = l, l, l, l
 end
 
+-- A row has something for the right side: my listing (its buttons) or matches.
+function UI.hasDetail(data)
+    return data ~= nil and (data.listing ~= nil or (data.item ~= nil and #data.item.others > 0))
+end
+
+-- Narrow (list + detail) or wide (list only); also moves 刊登 and the divider.
+function UI.applyLayout()
+    local data = state.selected and state.items[state.selected]
+    state.wide = not UI.hasDetail(data)
+    local w = UI.listWidth()
+    for _, r in pairs(rows) do UI.placeRow(r, w) end
+    if header then
+        header:SetWidth(w)
+        UI.placeCells(header, header.cells, w)
+    end
+    if statePanel then statePanel:SetWidth(w) end
+    if postButton then
+        postButton:ClearAllPoints()
+        postButton:SetPoint("TOPLEFT", panel, "TOPLEFT", UI.LIST_X + w - UI.POST_W, UI.TOOL_Y)
+    end
+    if UI.divider then if state.wide then UI.divider:Hide() else UI.divider:Show() end end
+    return state.wide
+end
+
 function UI.drawDetail()
     if not panel then return end
     local data = state.selected and state.items[state.selected]
+    if not UI.hasDetail(data) then data = nil end
     if not data then
         detail.icon:Hide()
         detail.name:SetText("")
@@ -481,6 +535,7 @@ end
 
 function UI.select(index)
     state.selected = index
+    UI.applyLayout()
     UI.drawList()
     UI.drawDetail()
 end
@@ -514,6 +569,7 @@ function UI.refresh()
     end
     if not state.selected and #state.items > 0 then state.selected = 1 end
     state.offset = math.max(0, math.min(state.offset, #state.items - UI.ROWS))
+    UI.applyLayout()
     UI.drawList()
     UI.drawDetail()
 end
@@ -564,7 +620,7 @@ local function build(p)
     end)(), UI.LIST_X, UI.BAR_Y, function(key) UI.setTab(key) end)
     tabs.select(state.tab)
     UI.tabs = tabs
-    postButton = Th.button(p, "刊登", UI.POST_W, ns.BUTTON_H)
+    postButton = Th.button(p, UI.POST_TEXT, UI.POST_W, ns.BUTTON_H)
     postButton:SetPoint("TOPLEFT", p, "TOPLEFT", UI.LIST_X + UI.LIST_W - UI.POST_W, UI.TOOL_Y)
     UI.postButton = postButton
     postButton:SetScript("OnClick", function() UI.openForm() end)
@@ -592,6 +648,7 @@ local function build(p)
         if fs.SetWordWrap then fs:SetWordWrap(false) end
         header.cells[i] = fs
     end
+    header.cells[1].gfHeadX, header.cells[1].gfHeadW = cols[1].x, cols[1].w
     UI.header = header
     -- Empty / loading / stale / error: the shared state panel in the list area.
     statePanel = W.statePanel(p, UI.LIST_W, 120)
@@ -599,7 +656,13 @@ local function build(p)
     UI.statePanel = statePanel
     -- A screenshot preview never outlives the page.
     if p.HookScript then p:HookScript("OnHide", function() state.preview = nil end) end
-    Th.vline(p, UI.DETAIL_X - 16, UI.HEAD_Y, UI.TOP - UI.ROWS * UI.ROW_H)
+    -- GF-UI-I: Th.vline's second y counts from the page's bottom; the old call
+    -- gave the list's bottom from the top, so the line ran out of the window.
+    -- Anchor the top and give the height instead.
+    UI.divider = Th.vline(p, UI.DETAIL_X - 16, -UI.HEAD_Y, 0)
+    UI.divider:ClearAllPoints()
+    UI.divider:SetPoint("TOPLEFT", p, "TOPLEFT", UI.DETAIL_X - 16, UI.HEAD_Y)
+    UI.divider:SetHeight(UI.HEAD_Y - (UI.TOP - UI.ROWS * UI.ROW_H))
     detail.icon = p:CreateTexture(nil, "ARTWORK")
     detail.icon:SetSize(40, 40)
     detail.icon:SetPoint("TOPLEFT", p, "TOPLEFT", UI.DETAIL_X, UI.HEAD_Y)
@@ -721,19 +784,34 @@ function UI.askDiscard()
     return W.confirm(UI.DISCARD_TEXT, function() UI.closeForm(true) end)
 end
 
-local function setFormItem(itemID, bagInfo)
+UI.PREVIEW_TEXT = { loading = "物品資料載入中", missing = "找不到這個物品", bad = "請貼物品連結或輸入物品編號" }
+local loadToken = 0
+local function setFormItem(itemID, bagInfo, waited)
     formState.itemID, formState.bagInfo = itemID, bagInfo
     if not form then return end
     if itemID then
+        -- GF-UI-I: a preview that knows the item may still be loading.
+        local pv = L.preview(itemID, waited)
+        formState.preview = pv.state
         setItemIcon(form.itemIcon, itemID)
-        form.itemName:SetText((Supply.itemLabel(itemID)))
+        form.itemName:SetText(pv.name or (pv.state == "missing" and UI.PREVIEW_TEXT.missing) or (Supply.itemLabel(itemID)))
         -- GF-UI-H: the type comes from the item (classID / subclassID), never a pick.
-        local info = L.itemInfo(itemID)
-        formState.category = L.categoryFor(info, formState.editing and formState.editing.category or "other")
-        form.typeText:SetText(info and L.typeText(info) or "")
+        formState.category = L.categoryFor(pv.info, formState.editing and formState.editing.category or "other")
+        form.typeText:SetText(pv.typeText or "")
         local problem = not formState.editing and L.itemProblem(itemID, bagInfo) or nil
+        if pv.state == "missing" and not formState.editing then problem = UI.PREVIEW_TEXT.missing end
         formMessage(problem)
+        if pv.state == "loading" then
+            loadToken = loadToken + 1
+            local token = loadToken
+            ns.after(L.LOAD_WAIT, function()
+                if token == loadToken and formState.itemID == itemID and formState.preview == "loading" then
+                    setFormItem(itemID, bagInfo, true)
+                end
+            end)
+        end
     else
+        formState.preview = nil
         form.itemIcon:Hide()
         form.typeText:SetText("")
         form.itemName:SetText("把物品拖到這裡、按住 Shift 點物品，或從背包選")
@@ -741,10 +819,19 @@ local function setFormItem(itemID, bagInfo)
 end
 UI.setFormItem = setFormItem
 
+-- Item data arrived: a form still waiting for its item shows it now.
+function UI.formItemInfo()
+    if form and form:IsShown() and formState.itemID and formState.preview == "loading" then
+        setFormItem(formState.itemID, formState.bagInfo)
+    end
+end
+
+-- GF-UI-I: a link, item:123 or an ItemID typed as digits.
 function UI.formFromText(text)
-    local id = L.itemFromText(text)
-    if id then setFormItem(id) end
-    return id
+    local id, kind = L.parseItemInput(text)
+    if id then setFormItem(id)
+    elseif kind == "bad" and form then formMessage(UI.PREVIEW_TEXT.bad) end
+    return id, kind
 end
 
 -- Shift-click on an item while the item box has focus (the game puts links
@@ -756,6 +843,8 @@ local function hookLinks()
     local function onLink(link)
         if form and form:IsShown() and form.itemBox and form.itemBox.HasFocus and form.itemBox:HasFocus() then
             UI.formFromText(link)
+        elseif UI.pickLink then
+            UI.pickLink(link)
         end
     end
     if type(ChatEdit_InsertLink) == "function" then pcall(hooksecurefunc, "ChatEdit_InsertLink", onLink) end
@@ -807,7 +896,7 @@ local function buildForm()
     f.itemBox = Th.editBox(f, 230, 30)
     f.itemBox:SetPoint("TOPLEFT", f, "TOPLEFT", 104, y)
     f.itemBox:SetScript("OnTextChanged", function(self) UI.formFromText(self:GetText()) end)
-    f.itemBox.tip = "貼上物品連結，或游標在這裡時按住 Shift 點物品"
+    f.itemBox.tip = "貼上物品連結或輸入物品編號"
     withTip(f.itemBox)
     f.pick = Th.button(f, "從背包選", 110, ns.BUTTON_H)
     f.pick:SetPoint("LEFT", f.itemBox, "RIGHT", 10, 0)
@@ -929,6 +1018,9 @@ UI.PICK_ROWS = 10
 UI.PICK_W = 500
 UI.PICK_SOURCES = { { key = "bag", text = "背包", w = 80 }, { key = "all", text = "全部", w = 80 } }
 UI.PICK_EMPTY = { bag = "背包裡沒有可交易的物品", all = "找不到可交易的物品" }
+-- GF-009-12: 全部 with a damaged catalog file (links, IDs and drops still work).
+UI.PICK_NO_CATALOG = "沒有物品目錄"
+UI.PICK_POS = "%d-%d／共 %d"
 UI.PICK_COL = { icon = 2, name = 42, nameW = 230, type = 280, typeW = 140 }
 UI.PICK_FILTER = { searchLabel = 12, search = 56, searchW = 150, class = 216, sub = 356, filterW = 130 }
 local pickState = { offset = 0, items = {}, base = {}, source = "bag", text = "", class = nil, subclass = nil }
@@ -937,8 +1029,9 @@ UI.pickState = pickState
 local function pickFiltered()
     local out = {}
     for _, e in ipairs(pickState.base) do
-        if (pickState.class == nil or e.info.classID == pickState.class)
-            and (pickState.subclass == nil or e.info.subclassID == pickState.subclass) then
+        local c, s = L.rowKind(e)
+        if (pickState.class == nil or c == pickState.class)
+            and (pickState.subclass == nil or s == pickState.subclass) then
             out[#out + 1] = e
         end
     end
@@ -953,8 +1046,12 @@ local function drawPicker()
         local b = picker.rows[i]
         local it = pickState.items[pickState.offset + i]
         if it then
-            setItemIcon(b.icon, it.itemID)
-            b.name:SetText((Supply.itemLabel(it.itemID)))
+            -- GF-009-12: catalog rows show the catalog's name and icon until
+            -- the client knows the item (no server request per row).
+            if not (it.info.icon and ns.Icons.set(b.icon, it.info.icon)) then setItemIcon(b.icon, it.itemID) end
+            if b.icon.SetTexCoord then b.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93) end
+            b.icon:Show()
+            b.name:SetText(it.info.name or (Supply.itemLabel(it.itemID)))
             b.kind:SetText(L.typeText(it.info))
             b.count:SetText(it.count and ("x" .. it.count) or "")
             b.item = it
@@ -964,11 +1061,23 @@ local function drawPicker()
             b:Hide()
         end
     end
-    picker.empty:SetText(#pickState.items == 0 and (UI.PICK_EMPTY[pickState.source] or "") or "")
+    local empty = UI.PICK_EMPTY[pickState.source] or ""
+    local Cat = ns.SupplyCatalog
+    local catStatus = Cat and Cat.status()
+    if pickState.source == "all" and catStatus == "bad" then empty = UI.PICK_NO_CATALOG end
+    picker.empty:SetText(#pickState.items == 0 and empty or "")
+    picker.pos:SetText(UI.pickPosText())
     picker.sources.select(pickState.source)
     picker.class.value, picker.sub.value = pickState.class, pickState.subclass
     picker.class.refreshText(); picker.sub.refreshText()
     W.setEnabled(picker.sub, pickState.class ~= nil)
+end
+
+-- 「1-10／共 5414」: which rows are shown (the list is never cut short).
+function UI.pickPosText()
+    local n = #pickState.items
+    if n == 0 then return "" end
+    return string.format(UI.PICK_POS, pickState.offset + 1, math.min(n, pickState.offset + UI.PICK_ROWS), n)
 end
 
 -- Read the list again (source or search changed); the class filter stays
@@ -1001,6 +1110,19 @@ function UI.pickSubclass(subclassID)
     drawPicker()
     return pickState.items
 end
+UI.PICK_ID_LINE = "物品編號 %d"
+-- GF-009-12: the item on the cursor (bags, or any game window that can put an
+-- item on the cursor) into the form, the same path as 拖到物品欄.
+function UI.pickDrop()
+    if type(GetCursorInfo) ~= "function" then return false end
+    local kind, itemID = GetCursorInfo()
+    if kind ~= "item" or type(itemID) ~= "number" then return false end
+    if type(ClearCursor) == "function" then ClearCursor() end
+    setFormItem(itemID)
+    if picker then picker:Hide() end
+    return true
+end
+
 -- Row i of the visible list into the form.
 function UI.pickChoose(i)
     local it = pickState.items[pickState.offset + i]
@@ -1013,7 +1135,7 @@ end
 local searchToken = 0
 local function buildPicker()
     local f = CreateFrame("Frame", UI.PICKER_NAME, UIParent)
-    f:SetSize(UI.PICK_W, UI.PICK_ROWS * 40 + 136)
+    f:SetSize(UI.PICK_W, UI.PICK_ROWS * 40 + 160)
     f:SetFrameStrata("TOOLTIP")
     -- Under the filters' drop-down menus (those sit at level 100).
     if f.SetFrameLevel then f:SetFrameLevel(50) end
@@ -1049,6 +1171,10 @@ local function buildPicker()
     end, function(value) UI.pickSubclass(value) end, "全部子類")
     f.empty = label(f, "", ns.LABEL_FONT)
     f.empty:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -126)
+    f.pos = label(f, "", ns.DISABLED_FONT)
+    f.pos:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 12)
+    -- GF-009-12: an item dropped on the finder is chosen like a row.
+    f:SetScript("OnReceiveDrag", function() UI.pickDrop() end)
     f.rows = {}
     local C = UI.PICK_COL
     for i = 1, UI.PICK_ROWS do
@@ -1069,7 +1195,10 @@ local function buildPicker()
         b.count = label(b, "", ns.LABEL_FONT)
         b.count:SetPoint("RIGHT", b, "RIGHT", -6, 0)
         b:SetScript("OnClick", function() UI.pickChoose(i) end)
-        b:SetScript("OnEnter", function(self) if self.item then itemTooltip(self, self.item.itemID) end end)
+        b:SetScript("OnEnter", function(self)
+            if self.item then itemTooltip(self, self.item.itemID, { string.format(UI.PICK_ID_LINE, self.item.itemID) }) end
+        end)
+        b:SetScript("OnReceiveDrag", function() UI.pickDrop() end)
         b:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
         if b.EnableMouseWheel then b:EnableMouseWheel(true) end
         b:SetScript("OnMouseWheel", function(_, delta)
@@ -1099,6 +1228,15 @@ function UI.openPicker(source)
     return picker
 end
 function UI.picker() return picker end
+-- GF-009-12: Shift-click on an item while the finder's search box has focus:
+-- the link goes into the search (one row: that item).
+function UI.pickLink(link)
+    if not (picker and picker:IsShown() and picker.search.HasFocus and picker.search:HasFocus()) then return false end
+    if not L.itemFromText(link) then return false end
+    picker.search:SetText(link)
+    UI.pickSearch(link)
+    return true
+end
 -- Item data arrived: the open picker shows the newly known items (once per half second).
 function UI.pickerItemInfo()
     if picker and picker:IsShown() then UI.pickReload() end
@@ -1113,7 +1251,7 @@ end
 ---------------------------------------------------------------------------
 
 Supply.onChanged = UI.refreshSoon
-Supply.onItemInfo = function() UI.refreshSoon(); UI.pickerItemInfoSoon() end
+Supply.onItemInfo = function() UI.refreshSoon(); UI.pickerItemInfoSoon(); UI.formItemInfo() end
 ns.Share.onUpdate(function() Supply.invalidate(); UI.refreshSoon() end)
 
 local regen = CreateFrame("Frame")
