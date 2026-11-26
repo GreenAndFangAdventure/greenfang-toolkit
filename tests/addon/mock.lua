@@ -831,4 +831,47 @@ function wow.serializeSV(name, value)
     return table.concat(out)
 end
 
+---------------------------------------------------------------------------
+-- GF-009-13 fix: the Forever profile, on by default (GF_CLASSIC_GLOBALS=1 in
+-- the environment turns it off). The owner's /gftk probe on Forever
+-- 1.60.1.71139: the classic item and bag globals do not exist, only C_Item
+-- and C_Container. Here they always read nil, also when a test sets one for
+-- its fake client: a fake GetItemInfo / GetItemInfoInstant / GetItemCount is
+-- reachable only as C_Item.<name> (the Forever way), so AddOn code that
+-- calls the global finds nothing, as in the game.
+-- The other missing globals (old quest, trade skill and talent API) stay
+-- settable: a few tests check the old-client fallbacks on purpose, behind a
+-- C_ path. The static check in catalog_tests ("no global-only calls") covers
+-- them for the AddOn code.
+---------------------------------------------------------------------------
+wow.FOREVER_MISSING = { "GetItemInfo", "GetItemInfoInstant", "GetItemCount", "GetContainerItemInfo",
+    "GetContainerNumSlots", "GetNumBankSlots", "BankButtonIDToInvSlotID", "GetQuestLogTitle", "GetQuestTagInfo",
+    "IsQuestFlaggedCompleted", "GetQuestsCompleted", "GetNumTradeSkills", "GetTradeSkillLine", "GetTalentInfo",
+    "GetNumTalentTabs", "GetTalentTabInfo", "GetNumTalents", "IsDualSpecUnlocked", "InspectFrame_Show" }
+wow.FOREVER_STRICT = { "GetItemInfo", "GetItemInfoInstant", "GetItemCount", "GetContainerItemInfo",
+    "GetContainerNumSlots", "GetNumBankSlots", "BankButtonIDToInvSlotID" }
+local strict = {}
+for _, k in ipairs(wow.FOREVER_STRICT) do strict[k] = true end
+local C_ITEM_ALIAS = { GetItemInfo = true, GetItemInfoInstant = true, GetItemCount = true }
+local shadow = {}
+local cItem -- C_Item lives here, so that every assignment passes __newindex
+wow.forever = os.getenv("GF_CLASSIC_GLOBALS") ~= "1"
+wow.foreverShadow = shadow
+if wow.forever then
+    setmetatable(_G, {
+        __index = function(_, k) if k == "C_Item" then return cItem end end,
+        __newindex = function(t, k, v)
+            if strict[k] then shadow[k] = v; return end
+            if k == "C_Item" then
+                if type(v) == "table" and getmetatable(v) == nil then
+                    setmetatable(v, { __index = function(_, key) if C_ITEM_ALIAS[key] then return shadow[key] end end })
+                end
+                cItem = v
+                return
+            end
+            rawset(t, k, v)
+        end,
+    })
+end
+
 return wow

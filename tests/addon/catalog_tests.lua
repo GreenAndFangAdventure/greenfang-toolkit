@@ -685,4 +685,91 @@ return function(T)
             ok(false, "a roster row to hover")
         end
     end))
+
+    test("GF-009-13 fix: the form's preview fills on ITEM_DATA_LOAD_RESULT, and a late answer clears 逾時", done(function()
+        local A, B = 990201, 990202
+        local ns = login({})
+        local UI = openFinder(ns)
+        UI.formFromText(tostring(A))
+        eq(UI.formState.preview, "loading", "asked")
+        G.known[A] = { name = "載入事件的布", classID = 7, sub = 5 }
+        wow.fire("ITEM_DATA_LOAD_RESULT", A, true)
+        eq(UI.formState.preview, "ready", "filled by ITEM_DATA_LOAD_RESULT")
+        eq(UI.form().itemName._text, "載入事件的布", "name")
+        UI.formFromText(tostring(B))
+        wow.advance(ns.SupplyListings.LOAD_WAIT + 1)
+        eq(UI.formState.preview, "timeout", "no answer in time")
+        G.known[B] = { name = "晚到的布", classID = 7, sub = 5 }
+        wow.fire("ITEM_DATA_LOAD_RESULT", B, true)
+        eq(UI.formState.preview, "ready", "the late answer clears 逾時")
+        UI.formFromText("990203")
+        wow.fire("ITEM_DATA_LOAD_RESULT", 990203, false)
+        eq(UI.formState.preview, "missing", "a failed load: no such item")
+    end))
+
+    test("GF-009-13 fix, the owner's probe: only C_Item.GetItemInfo answers (|cnIQ1: links): preview, finder, link parsing and the item link", done(function()
+        local LINEN = 2589
+        local ns = login({ bag = { { LINEN, 3 } } })
+        local known = { [LINEN] = { name = "亞麻布", classID = 7, sub = 5 } }
+        local link = "|cnIQ1:|Hitem:2589::::::::27:1486:::::::::|h[亞麻布]|h|r"
+        C_Item.GetItemInfo = function(id)
+            local it = known[id]
+            if not it then G.asked[id] = true; return nil end
+            return it.name, "|cnIQ1:|Hitem:" .. id .. "::::::::27:1486:::::::::|h[" .. it.name .. "]|h|r", 1, 5, 0, "商品", "布料", 20,
+                "INVTYPE_NON_EQUIP_IGNORE", 132889, 13, it.classID, it.sub, 0, 0, nil, true, ""
+        end
+        C_Item.IsItemDataCachedByID = function(id) return known[id] ~= nil end
+        GetItemInfo = function() end
+        local L = ns.SupplyListings
+        eq(L.itemFromText(link), LINEN, "the |cnIQ1: link parses")
+        eq(L.parseItemInput(link), LINEN, "in the item box too")
+        local UI = openFinder(ns)
+        UI.formFromText(link)
+        eq(UI.formState.preview, "ready", "preview from a |cnIQ1: link")
+        eq(UI.form().itemName._text, "亞麻布", "name")
+        eq(UI.form().typeText._text, "商品｜布料", "type from the client's texts")
+        UI.formFromText(tostring(LINEN))
+        eq(UI.formState.preview, "ready", "preview from the ItemID")
+        eq(ns.Supply.itemLink(LINEN), link, "the item link (contact text) through C_Item.GetItemInfo")
+        UI.openPicker("all")
+        UI.pickSearch("亞麻")
+        ok(has(rowIDs(UI), LINEN), "the finder lists it")
+        UI.openPicker("bag")
+        ok(has(rowIDs(UI), LINEN), "and the bag source")
+    end))
+
+    test("GF-009-13 fix, Forever has no classic item / bag / quest / talent globals: no AddOn code calls them except behind a C_ path", function()
+        local ITEM = { GetItemInfo = true, GetItemInfoInstant = true, GetItemCount = true }
+        -- Where an item global may still be named: the shared helper (C_Item first) and
+        -- the dev scan's copy of it, Delivery's count (C_Item.GetItemCount first).
+        local ITEM_OK = { ["Core.lua"] = true, ["Delivery.lua"] = true, ["Dev/CatalogScan.lua"] = true }
+        local files = {}
+        for line in readAll(TOC_FILE):gmatch("[^\r\n]+") do
+            if line:match("^[%w_]+%.lua$") then files[#files + 1] = { line, ADDON_DIR .. "/" .. line } end
+        end
+        files[#files + 1] = { "Dev/CatalogScan.lua", ROOT_DIR .. "/addon/GreenFangToolkit_Dev/CatalogScan.lua" }
+        local bad = {}
+        for _, f in ipairs(files) do
+            if f[1] ~= "Probe.lua" then -- the probe lists API names as text on purpose
+                local n = 0
+                for raw in (readAll(f[2]) or ""):gmatch("[^\n]*") do
+                    n = n + 1
+                    local line = raw:gsub("%-%-.*$", ""):gsub('"[^"]*"', '""')
+                    for _, name in ipairs(wow.FOREVER_MISSING) do
+                        for pre in line:gmatch("([%w_%.:]?)" .. name .. "%f[^%w_]") do
+                            if pre == "" or not pre:match("[%w_%.:]") then
+                                local guarded = line:find("type(" .. name .. ")", 1, true) or line:find("fn(" .. name .. ")", 1, true)
+                                    or line:find("ns.call(" .. name, 1, true)
+                                local okHere = ITEM[name] and ITEM_OK[f[1]] or (not ITEM[name] and guarded)
+                                if not okHere then bad[#bad + 1] = f[1] .. ":" .. n .. " " .. name end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        eq(table.concat(bad, ", "), "", "global-only calls")
+        ok(wow.forever, "the suite runs with the Forever profile (mock.lua)")
+        eq(GetItemInfo, nil, "no global GetItemInfo here either")
+    end)
 end
