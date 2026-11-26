@@ -38,6 +38,7 @@ return function(T)
             GetItemNameByID = function(id) return G.items[id] and G.items[id].name or nil end,
             RequestLoadItemDataByID = function(id) G.asked[id] = true end,
             DoesItemExistByID = function(id) if G.exists[id] == false then return false end return true end,
+            IsItemDataCachedByID = function(id) return G.items[id] ~= nil end, -- GF-009-13
         }
         ChatFrame_SendTellWithMessage = function() end
     end
@@ -309,12 +310,12 @@ return function(T)
         eq(UI.formState.preview, "ready", "filled in when the data arrived")
         eq(f.itemName._text, "測試晚到的布", "name")
         eq(f.msg._text, "", "message cleared")
-        -- No answer in time: missing.
+        -- No answer in time: GF-009-13 calls it a timeout (it was "missing").
         UI.formFromText(tostring(NONE))
         eq(UI.formState.preview, "loading", "waiting")
         wow.advance(ns.SupplyListings.LOAD_WAIT + 1)
-        eq(UI.formState.preview, "missing", "no answer: missing")
-        eq(f.msg._text, UI.PREVIEW_TEXT.missing, "找不到這個物品")
+        eq(UI.formState.preview, "timeout", "no answer: timeout")
+        eq(f.msg._text, UI.PREVIEW_TEXT.timeout, "物品資料逾時")
         -- The client says it does not exist: missing at once.
         G.exists[NONE + 1] = false
         UI.formFromText(tostring(NONE + 1))
