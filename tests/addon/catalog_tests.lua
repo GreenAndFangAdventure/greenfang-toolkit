@@ -823,4 +823,111 @@ return function(T)
         wow.pressEscape()
         ok(not picker:IsShown() and f:IsShown(), "ESC: the finder first")
     end))
+
+    test("GF-009-14 A scroll bar: 全部 → 配方 → 「皮」 over a page; the thumb reaches first to last, arrows / wheel / range text agree, rows reused", done(function()
+        local ns = login({})
+        local UI, picker = openFinder(ns)
+        UI.pickSearch("皮")
+        UI.pickClass(9)
+        local n = #UI.pickState.items
+        ok(n > UI.PICK_ROWS, "more than one page: " .. n)
+        local bar = picker.bar
+        local max = n - UI.PICK_ROWS
+        ok(bar:IsShown(), "the bar is shown"); eq(bar._max, max, "bar range 0..n-10"); eq(bar._value, 0, "at the top")
+        eq(picker.title._text, "找物品", "the title")
+        local rows = {}
+        for i = 1, UI.PICK_ROWS do rows[i] = picker.rows[i] end
+        -- Drag the thumb to the end, then back to the start.
+        bar:GetScript("OnValueChanged")(bar, max)
+        eq(UI.pickState.offset, max, "thumb at the bottom: the last page")
+        eq(picker.pos._text, string.format(UI.PICK_POS, max + 1, n, n), "range text: the last rows")
+        eq(picker.rows[UI.PICK_ROWS].item, UI.pickState.items[n], "the last item in the last row")
+        for i = 1, UI.PICK_ROWS do ok(picker.rows[i] == rows[i], "row " .. i .. " reused") end
+        ok(not picker.up.disabled and picker.down.disabled, "at the end: up on, down off")
+        bar:GetScript("OnValueChanged")(bar, 0.4)
+        eq(UI.pickState.offset, 0, "thumb at the top: the first row")
+        eq(picker.pos._text, string.format(UI.PICK_POS, 1, UI.PICK_ROWS, n), "range text: the first rows")
+        -- Arrows and the wheel move the thumb too.
+        wow.click(picker.down)
+        eq(UI.pickState.offset, 1, "down arrow: one row"); eq(bar._value, 1, "the thumb follows")
+        picker:GetScript("OnMouseWheel")(picker, -1)
+        eq(UI.pickState.offset, 2, "the wheel on the finder"); eq(bar._value, 2, "the thumb follows the wheel")
+        picker.rows[3]:GetScript("OnMouseWheel")(picker.rows[3], -2)
+        eq(UI.pickState.offset, 4, "the wheel over a row"); eq(bar._value, 4, "thumb")
+        wow.click(picker.up)
+        eq(UI.pickState.offset, 3, "up arrow"); eq(bar._value, 3, "thumb")
+        bar:GetScript("OnValueChanged")(bar, max + 50)
+        eq(UI.pickState.offset, max, "past the end: the last page")
+        -- A new search or another class starts from the first row.
+        UI.pickSearch("皮革")
+        eq(UI.pickState.offset, 0, "new search: first row"); eq(bar._value, 0, "thumb at the top")
+        bar:GetScript("OnValueChanged")(bar, 1)
+        UI.pickClass(7)
+        eq(UI.pickState.offset, 0, "another class: first row")
+        -- One page or less: no bar; the bag source keeps the title.
+        UI.pickSearch(tostring(BRONZE))
+        ok(not bar:IsShown(), "one row: no bar")
+        UI.pickSource("bag")
+        UI.openPicker("bag")
+        eq(picker.title._text, "找物品", "always 找物品")
+    end))
+
+    test("GF-009-14 A drag: the title bar moves it; kept for the draft, clamped at UI scale 0.64 / 1.0; a new draft anchors beside the form; picking keeps the draft", done(function()
+        local srv = { [BRONZE] = { name = "青銅錠", classID = 7, sub = 7 } }
+        local ns = login({ server = srv })
+        G.known[BRONZE] = srv[BRONZE]
+        local sw, sh = setScreen(1920, 1080, 0.64)
+        local UI, picker = openFinder(ns)
+        local f = UI.form()
+        f.qty:SetText("7"); f.note:SetText("拖曳草稿")
+        ok(picker.drag and picker.drag._scripts.OnDragStart, "a drag handle on the title bar")
+        -- Drag it somewhere: the client's position after StopMovingOrSizing.
+        picker.GetLeft = function() return 200 end
+        picker.GetTop = function() return 900 end
+        picker.drag._scripts.OnDragStart(picker.drag)
+        picker.drag._scripts.OnDragStop(picker.drag)
+        eq(UI.formState.pickPos and UI.formState.pickPos[1], 200, "remembered for this draft")
+        picker.GetLeft, picker.GetTop = nil, nil
+        picker:Hide()
+        UI.openPicker("all")
+        local p = picker._points[#picker._points]
+        eq(p[1] .. "," .. p[4] .. "," .. p[5], "TOPLEFT,200,900", "reopened where it was dragged")
+        -- At UI scale 1.0 the same place would be off the bottom / right: clamped.
+        picker:Hide()
+        UI.formState.pickPos = { 5000, 50 }
+        sw, sh = setScreen(1280, 720, 1.0)
+        UI.openPicker("all")
+        local l, b, r, t = rectOf(picker, UI.PICK_W, UI.pickHeight(), sw, sh)
+        inside("dragged off screen at 1.0", l, b, r, t, sw, sh)
+        sw, sh = setScreen(1280, 720, 0.64)
+        picker:Hide(); UI.formState.pickPos = { -300, 5000 }
+        UI.openPicker("all")
+        l, b, r, t = rectOf(picker, UI.PICK_W, UI.pickHeight(), sw, sh)
+        inside("dragged off screen at 0.64", l, b, r, t, sw, sh)
+        -- Pick an item: back in the form, the draft is intact.
+        UI.pickSearch("青銅錠")
+        local idx
+        for k, it in ipairs(UI.pickState.items) do if it.itemID == BRONZE then idx = k end end
+        UI.pickChoose(idx - UI.pickState.offset)
+        eq(UI.formState.itemID, BRONZE, "picked")
+        eq(f.qty:GetText(), "7", "quantity kept"); eq(f.note:GetText(), "拖曳草稿", "note kept")
+        ok(UI.formState.pickPos ~= nil, "the dragged place stays for this draft")
+        -- A new draft: beside the form again.
+        UI.closeForm(true)
+        UI.openForm()
+        eq(UI.formState.pickPos, nil, "a new draft forgets it")
+        UI.openPicker("all")
+        local fl, fb, fr, ft = rectOf(f, UI.FORM_W, UI.FORM_H, sw, sh)
+        l, b, r, t = rectOf(picker, UI.PICK_W, UI.pickHeight(), sw, sh)
+        ok(l >= fr or r <= fl, "beside the form")
+        -- The draft stash (window closed) keeps the place too.
+        picker.GetLeft = function() return 150 end
+        picker.GetTop = function() return 800 end
+        picker.drag._scripts.OnDragStop(picker.drag)
+        picker.GetLeft, picker.GetTop = nil, nil
+        f.note:SetText("改過")
+        _G[ns.Framework.WINDOW_NAME]:Hide()
+        ns.Framework.open("supply"); UI.openForm()
+        eq(UI.formState.pickPos and UI.formState.pickPos[1], 150, "restored with the draft")
+    end))
 end

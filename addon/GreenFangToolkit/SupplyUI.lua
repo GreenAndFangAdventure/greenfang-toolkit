@@ -785,7 +785,8 @@ end
 local function draftOf()
     return { editingID = formState.editing and formState.editing.id or nil, direction = formState.direction,
         itemID = formState.itemID, bagInfo = formState.bagInfo, days = formState.days,
-        qty = form.qty:GetText(), note = form.note:GetText(), itemText = form.itemBox:GetText() }
+        qty = form.qty:GetText(), note = form.note:GetText(), itemText = form.itemBox:GetText(),
+        pickPos = formState.pickPos }
 end
 function UI.closeWithPage()
     local p = UI.picker and UI.picker()
@@ -828,6 +829,13 @@ function UI.layoutPair(sw, sh, fw, fh, pw, ph, formLeft, formTop)
         px = clampX(sw - pw - E, pw)
     end
     return formLeft, formTop, px, clampTop(formTop, ph)
+end
+-- GF-009-14 A: a dragged-to place, kept inside the screen (left, top).
+function UI.clampPos(sw, sh, w, h, left, top)
+    local E = UI.SCREEN_EDGE
+    left = math.max(E, math.min(left, sw - w - E))
+    top = math.max(math.min(top, sh - E), math.min(sh - E, h + E))
+    return left, top
 end
 function UI.screenSize()
     local w = UIParent and UIParent.GetWidth and tonumber((UIParent:GetWidth())) or nil
@@ -1099,6 +1107,7 @@ function UI.openForm(listing, force)
         f.note:SetText(d.note or "")
         if not listing then f.itemBox:SetText(d.itemText or "") end
         setFormItem(d.itemID, d.bagInfo)
+        formState.pickPos = d.pickPos
         if (f.msg:GetText() or "") == "" then formMessage(UI.DRAFT_BACK) end
     end
     return true
@@ -1140,6 +1149,9 @@ local picker
 UI.PICK_ROWS = 10
 UI.PICK_W = 500
 function UI.pickHeight() return UI.PICK_ROWS * 40 + 160 end
+UI.PICK_BAR_W = 22   -- GF-009-14 A: the scroll bar right of the rows
+UI.PICK_TITLE = "找物品" -- one title for both sources
+UI.PICK_DRAG_H = 34
 UI.PICK_SOURCES = { { key = "bag", text = "背包", w = 80 }, { key = "all", text = "全部", w = 80 } }
 UI.PICK_EMPTY = { bag = "背包裡沒有可交易的物品", all = "找不到可交易的物品" }
 -- GF-009-12: 全部 with a damaged catalog file (links, IDs and drops still work).
@@ -1191,10 +1203,53 @@ local function drawPicker()
     if pickState.source == "all" and catStatus == "bad" then empty = UI.PICK_NO_CATALOG end
     picker.empty:SetText(#pickState.items == 0 and empty or "")
     picker.pos:SetText(UI.pickPosText())
+    UI.syncPickBar()
     picker.sources.select(pickState.source)
     picker.class.value, picker.sub.value = pickState.class, pickState.subclass
     picker.class.refreshText(); picker.sub.refreshText()
     W.setEnabled(picker.sub, pickState.class ~= nil)
+end
+
+-- GF-009-14 A: the scroll bar follows the list (the wheel, the arrows, a
+-- new search); dragging its thumb only moves the offset, the 10 rows are
+-- reused.
+local syncing = false
+function UI.pickMaxOffset() return math.max(0, #pickState.items - UI.PICK_ROWS) end
+function UI.syncPickBar()
+    local bar = picker and picker.bar
+    if not bar then return end
+    local max = UI.pickMaxOffset()
+    syncing = true
+    bar:SetMinMaxValues(0, max)
+    bar:SetValue(pickState.offset)
+    syncing = false
+    bar.gfMax, bar.gfValue = max, pickState.offset
+    W.setEnabled(picker.up, pickState.offset > 0)
+    W.setEnabled(picker.down, pickState.offset < max)
+    if max == 0 then bar:Hide() else bar:Show() end
+end
+function UI.pickScrollTo(offset)
+    offset = math.max(0, math.min(UI.pickMaxOffset(), math.floor((tonumber(offset) or 0) + 0.5)))
+    if offset == pickState.offset then UI.syncPickBar(); return offset end
+    pickState.offset = offset
+    drawPicker()
+    return offset
+end
+function UI.pickScrollBy(rows) return UI.pickScrollTo(pickState.offset + rows) end
+function UI.pickBarChanged(value)
+    if syncing then return end
+    UI.pickScrollTo(value)
+end
+
+-- GF-009-14 A: where the player dragged the finder (kept for this draft).
+function UI.pickRemember()
+    if not picker then return nil end
+    local l = picker.GetLeft and tonumber((picker:GetLeft())) or nil
+    local t = picker.GetTop and tonumber((picker:GetTop())) or nil
+    if not (l and t) then return nil end
+    formState.pickPos = { l, t }
+    UI.pickAt = { l, t }
+    return formState.pickPos
 end
 
 -- 「1-10／共 5414」: which rows are shown (the list is never cut short).
@@ -1269,8 +1324,23 @@ local function buildPicker()
     if f.SetToplevel then f:SetToplevel(true) end
     Th.panel(f)
     f:EnableMouse(true)
-    f.title = label(f, "選物品", ns.FIELD_FONT)
+    f.title = label(f, UI.PICK_TITLE, ns.FIELD_FONT)
     f.title:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -10)
+    -- GF-009-14 A: drag by the title bar; the client keeps it on screen
+    -- (SetClampedToScreen); not saved in the game's layout file.
+    if f.SetMovable then f:SetMovable(true) end
+    f.drag = CreateFrame("Frame", nil, f)
+    f.drag:SetPoint("TOPLEFT", f, "TOPLEFT", 0, 0)
+    f.drag:SetPoint("TOPRIGHT", f, "TOPRIGHT", -(Th.CLOSE_SIZE or 28) - 4, 0)
+    f.drag:SetHeight(UI.PICK_DRAG_H)
+    f.drag:EnableMouse(true)
+    if f.drag.RegisterForDrag then f.drag:RegisterForDrag("LeftButton") end
+    f.drag:SetScript("OnDragStart", function() if f.StartMoving then f:StartMoving() end end)
+    f.drag:SetScript("OnDragStop", function()
+        if f.StopMovingOrSizing then f:StopMovingOrSizing() end
+        if f.SetUserPlaced then f:SetUserPlaced(false) end
+        UI.pickRemember()
+    end)
     f.close = Th.closeButton(f)
     f.sources = Th.tabStrip(f, UI.PICK_SOURCES, 12, -40, function(key) UI.pickSource(key) end)
     local P = UI.PICK_FILTER
@@ -1303,11 +1373,44 @@ local function buildPicker()
     f.pos:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 12)
     -- GF-009-12: an item dropped on the finder is chosen like a row.
     f:SetScript("OnReceiveDrag", function() UI.pickDrop() end)
+    -- GF-009-14 A: a scroll bar like the game's (arrows, a thumb to drag),
+    -- right of the rows; the wheel anywhere on the finder scrolls too.
+    local rowsTop, rowsH = -120, UI.PICK_ROWS * 40
+    local function arrow(dir, y)
+        local b = CreateFrame("Button", nil, f)
+        b:SetSize(18, 18)
+        b:SetPoint("TOPRIGHT", f, "TOPRIGHT", -8, y)
+        local base = "Interface\\Buttons\\UI-ScrollBar-Scroll" .. dir .. "Button-"
+        if b.SetNormalTexture then
+            b:SetNormalTexture(base .. "Up"); b:SetPushedTexture(base .. "Down")
+            b:SetDisabledTexture(base .. "Disabled"); b:SetHighlightTexture(base .. "Highlight")
+        end
+        return b
+    end
+    f.up = arrow("Up", rowsTop)
+    f.up:SetScript("OnClick", function() UI.pickScrollBy(-1) end)
+    f.down = arrow("Down", rowsTop - rowsH + 18)
+    f.down:SetScript("OnClick", function() UI.pickScrollBy(1) end)
+    f.bar = CreateFrame("Slider", nil, f)
+    f.bar:SetPoint("TOPRIGHT", f, "TOPRIGHT", -9, rowsTop - 18)
+    f.bar:SetSize(16, rowsH - 36)
+    if f.bar.SetOrientation then f.bar:SetOrientation("VERTICAL") end
+    if f.bar.SetThumbTexture then f.bar:SetThumbTexture("Interface\\Buttons\\UI-ScrollBar-Knob") end
+    if f.bar.SetValueStep then f.bar:SetValueStep(1) end
+    if f.bar.SetObeyStepOnDrag then f.bar:SetObeyStepOnDrag(true) end
+    f.bar.track = f.bar:CreateTexture(nil, "BACKGROUND")
+    f.bar.track:SetAllPoints()
+    f.bar.track:SetColorTexture(0, 0, 0, 0.35)
+    f.bar:SetMinMaxValues(0, 0)
+    f.bar:SetValue(0)
+    f.bar:SetScript("OnValueChanged", function(_, value) UI.pickBarChanged(value) end)
+    if f.EnableMouseWheel then f:EnableMouseWheel(true) end
+    f:SetScript("OnMouseWheel", function(_, delta) UI.pickScrollBy(-delta) end)
     f.rows = {}
     local C = UI.PICK_COL
     for i = 1, UI.PICK_ROWS do
         local b = CreateFrame("Button", nil, f)
-        b:SetSize(UI.PICK_W - 24, 38)
+        b:SetSize(UI.PICK_W - 24 - UI.PICK_BAR_W, 38)
         b:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -120 - (i - 1) * 40)
         b.icon = b:CreateTexture(nil, "ARTWORK")
         b.icon:SetSize(32, 32)
@@ -1329,10 +1432,7 @@ local function buildPicker()
         b:SetScript("OnReceiveDrag", function() UI.pickDrop() end)
         b:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
         if b.EnableMouseWheel then b:EnableMouseWheel(true) end
-        b:SetScript("OnMouseWheel", function(_, delta)
-            pickState.offset = math.max(0, math.min(math.max(0, #pickState.items - UI.PICK_ROWS), pickState.offset - delta))
-            drawPicker()
-        end)
+        b:SetScript("OnMouseWheel", function(_, delta) UI.pickScrollBy(-delta) end)
         f.rows[i] = b
     end
     f:Hide()
@@ -1352,7 +1452,12 @@ function UI.openPicker(source)
     -- screen or a large UI scale (UI.layoutPair).
     local sw, sh = UI.screenSize()
     local ph = UI.pickHeight()
-    if form and form:IsShown() then
+    if form and form:IsShown() and formState.pickPos then
+        -- GF-009-14 A: dragged before in this draft: there (still on screen).
+        local px, pt = UI.clampPos(sw, sh, UI.PICK_W, ph, formState.pickPos[1], formState.pickPos[2])
+        picker:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", px, pt)
+        UI.pickAt = { px, pt }
+    elseif form and form:IsShown() then
         local fl, ft = UI.formRect(sw, sh)
         local nl, nt, px, pt = UI.layoutPair(sw, sh, UI.FORM_W, UI.FORM_H, UI.PICK_W, ph, fl, ft)
         if math.abs(nl - fl) > 0.5 or math.abs(nt - ft) > 0.5 then
@@ -1369,7 +1474,7 @@ function UI.openPicker(source)
     pickState.source = source == "all" and "all" or "bag"
     pickState.text, pickState.class, pickState.subclass, pickState.offset = "", nil, nil, 0
     picker.search:SetText("")
-    picker.title:SetText(pickState.source == "all" and "找物品" or "從背包選")
+    picker.title:SetText(UI.PICK_TITLE) -- GF-009-14 A: always 找物品 (背包 / 全部 are the tabs)
     UI.pickReload()
     picker:Show()
     return picker
