@@ -4691,6 +4691,9 @@ assert(loadfile(ROOT .. "/tests/addon/uij_tests.lua"))()({ test = test, eq = eq,
 -- GF-014-02: 職工單配對 notices and their switches (tests/addon/workermatch_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/workermatch_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-014-03: joinable slots, recheck after combat, chat, windows on the screen, drafts (tests/addon/gf01403_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf01403_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------
 
