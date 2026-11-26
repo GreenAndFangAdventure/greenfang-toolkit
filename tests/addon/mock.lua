@@ -121,6 +121,15 @@ local function newObject(kind, name)
     end
     function methods.GetVerticalScroll(self) return self._vscroll or 0 end
     function methods.IsShown(self) return self._shown end
+    -- GF-011-B: like the client, shown only when every parent is shown too.
+    function methods.IsVisible(self)
+        local f = self
+        while f do
+            if not f._shown then return false end
+            f = f._parent
+        end
+        return true
+    end
     function methods.SetScript(self, what, fn) self._scripts[what] = fn end
     function methods.GetScript(self, what) return self._scripts[what] end
     function methods.HookScript(self, what, fn)

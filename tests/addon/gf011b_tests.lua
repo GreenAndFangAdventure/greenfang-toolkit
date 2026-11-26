@@ -249,4 +249,75 @@ return function(T)
         v.state = "checking"
         eq(ns.OrdersUI.showsCraft(v, me), false, "after delivery: no 製作")
     end)
+
+    ---------------------------------------------------------------------------
+    -- Owner 0.16.5 screenshot: after closing the toolkit, 「急救 / 38 / 75 /
+    -- 配方 3 個」 and a small white square stayed in the middle of the screen:
+    -- the own-profession buttons (secure, on UIParent, with a highlight
+    -- texture) were placed again by a roster refresh while the page was
+    -- "shown" inside the closed window.
+    ---------------------------------------------------------------------------
+
+    local function onUIParent()
+        local out = {}
+        for _, o in ipairs(wow.allObjects()) do
+            if o._parent == UIParent and o._shown and o.IsVisible and o:IsVisible() then out[#out + 1] = o end
+        end
+        return out
+    end
+    local function leftovers(ns, before)
+        local was = {}
+        for _, o in ipairs(before) do was[o] = true end
+        local out = {}
+        for _, o in ipairs(onUIParent()) do
+            if not was[o] and o ~= GameTooltip then out[#out + 1] = tostring(o._name or o._kind) end
+        end
+        return out
+    end
+    local function hoverOwnIcon(ns)
+        ns.Framework.open("roster")
+        wow.state.minimapSize = 400
+        ns.UI.refresh(true)
+        local shown = ns.Professions.shown("roster")
+        ok(#shown > 0, "own profession buttons on the own row")
+        ns.UI.showRowTooltip(rowFor(ns, PEER), nil) -- the member card (GF-UI-I) first
+        local b = shown[1]
+        b:GetScript("OnEnter")(b)                  -- then the profession icon's tooltip
+        ok(GameTooltip:IsShown(), "tooltip up"); eq(GameTooltip:GetOwner(), b, "owned by the icon")
+        return b
+    end
+    local function nothingLeft(ns, before, how)
+        eq(#ns.Professions.shown("roster"), 0, how .. ": no profession button")
+        ok(not GameTooltip:IsShown(), how .. ": no tooltip")
+        ok(not (ns.UI.rosterCard() and ns.UI.rosterCard():IsShown()), how .. ": no member card")
+        -- What used to put them back: a roster update and a refresh while closed.
+        wow.fire("GUILD_ROSTER_UPDATE")
+        wow.advance(5)
+        ns.UI.refresh(true)
+        ns.UI.placeOwnButtons()
+        eq(#ns.Professions.shown("roster"), 0, how .. ": still none after a roster update")
+        eq(table.concat(leftovers(ns, before), ","), "", how .. ": nothing of the toolkit on UIParent")
+    end
+
+    test("GF-011-B closing the window (✕, ESC) or changing page leaves no roster hover piece on screen", function()
+        local ns = login()
+        local before = onUIParent()
+        peerTalents(ns)
+        hoverOwnIcon(ns)
+        ns.Framework.toggle() -- the window's ✕ / the minimap button
+        ok(not ns.Framework.isShown(), "closed")
+        nothingLeft(ns, before, "closed")
+        hoverOwnIcon(ns)
+        wow.pressEscape()
+        ok(not ns.Framework.isShown(), "ESC closed it")
+        nothingLeft(ns, before, "ESC")
+        hoverOwnIcon(ns)
+        ns.Framework.open("sleepingbag")
+        eq(#ns.Professions.shown("roster"), 0, "page change: no profession button")
+        ok(not GameTooltip:IsShown(), "page change: no tooltip")
+        -- Opening the roster again puts the buttons back (the window shows after the page).
+        ns.Framework.toggle()
+        ns.Framework.open("roster")
+        ok(#ns.Professions.shown("roster") > 0, "back when the roster is open again")
+    end)
 end

@@ -296,6 +296,32 @@ end
 -- GameTooltip just above owner, x px from its left edge (GF-001-D21: a
 -- recipe tooltip anchored to the far right of a 930 px row ended up in the
 -- screen corner). The client keeps GameTooltip on screen.
+-- GF-011-B: on screen now (the frame and every parent shown). IsShown alone
+-- stays true for a page inside a closed window.
+function ns.isVisible(f)
+    if not f then return false end
+    if type(f.IsVisible) == "function" then return f:IsVisible() and true or false end
+    return type(f.IsShown) == "function" and f:IsShown() and true or false
+end
+
+-- GF-011-B: hide GameTooltip when its owner is f or inside f. The owner
+-- hiding does not always take GameTooltip with it (owner 0.16.5: 「急救
+-- 38 / 75　配方 3 個」 left floating after the window closed).
+function ns.hideTooltipOf(f)
+    if not (f and GameTooltip and GameTooltip.GetOwner) then return false end
+    local o = GameTooltip:GetOwner()
+    local guard = 0
+    while o and guard < 50 do
+        if o == f then
+            GameTooltip:Hide()
+            return true
+        end
+        o = type(o.GetParent) == "function" and o:GetParent() or o._parent
+        guard = guard + 1
+    end
+    return false
+end
+
 function ns.tooltipAbove(owner, x)
     GameTooltip:SetOwner(owner, "ANCHOR_NONE")
     GameTooltip:ClearAllPoints()

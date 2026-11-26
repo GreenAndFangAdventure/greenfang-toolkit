@@ -222,7 +222,8 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
         ns.after(3, function() Comm.broadcast(false) end)
         Share.ownChanged()
         if ns.Character and ns.Framework.isModuleShown("character") then
-            ns.after(1, ns.Character.refresh)
+            -- GF-011-B: still open a second later (its buttons live on UIParent).
+            ns.after(1, function() if ns.Framework.isModuleShown("character") then ns.Character.refresh() end end)
         end
     end
 end)
