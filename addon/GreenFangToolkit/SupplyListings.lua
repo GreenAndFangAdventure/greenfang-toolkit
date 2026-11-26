@@ -261,7 +261,7 @@ L.CLASS_CATEGORY = { [9] = "recipe", [7] = "material", [5] = "material", [2] = "
 -- is not asked from the server (GF-UI-H: the item finder reads many IDs).
 function L.itemInfo(itemID, noRequest)
     if type(itemID) ~= "number" or itemID <= 0 then return nil, "unknown" end
-    local getInfo = (type(C_Item) == "table" and type(C_Item.GetItemInfo) == "function") and C_Item.GetItemInfo or GetItemInfo
+    local getInfo = ns.itemInfoFn() -- GF-009-13 fix: C_Item first (Forever has no global)
     if type(getInfo) ~= "function" then return nil, "unknown" end
     local okCall, name, link, _, _, _, typeName, subTypeName, _, _, icon, _, classID, subclassID, bindType = pcall(getInfo, itemID)
     if not okCall then return nil, "unknown" end

@@ -415,7 +415,7 @@ function W.itemInfo(itemID)
     local info = { id = id, loaded = false }
     if not id then return info end
     local C = type(C_Item) == "table" and C_Item or {}
-    local name, link, quality, _, _, _, _, _, _, icon = try(GetItemInfo, id)
+    local name, link, quality, _, _, _, _, _, _, icon = try(ns.itemInfoFn(), id) -- GF-009-13 fix: no global GetItemInfo on Forever
     name = name or try(C.GetItemNameByID, id)
     icon = icon or try(C.GetItemIconByID, id) or try(GetItemIcon, id)
     if type(name) == "string" and name ~= "" then
@@ -432,6 +432,7 @@ end
 local waiting = setmetatable({}, { __mode = "k" }) -- row -> itemID still loading
 local itemEvents = CreateFrame("Frame")
 pcall(itemEvents.RegisterEvent, itemEvents, "GET_ITEM_INFO_RECEIVED")
+pcall(itemEvents.RegisterEvent, itemEvents, "ITEM_DATA_LOAD_RESULT") -- GF-009-13 fix: RequestLoadItemDataByID's answer
 itemEvents:SetScript("OnEvent", function(_, _, itemID)
     local id = tonumber(itemID)
     local list = {}

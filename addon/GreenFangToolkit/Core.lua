@@ -130,6 +130,17 @@ function ns.call(fn, ...)
     return unpack(results, 2, table.maxn(results))
 end
 
+-- GF-009-13 fix (owner's /gftk probe, Forever 1.60.1.71139): there is no
+-- global GetItemInfo, only C_Item.GetItemInfo (the same classic values; links
+-- look like |cnIQ1:|Hitem:2589:...). Every item lookup goes through these:
+-- C_Item first, the global only on clients that still have it.
+function ns.itemInfoFn()
+    if type(C_Item) == "table" and type(C_Item.GetItemInfo) == "function" then return C_Item.GetItemInfo end
+    if type(GetItemInfo) == "function" then return GetItemInfo end
+    return nil
+end
+function ns.itemInfo(itemID) return ns.call(ns.itemInfoFn(), itemID) end
+
 -- IsInGuild is not listed in the ForeverAPI dump; fall back to GetGuildInfo
 -- and C_GuildInfo / IsPlayerInGuildFromGUID.
 function ns.isInGuild()

@@ -42,22 +42,37 @@ return function(T)
     local function install(opts)
         G = { known = {}, server = opts.server or {}, fail = opts.fail or {}, exists = opts.exists or {},
             requests = {}, coldInfo = 0, instance = false }
-        GetItemInfo = function(id)
+        local function getInfo(id)
             local it = G.known[id]
             if not it then
                 G.coldInfo = G.coldInfo + 1
-                if opts.noCachedAPI then G.requests[#G.requests + 1] = { id = id, t = wow.state.now } end
+                G.requests[#G.requests + 1] = { id = id, t = wow.state.now, via = "info" } -- a miss asks the server
                 return nil
             end
             return it.name, "link", it.quality or 1, it.ilvl or 1, 1, "", "", 20, "", it.icon or 134939, 0,
                 it.classID, it.sub or 0, it.bindType or 0
         end
+        GetItemInfo = getInfo -- the Forever profile (mock.lua) keeps it off _G: C_Item.GetItemInfo
         C_Item = {
-            RequestLoadItemDataByID = function(id) G.requests[#G.requests + 1] = { id = id, t = wow.state.now } end,
+            RequestLoadItemDataByID = function(id) G.requests[#G.requests + 1] = { id = id, t = wow.state.now, via = "load" } end,
             DoesItemExistByID = function(id) return G.exists[id] ~= false end,
             IsItemDataCachedByID = function(id) return G.known[id] ~= nil end,
         }
         if opts.noCachedAPI then C_Item.IsItemDataCachedByID = nil end
+        if opts.forever then
+            -- The owner's Forever probe (GF-009-13 field result): C_Item.GetItemInfo
+            -- gives the classic 18 values (the 16th nil, a |cnIQ1: link); the
+            -- global GetItemInfo gives nothing.
+            local miss = getInfo
+            C_Item.GetItemInfo = function(id)
+                local it = G.known[id]
+                if not it then return miss(id) end
+                return it.name, "|cnIQ1:|Hitem:" .. id .. "::::::::27:1486:::::::::|h[" .. it.name .. "]|h|r", it.quality or 1,
+                    it.ilvl or 5, 0, "商品", "布料", 20, "INVTYPE_NON_EQUIP_IGNORE", it.icon or 132889, 13, it.classID,
+                    it.sub or 0, it.bindType or 0, 0, nil, true, ""
+            end
+            GetItemInfo = function() end
+        end
         IsInInstance = function() return G.instance end
         GetBuildInfo = function() return opts.version or "1.60.1", opts.build or "71139", "Nov 1 2026", 16001 end
         GetLocale = function() return opts.locale or "zhTW" end
@@ -81,19 +96,25 @@ return function(T)
     end
     local function slash(msg) SlashCmdList.GFTKDEV(msg) end
     -- The fake server answers a request one second later: an item it knows,
-    -- "no such item" for G.fail, nothing for the rest.
+    -- "no such item" for G.fail, nothing for the rest. G.loadEvent (the
+    -- Forever client, GF-009-13 field result): a RequestLoadItemDataByID is
+    -- answered with ITEM_DATA_LOAD_RESULT, a GetItemInfo miss with
+    -- GET_ITEM_INFO_RECEIVED; G.silentLoad: the load answers with no event at all.
     local function serve(seconds)
         for _ = 1, seconds * 4 do
             wow.advance(0.25)
+            if G.noise then wow.fire("GET_ITEM_INFO_RECEIVED", 2589 + math.floor(wow.state.now) % 7, true) end
             for _, r in ipairs(G.requests) do
                 if not r.answered and wow.state.now - r.t >= 1 then
+                    local ev = "GET_ITEM_INFO_RECEIVED"
+                    if G.loadEvent and r.via == "load" then ev = "ITEM_DATA_LOAD_RESULT" end
                     if G.server[r.id] then
                         r.answered = true
                         G.known[r.id] = G.server[r.id]
-                        wow.fire("GET_ITEM_INFO_RECEIVED", r.id, true)
+                        if not (G.silentLoad and r.via == "load") then wow.fire(ev, r.id, true) end
                     elseif G.fail[r.id] then
                         r.answered = true
-                        wow.fire("GET_ITEM_INFO_RECEIVED", r.id, false)
+                        if not (G.silentLoad and r.via == "load") then wow.fire(ev, r.id, false) end
                     end
                 end
             end
@@ -182,7 +203,7 @@ return function(T)
         ok(c.events >= 3, "every GET_ITEM_INFO_RECEIVED counted: " .. c.events)
         eq(c.success, 1, "success"); eq(c.failed, 1, "failed"); eq(c.invalid, 1, "invalid before asking")
         eq(c.timeouts, 3, "timeouts"); eq(c.retries, 2, "retries"); eq(c.known, 1, "known")
-        eq(G.coldInfo, 0, "GetItemInfo never called for an item the client does not have")
+        eq(G.coldInfo, 2, "GetItemInfo for an item the client does not have: only the two retries (the other path)")
         eq(next(d.pending), nil, "nothing left waiting")
         local report = table.concat(S.report(), "\n")
         ok(report:find(OK .. "：成功", 1, true) and report:find(NOPE .. "：無效", 1, true)
@@ -244,5 +265,64 @@ return function(T)
         d = GreenFangToolkitDevDB.catalogSample
         ok(d.got[ids[1]], "found through GetItemInfo")
         eq(d.counts.requests, 1, "one request counted")
+    end))
+
+    test("GF-009-13 fix, Forever field result: RequestLoadItemDataByID answers with ITEM_DATA_LOAD_RESULT; other GET_ITEM_INFO_RECEIVED are noise", done(function()
+        -- 0.16.4 in Forever: 0 successes; 56 requests for 20 IDs (each asked 3 times); 39 events, none ours.
+        local ids, srv = {}, {}
+        for i = 1, 20 do ids[i] = 800000 + i; if i ~= 20 then srv[ids[i]] = item(i) end end
+        local _, S = loadDev({ sample = pack(ids), server = srv, forever = true })
+        G.loadEvent, G.noise = true, true
+        slash("catalogscan sample")
+        serve(150)
+        local d = GreenFangToolkitDevDB.catalogSample
+        ok(not d.running and d.finished, "finished: " .. S.statusText("sample"))
+        eq(count(d.got), 19, "every item the server knows: " .. S.statusText("sample"))
+        eq(count(d.timeout), 1, "the one it does not know times out")
+        ok(d.counts.loads >= 19, "ITEM_DATA_LOAD_RESULT counted: " .. tostring(d.counts.loads))
+        ok(d.counts.events > 0, "the other events counted too")
+        eq(d.counts.ours, 19, "the load answers matched our IDs")
+        ok(d.counts.requests <= 20 + 2, "no triple asking: " .. d.counts.requests)
+        ok(S.statusText("sample"):find("載入事件", 1, true), "the status line shows both kinds")
+    end))
+
+    test("GF-009-13 fix: a load with no event at all, and a client whose load path is silent: polling and the GetItemInfo retry still find them", done(function()
+        local ids, srv = {}, {}
+        for i = 1, 6 do ids[i] = 810000 + i; srv[ids[i]] = item(i) end
+        -- The data arrives in the cache, no event: found by polling, no retry.
+        local _, S = loadDev({ sample = pack(ids), server = srv, forever = true })
+        G.loadEvent, G.silentLoad = true, true
+        slash("catalogscan sample")
+        serve(20)
+        local d = GreenFangToolkitDevDB.catalogSample
+        eq(count(d.got), 6, "found by polling: " .. S.statusText("sample"))
+        eq(d.counts.polled, 6, "polled"); eq(d.counts.retries, 0, "no retry needed")
+        -- RequestLoadItemDataByID does nothing on this client: the retry asks GetItemInfo.
+        _, S = loadDev({ sample = pack(ids), server = srv, forever = true })
+        C_Item.RequestLoadItemDataByID = function() end
+        slash("catalogscan sample")
+        serve(80)
+        d = GreenFangToolkitDevDB.catalogSample
+        eq(count(d.got), 6, "found through GetItemInfo on the retry: " .. S.statusText("sample"))
+        eq(d.counts.viaInfo, 6, "asked once through GetItemInfo each")
+        eq(count(d.timeout), 0, "no timeouts left")
+    end))
+
+    test("GF-009-13 fix, the owner's probe: C_Item.GetItemInfo's 18 values (16th nil, |cnIQ1: link), global GetItemInfo empty; a cached cloth and a cold one both succeed", done(function()
+        local LINEN, COLD = 2589, 14047
+        local _, S = loadDev({ sample = pack({ LINEN, COLD, 99999999 }), forever = true,
+            server = { [COLD] = { name = "符文布", classID = 7, sub = 5, quality = 1, ilvl = 50 } }, fail = { [99999999] = true } })
+        G.loadEvent, G.noise = true, true
+        G.known[LINEN] = { name = "亞麻布", classID = 7, sub = 5, quality = 1, ilvl = 5, icon = 132889 }
+        slash("catalogscan sample")
+        serve(10)
+        local d = GreenFangToolkitDevDB.catalogSample
+        ok(not d.running and d.finished, "finished: " .. S.statusText("sample"))
+        eq(d.got[LINEN] and d.got[LINEN][1], "亞麻布", "the cached cloth, no request")
+        eq(table.concat(d.got[LINEN], ","), "亞麻布,7,5,0,1,5,132889", "the seven fields in the classic order")
+        eq(d.got[COLD] and d.got[COLD][1], "符文布", "the cold one, answered by ITEM_DATA_LOAD_RESULT")
+        eq(d.invalid[99999999], "answer", "the missing ID: a failed load result, not a timeout")
+        eq(count(d.timeout), 0, "no timeouts")
+        eq(d.counts.requests, 2, "one request each for the two not cached")
     end))
 end

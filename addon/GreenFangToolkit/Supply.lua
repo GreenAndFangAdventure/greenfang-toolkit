@@ -410,7 +410,8 @@ end
 
 local events = CreateFrame("Frame")
 Supply.EVENTS = { "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "BAG_UPDATE_DELAYED", "QUEST_LOG_UPDATE", "QUEST_ACCEPTED",
-    "QUEST_TURNED_IN", "QUEST_REMOVED", "PLAYER_REGEN_ENABLED", "GET_ITEM_INFO_RECEIVED" }
+    "QUEST_TURNED_IN", "QUEST_REMOVED", "PLAYER_REGEN_ENABLED", "GET_ITEM_INFO_RECEIVED",
+    "ITEM_DATA_LOAD_RESULT" } -- GF-009-13 fix: RequestLoadItemDataByID answers with this one
 for _, e in ipairs(Supply.EVENTS) do pcall(events.RegisterEvent, events, e) end
 events:SetScript("OnEvent", function(_, event, a, b)
     if event == "PLAYER_LOGIN" or event == "PLAYER_ENTERING_WORLD" then
@@ -418,7 +419,7 @@ events:SetScript("OnEvent", function(_, event, a, b)
         if not Supply.started then
             ns.after(ns.Share.LOGIN_DELAY, function() Supply.start() end)
         end
-    elseif event == "GET_ITEM_INFO_RECEIVED" then
+    elseif event == "GET_ITEM_INFO_RECEIVED" or event == "ITEM_DATA_LOAD_RESULT" then
         -- GF-009-13: (itemID, success): success = false is "no such item".
         if ns.SupplyListings and ns.SupplyListings.itemAnswer then ns.SupplyListings.itemAnswer(a, b) end
         if Supply.onItemInfo then Supply.onItemInfo() end
@@ -612,10 +613,14 @@ end
 -- Items (names, icons, links) and contact
 ---------------------------------------------------------------------------
 
+-- GF-009-13 fix: C_Item.GetItemInfo first (Forever answers it; the global
+-- GetItemInfo gave nothing in the owner's probe).
+function Supply.getItemInfo(itemID) return ns.itemInfo(itemID) end
+
 function Supply.itemName(itemID)
     local name
     if type(C_Item) == "table" and type(C_Item.GetItemNameByID) == "function" then name = ns.call(C_Item.GetItemNameByID, itemID) end
-    if (type(name) ~= "string" or name == "") and type(GetItemInfo) == "function" then name = ns.call(GetItemInfo, itemID) end
+    if type(name) ~= "string" or name == "" then name = Supply.getItemInfo(itemID) end
     if type(name) == "string" and name ~= "" then return name end
     if type(C_Item) == "table" and type(C_Item.RequestLoadItemDataByID) == "function" then ns.call(C_Item.RequestLoadItemDataByID, itemID) end
     return nil
@@ -637,8 +642,7 @@ function Supply.itemIcon(itemID)
     return icon
 end
 function Supply.itemLink(itemID)
-    if type(GetItemInfo) ~= "function" then return nil end
-    local _, link = ns.call(GetItemInfo, itemID)
+    local _, link = Supply.getItemInfo(itemID)
     if type(link) == "string" and link:find("|Hitem:", 1, true) then return link end
     return nil
 end
