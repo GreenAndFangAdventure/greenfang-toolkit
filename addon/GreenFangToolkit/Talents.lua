@@ -106,8 +106,9 @@ function Talents.decode(v)
         if not spent then return nil end
         local icon = nil
         if il[k] ~= "" then
-            icon = n36(il[k], 1, 2147483647)
+            icon = n36(il[k], 0, 2147483647) -- gftks.md §3.2: 0 = no icon, like ""
             if not icon then return nil end
+            if icon == 0 then icon = nil end
         end
         total = total + spent
         d.groups[k] = { spent = spent, icon = icon }

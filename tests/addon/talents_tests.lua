@@ -78,6 +78,7 @@ return function(T)
             "1.p0.1z.1o.,,,,,.,,,,.", "1.p0.1z.1o.e,w,5.,,", "1.p0.1z.1o.e,w,5.,,." .. string.rep("A", 121) }) do
             eq(Tl.decode(bad), nil, "refused: " .. bad)
         end
+        eq(Tl.decode("1.p0.1z.1o.e,w,5.0,,.").groups[1].icon, nil, "icon 0 = none (gftks.md §3.2)")
         ok(ns.Share.isLocalGroup("T"), "T is never uploaded by GF Sync (local)")
         eq(ns.Share.offer(A_PEER, "T", ns.Share.serverNow(), ns.Share.hash("1.x"), "1.x", true, A_PEER), "invalid", "malformed")
     end)
