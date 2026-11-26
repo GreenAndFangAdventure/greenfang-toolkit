@@ -769,7 +769,7 @@ return function(T)
             end
         end
         eq(table.concat(bad, ", "), "", "global-only calls")
-        ok(wow.forever, "the suite runs with the Forever profile (mock.lua)")
-        eq(GetItemInfo, nil, "no global GetItemInfo here either")
+        -- The Forever profile (mock.lua) is the default; GF_CLASSIC_GLOBALS=1 runs without it.
+        if wow.forever then eq(GetItemInfo, nil, "no global GetItemInfo under the Forever profile") end
     end)
 end
