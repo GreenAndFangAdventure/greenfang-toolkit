@@ -809,6 +809,7 @@ UI.DRAFT_BACK = "已還原上次沒送出的內容"
 -- moves so both fit side by side; on a screen narrower than both, the finder
 -- covers the form's right side. Nothing is placed off screen.
 UI.FORM_W, UI.FORM_H, UI.FORM_Y = 600, 470, 40
+UI.EDIT_STRATA, UI.FORM_LEVEL, UI.PICK_LEVEL = "DIALOG", 100, 140 -- GF-009-14: IME above edit-box windows
 UI.PICK_GAP, UI.SCREEN_EDGE = 4, 8
 function UI.layoutPair(sw, sh, fw, fh, pw, ph, formLeft, formTop)
     local E, gap = UI.SCREEN_EDGE, UI.PICK_GAP
@@ -963,6 +964,12 @@ end
 
 local function buildForm()
     local f = ns.popupWindow(UI.FORM_NAME, UI.FORM_W, UI.FORM_H)
+    -- GF-009-14 (Forever: the 注音 candidate list was hidden under the
+    -- finder): windows with edit boxes stay in DIALOG, so the client's IME
+    -- candidates draw above them; a high frame level keeps them above the
+    -- toolkit window (also DIALOG). Menus and tooltips stay in TOOLTIP.
+    f:SetFrameStrata(UI.EDIT_STRATA)
+    if f.SetFrameLevel then f:SetFrameLevel(UI.FORM_LEVEL) end
     f:SetPoint("CENTER", UIParent, "CENTER", 0, UI.FORM_Y)
     if f.SetClampedToScreen then f:SetClampedToScreen(true) end
     f.TitleText:SetText("刊登")
@@ -1122,7 +1129,7 @@ end
 function UI.form() return form end
 
 ---------------------------------------------------------------------------
--- The item picker (a list: ESC, X and a click outside close it).
+-- The item picker (GF-009-14: a window: ESC, X, a pick or closing the form close it).
 -- GF-UI-H: two sources: 背包 (unbound bag items, as before) and 全部 (every
 -- item the client knows: L.catalog); a name / ItemID search; 類型 and 子類
 -- filters from the item's classID / subclassID. Untradeable items are never
@@ -1255,9 +1262,11 @@ local function buildPicker()
     f:SetSize(UI.PICK_W, UI.pickHeight())
     if f.SetClampedToScreen then f:SetClampedToScreen(true) end
     if f.HookScript then f:HookScript("OnHide", function() UI.hideTip() end) end
-    f:SetFrameStrata("TOOLTIP")
-    -- Under the filters' drop-down menus (those sit at level 100).
-    if f.SetFrameLevel then f:SetFrameLevel(50) end
+    -- GF-009-14: DIALOG, not TOOLTIP (the IME candidates were hidden under
+    -- it); above the form; the filters' drop-down lists (TOOLTIP) stay above.
+    f:SetFrameStrata(UI.EDIT_STRATA)
+    if f.SetFrameLevel then f:SetFrameLevel(UI.PICK_LEVEL) end
+    if f.SetToplevel then f:SetToplevel(true) end
     Th.panel(f)
     f:EnableMouse(true)
     f.title = label(f, "選物品", ns.FIELD_FONT)
@@ -1327,7 +1336,10 @@ local function buildPicker()
         f.rows[i] = b
     end
     f:Hide()
-    ns.escRegister(f, ns.ESC_LEVEL.grid)
+    -- GF-009-14: a window (above the form for ESC), not a menu: no
+    -- click-outside layer (TOOLTIP) over it. ESC, X, a pick or closing the
+    -- form close it.
+    ns.escRegister(f, ns.ESC_LEVEL.popup)
     picker = f
     return f
 end

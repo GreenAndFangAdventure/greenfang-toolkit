@@ -444,9 +444,10 @@ return function(T)
         UI.openForm()
         f.qty:SetText("5")
         UI.openPicker()
+        -- GF-009-14: the picker is a window (no click-outside layer); a click
+        -- outside reaches the game, never the form.
         local blocker = ns.clickBlocker()
-        ok(blocker and blocker:IsShown(), "blocker for the picker")
-        blocker._scripts.OnClick(blocker)
+        ok(not (blocker and blocker:IsShown()), "no click-outside layer for the picker")
         ok(f:IsShown() and not wow.popup(), "a click outside leaves the form and asks nothing")
         -- The 刊登 button while changes are open keeps them.
         ok(not UI.openForm(), "not replaced")

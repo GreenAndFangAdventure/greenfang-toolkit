@@ -772,4 +772,55 @@ return function(T)
         -- The Forever profile (mock.lua) is the default; GF_CLASSIC_GLOBALS=1 runs without it.
         if wow.forever then eq(GetItemInfo, nil, "no global GetItemInfo under the Forever profile") end
     end)
+
+    ---------------------------------------------------------------------------
+    -- GF-009-14
+    ---------------------------------------------------------------------------
+
+    -- The window an object sits in: its strata and the top frame under UIParent.
+    local function windowOf(o)
+        local strata, f, top = nil, o, o
+        while f and f ~= UIParent do
+            if f._strata and not strata then strata = f._strata end
+            top = f
+            f = f._parent
+        end
+        return strata, top
+    end
+
+    test("GF-009-14 IME: no edit box of the 刊登 form or 找物品 sits in TOOLTIP or FULLSCREEN_DIALOG; menus still above, ESC order kept", done(function()
+        local ns = login({})
+        local UI, picker = openFinder(ns)
+        local f = UI.form()
+        local boxes = { ["找物品 search"] = picker.search, ["物品框"] = f.itemBox, ["數量"] = f.qty, ["備註"] = f.note }
+        for name, box in pairs(boxes) do
+            local strata, top = windowOf(box)
+            ok(top == f or top == picker, name .. ": in the form or the finder")
+            ok(strata ~= "TOOLTIP" and strata ~= "FULLSCREEN_DIALOG", name .. ": strata " .. tostring(strata))
+        end
+        -- Every edit box the supply windows made.
+        local n = 0
+        for _, o in ipairs(wow.allObjects()) do
+            if o._kind == "EditBox" then
+                local strata, top = windowOf(o)
+                if top == f or top == picker then
+                    n = n + 1
+                    ok(strata ~= "TOOLTIP" and strata ~= "FULLSCREEN_DIALOG", "edit box strata " .. tostring(strata))
+                end
+            end
+        end
+        ok(n >= 4, "edit boxes checked: " .. n)
+        eq(f._strata, "DIALOG", "the form: DIALOG")
+        eq(picker._strata, "DIALOG", "the finder: DIALOG")
+        ok(UI.PICK_LEVEL > UI.FORM_LEVEL, "the finder's frame level above the form's")
+        -- The 類型 list opened from the finder still sits above it (TOOLTIP).
+        local list = picker.class.menu
+        if picker.class.open then picker.class.open() elseif picker.class:GetScript("OnClick") then picker.class:GetScript("OnClick")(picker.class) end
+        list = list or picker.class.menu
+        ok(list and list._strata == "TOOLTIP", "the drop-down list above the finder: " .. tostring(list and list._strata))
+        if ns.closeMenus then ns.closeMenus() end
+        ok(picker:IsShown(), "closing the list keeps the finder")
+        wow.pressEscape()
+        ok(not picker:IsShown() and f:IsShown(), "ESC: the finder first")
+    end))
 end
