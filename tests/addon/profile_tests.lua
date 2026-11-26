@@ -239,7 +239,8 @@ return function(T)
         -- Read-only: no role buttons on the card, only 關閉 (and the window's ✕).
         local buttons = 0
         for _, o in ipairs(wow.allObjects()) do
-            if o._kind == "Button" and o._parent == card and o ~= card.close and o._shown ~= false then buttons = buttons + 1 end
+            -- GF-011-B: 天賦樹 opens the game's talent window; it does not edit roles.
+            if o._kind == "Button" and o._parent == card and o ~= card.close and o ~= card.tree and o._shown ~= false then buttons = buttons + 1 end
         end
         ok(buttons <= 1, "only the window's ✕ besides 關閉 (" .. buttons .. ")")
         wow.pressEscape()

@@ -1272,6 +1272,10 @@ function UI.memberMenuItems(m)
     end
     -- GF-011: the member's talents as a talentbuild link in the chat box.
     local T = ns.Talents
+    -- GF-011-B: 「天賦樹」 opens the game's own talent window (view-only for others).
+    if T and T.treeMode and T.treeMode(m.guid) then
+        items[#items + 1] = { text = T.TREE_LABEL, key = "talenttree", fn = function() T.openTree(m.guid, m.name) end }
+    end
     if T and T.canLink(T.of(m.guid)) then
         items[#items + 1] = { text = T.LINK_LABEL, key = "talentlink", fn = function() T.insertLink(m.guid, m.name) end }
     end

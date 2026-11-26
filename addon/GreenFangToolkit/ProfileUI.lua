@@ -22,7 +22,7 @@ ProfileUI.ROLE_STEP = 108          -- icon + 4 + a 2-3 character name + gap
 ProfileUI.Y = { head = -40, main = -76, can = -120, share = -162, bizHead = -208, biz = -240, needs = -520 }
 ProfileUI.BIZ_ROWS, ProfileUI.BIZ_ROW = 7, 36
 ProfileUI.CARD_NAME = "GreenFangToolkit_ProfileCard"
-ProfileUI.CARD_W, ProfileUI.CARD_H = 460, 300
+ProfileUI.CARD_W, ProfileUI.CARD_H = 460, 340 -- GF-011-B: +40 for 天賦
 ProfileUI.GAME = { t = "role_t", h = "role_h", d = "role_d" }
 ProfileUI.KIND = { order = { art = "INV_Hammer_20", name = "委託" }, adventure = { art = "INV_Misc_Map_01", name = "冒險" } }
 
@@ -234,6 +234,20 @@ function ProfileUI.rolesText(p)
     return main, (#can > 0 and table.concat(can, "、") or (p.state == "unknown" and Pr.UNKNOWN_NAME or "無"))
 end
 
+-- GF-011-B: the card's 天賦 line and 「天賦樹」 (greyed when it cannot open:
+-- no talents received, no import string, in combat, or no talent window).
+function ProfileUI.fillTalents(f, m)
+    local T = ns.Talents
+    local t = T and T.of(m.guid) or nil
+    f.talentText:SetText(t and t.text or P().UNKNOWN_NAME)
+    local mode, why = nil, "noui"
+    if T and T.treeMode then mode, why = T.treeMode(m.guid) end
+    if mode and ns.inCombat() then mode, why = nil, "combat" end
+    f.tree:SetEnabled(mode ~= nil)
+    f.tree.tip = mode and nil or (T and T.TREE_TIP[why] or nil)
+    f.treeMode = mode
+end
+
 function ProfileUI.openCard(m)
     if type(m) ~= "table" then return nil end
     local f = ProfileUI.card
@@ -272,6 +286,15 @@ function ProfileUI.openCard(m)
         f.profNone:SetPoint("TOPLEFT", f, "TOPLEFT", 100, -198)
         f.age = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT))
         f.age:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 24, 22)
+        -- GF-011-B: 天賦 (the roster's summary) and 「天賦樹」, the game's own talent window.
+        fieldLabel(f, "天賦", 24, -238)
+        f.talentText = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
+        f.talentText:SetPoint("TOPLEFT", f, "TOPLEFT", 100, -238)
+        f.tree = ns.OrdersUI.textButton(f, "天賦樹", function()
+            local m = f.member
+            if m and ns.Talents then ns.Talents.openTree(m.guid, m.name) end
+        end, 96)
+        f.tree:SetPoint("TOPLEFT", f, "TOPLEFT", 300, -232)
         f.close = ns.OrdersUI.textButton(f, "關閉", function() f:Hide() end, 96)
         f.close:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -24, 18)
         f:Hide()
@@ -315,6 +338,7 @@ function ProfileUI.openCard(m)
         if prof and ns.Icons.setProfessionIcon(t, prof) then shown = shown + 1 else t:Hide() end
     end
     f.profNone:SetText(shown == 0 and "－" or "")
+    ProfileUI.fillTalents(f, m)
     f.age:SetText(P().ageText(p.at))
     f:Show()
     return f

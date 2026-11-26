@@ -44,6 +44,9 @@ Probe.APIS = {
     "GetTalentInfo", "GetTalentTabInfo", "GetNumTalentTabs", "GetActiveTalentGroup", "GetUnspentTalentPoints",
     "LinkUtil.FormatLink", "LinkTypes.TalentBuild", "PlayerSpellsFrame_LoadUI", "PlayerSpellsUtil.OpenToClassTalentsTab",
     "PlayerSpellsUtil.InspectLoadout",
+    -- GF-011-B 「天賦樹」: the ways into the game's own talent window
+    "PlayerSpellsUtil.ToggleClassTalentFrame", "TogglePlayerSpellsFrame", "ToggleTalentFrame", "SetItemRef",
+    "HideUIPanel",
     -- inspect
     "CanInspect", "NotifyInspect", "ClearInspectPlayer", "InspectUnit", "InspectFrame_Show",
     "C_PaperDollInfo.GetInspectItemLevel", "C_PaperDollInfo.GetInspectGuildInfo",
@@ -79,6 +82,9 @@ Probe.APIS = {
     "C_TradeSkillUI.GetProfessionInfoBySkillLineID", "C_TradeSkillUI.GetRecipeInfo", "C_TradeSkillUI.OpenTradeSkill",
     "C_TradeSkillUI.IsNPCCrafting", "C_TradeSkillUI.GetAllRecipeIDs", "GetProfessions", "GetProfessionInfo",
     "GetNumTradeSkills", "GetTradeSkillLine",
+    -- GF-011-B 「製作」: the ways into the profession window
+    "ProfessionsUtil.OpenProfessionFrameToRecipe", "C_TradeSkillUI.OpenRecipe", "OpenProfessionUIToSkillLine",
+    "ProfessionsFrame_LoadUI", "C_TradeSkillUI.GetTradeSkillLineForRecipe", "C_TradeSkillUI.IsRecipeProfessionLearned",
     -- general
     "InCombatLockdown", "issecretvalue", "GetBuildInfo",
 }
