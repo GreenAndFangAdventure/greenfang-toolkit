@@ -142,6 +142,15 @@ SLASH_GREENFANGTOOLKIT1 = "/gftk"
 SLASH_GREENFANGTOOLKIT2 = "/綠皮"
 SlashCmdList.GREENFANGTOOLKIT = handleSlash
 
+-- GF-DEV-02: the window preview of the dev-only AddOn GreenFangToolkit_Dev (on the
+-- owner's computer only; members never have it) reaches the pages through
+-- this. Nothing comes back unless that AddOn is loaded.
+function GreenFangToolkit_DevAccess()
+    local loaded = (type(C_AddOns) == "table" and C_AddOns.IsAddOnLoaded) or IsAddOnLoaded
+    if type(loaded) == "function" and loaded("GreenFangToolkit_Dev") then return ns end
+    return nil
+end
+
 local events = CreateFrame("Frame")
 ns.eventFrame = events
 for _, e in ipairs({ "ADDON_LOADED", "PLAYER_LOGIN", "PLAYER_LOGOUT", "GUILD_ROSTER_UPDATE",
