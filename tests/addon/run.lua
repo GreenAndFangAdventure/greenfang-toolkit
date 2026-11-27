@@ -4750,6 +4750,9 @@ assert(loadfile(ROOT .. "/tests/addon/gf00915_tests.lua"))()({ test = test, eq =
 -- GF-TEST-01: 0.12.6 and 0.15.1 saves loaded by this version (tests/addon/gftest01_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gftest01_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-012-FIX: 臨時黑箱 指定保管人 from the guild roster picker (tests/addon/gf012fix_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf012fix_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0

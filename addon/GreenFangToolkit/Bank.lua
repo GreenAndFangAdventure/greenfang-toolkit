@@ -48,6 +48,11 @@ Bank.STATE_NAME = {
     ok = "有效", none = "尚無名單", expired = "非目前會長的名單，不採信", unknown = "權限未知",
     forged = "名單作者不符", old = "舊版名單", invalid = "名單格式錯誤",
 }
+-- GF-012-FIX: why authority is unknown / what the last 指定 did, for 同步與診斷.
+Bank.WHY_NAME = { guild = "不在目標公會", roster = "名冊未載入或找不到會長", self = "讀不到自己的角色",
+    api = "遊戲沒回答是否為會長", conflict = "遊戲與名冊對會長不一致" }
+Bank.APPOINT_NAME = { ok = "成功", same = "沒有變更", full = "已達上限", invalid = "格式不對",
+    ["not-found"] = "找不到這位職工", ["no-authority"] = "沒有會長權限" }
 Bank.ROLE_NAME = { leader = "會長", custodian = "保管人", member = "職工", unknown = "權限未知" }
 
 local stats = { published = 0, refused = 0, healed = 0, rejectedOld = 0, rejectedForged = 0 }
@@ -91,19 +96,24 @@ local currentMemo = {}
 function Bank.invalidate() cache.at = -1; currentMemo = {} end
 
 -- The guild master's author id from the live roster, or nil when it cannot be
--- told (roster not loaded, a row missing, not exactly one rank 0, no GUID).
+-- told (roster not loaded, not exactly one rank 0 among the rows read, no GUID).
+-- GF-012-FIX (owner 2026-11-27 「無法正常指定成員」): a row the client does
+-- not return (an empty name, as Roster.collect already skips) used to make
+-- the guild master unknown for the whole guild; it is now skipped and counted
+-- (Bank.rosterSkipped). The guild master's own row missing is still unknown.
+Bank.rosterSkipped = 0
 function Bank.rosterLeader()
     local now = ns.now()
     if cache.at >= 0 and now - cache.at < Bank.ROSTER_CACHE then return cache.a, cache.name end
     local a, name
     local total = ns.num(ns.call(GetNumGuildMembers)) or 0
     if total > 0 and type(GetGuildRosterInfo) == "function" then
-        local found, bad = 0, false
+        local found, bad, skipped = 0, false, 0
         for i = 1, total do
             local r = { pcall(GetGuildRosterInfo, i) }
             local n = r[1] and str(r[2]) or ""
-            if n == "" then bad = true; break end
-            if ns.num(r[4]) == 0 then
+            if n == "" then skipped = skipped + 1
+            elseif ns.num(r[4]) == 0 then
                 found = found + 1
                 local guid = str(r[18])
                 a = guid:match("^Player%-") and S().authorOf(guid) or nil
@@ -112,6 +122,7 @@ function Bank.rosterLeader()
             end
         end
         if bad or found ~= 1 then a, name = nil, nil end
+        Bank.rosterSkipped = skipped
     end
     cache.at, cache.a, cache.name = now, a, name
     return a, name
@@ -131,8 +142,11 @@ function Bank.authority()
     if type(IsGuildLeader) == "function" then
         local ok, v = pcall(IsGuildLeader)
         if ok and (v == true or v == 1) then apiSays = true
-        elseif ok and v == false then apiSays = false end
-    else
+        elseif ok and (v == false or v == 0) then apiSays = false end
+    end
+    -- GF-012-FIX: IsGuildLeader missing, erroring or with no answer (nil):
+    -- my rank index from GetGuildInfo; it still has to agree with the roster.
+    if apiSays == nil then
         local _, _, idx = ns.call(GetGuildInfo, "player")
         idx = ns.num(idx)
         if idx then apiSays = idx == 0 end
@@ -341,14 +355,23 @@ local function change(fn)
     return "ok"
 end
 
+-- GF-012-FIX: whoever it is given as, the answer is a member of the current
+-- guild roster with a GUID, or nil (an author id, a name or a table with a
+-- GUID that is not in the roster is not anybody's custodian).
 local function memberA(who)
-    if type(who) == "table" and who.guid then return S().authorOf(who.guid), who end
+    if type(who) == "table" and who.guid then
+        local a = S().authorOf(who.guid)
+        local m = a and S().memberFor(a)
+        if m then return a, m end
+        return nil
+    end
     who = str(who)
     if who == "" then return nil end
     if validA(who) and S().memberFor(who) then return who, S().memberFor(who) end
     local m = ns.Comm.memberFor(who)
     if not m and not who:find("%-") then m = ns.Comm.memberFor(who .. "-" .. ns.realm()) end
-    if m and m.guid then return S().authorOf(m.guid), m end
+    local a = m and m.guid and S().authorOf(m.guid)
+    if a and S().memberFor(a) then return a, m end
     return nil
 end
 Bank.memberA = memberA
@@ -361,7 +384,17 @@ end
 
 -- Appoint a custodian (a name, a roster member or an author id). kinds: "b",
 -- "k" or "bk" (default both). Returns "ok" or why not.
+-- GF-012-FIX: the last result (and, when refused for authority, why) is kept
+-- for 同步與診斷 (no name, no GUID).
+Bank.lastAppoint = nil
+local appoint
 function Bank.appoint(who, kinds)
+    local r = appoint(who, kinds)
+    local _, _, why = Bank.authority()
+    Bank.lastAppoint = { r = r, why = r == "no-authority" and why or nil }
+    return r
+end
+appoint = function(who, kinds)
     kinds = kinds or "bk"
     if not Bank.KINDS[kinds] then return "invalid" end
     if not Bank.canManage() then stats.refused = stats.refused + 1; return "no-authority" end
@@ -374,6 +407,45 @@ function Bank.appoint(who, kinds)
         own.entries[a] = { kinds = kinds, enabled = true, epoch = epoch, at = ns.now() }
         return "ok"
     end)
+end
+
+-- GF-012-FIX (owner: 成員一定是公會內的人，可以用選的): the picker's rows,
+-- from the roster snapshot (no game call): { a, name, short, rank, rankIndex,
+-- classToken, online, custodian }, online first, then rank, then name.
+-- The sorted base list is kept per snapshot; a search only filters it.
+local base = { snap = false }
+function Bank.candidates(query)
+    local snap = ns.Roster and ns.Roster.current()
+    if not snap then return {} end
+    if base.snap ~= snap then
+        local rows = {}
+        for _, m in ipairs(snap.members) do
+            local a = m.guid and S().authorOf(m.guid)
+            if a then
+                rows[#rows + 1] = { a = a, name = m.name, short = ns.shortName(m.name), key = ns.keyName(m.name),
+                    rank = str(m.guildRank), rankIndex = ns.num(m.rankIndex) or 99, classToken = m.classToken,
+                    online = m.online == true }
+            end
+        end
+        table.sort(rows, function(x, y)
+            if x.online ~= y.online then return x.online end
+            if x.rankIndex ~= y.rankIndex then return x.rankIndex < y.rankIndex end
+            return x.key < y.key
+        end)
+        base = { snap = snap, rows = rows }
+    end
+    local q = ns.keyName(query)
+    local cur = Bank.current()
+    local on = {}
+    for _, e in ipairs(cur.state == "ok" and cur.list.entries or {}) do if e.enabled then on[e.a] = true end end
+    local out = {}
+    for _, r in ipairs(base.rows) do
+        if q == "" or r.key:find(q, 1, true) then
+            r.custodian = on[r.a] == true
+            out[#out + 1] = r
+        end
+    end
+    return out
 end
 
 function Bank.revoke(a)
@@ -492,10 +564,17 @@ function Bank.diagText()
     local cur = Bank.current()
     local active = 0
     for _, e in ipairs(cur.list and cur.list.entries or {}) do if e.enabled then active = active + 1 end end
-    return string.format("身分：%s%s｜名單：%s%s｜有效保管人 %d 位｜發布 %d、拒絕管理 %d、自我修正 %d｜庫存：尚未開放（第一階段不掃描）",
-        Bank.ROLE_NAME[Bank.myRole()] or "?", (auth == "unknown" and why) and ("（" .. why .. "）") or "",
+    local last = ""
+    local la = Bank.lastAppoint
+    if la then
+        last = "｜上次指定：" .. (Bank.APPOINT_NAME[la.r] or tostring(la.r))
+            .. (la.why and ("（" .. (Bank.WHY_NAME[la.why] or la.why) .. "）") or "")
+    end
+    return string.format("身分：%s%s｜名單：%s%s｜有效保管人 %d 位｜發布 %d、拒絕管理 %d、自我修正 %d%s%s｜庫存：尚未開放（第一階段不掃描）",
+        Bank.ROLE_NAME[Bank.myRole()] or "?", (auth == "unknown" and why) and ("（" .. (Bank.WHY_NAME[why] or why) .. "）") or "",
         Bank.STATE_NAME[cur.state] or cur.state, cur.state == "ok" and (cur.direct and "，直接收到" or "，經轉送") or "",
-        active, stats.published, stats.refused, stats.healed)
+        active, stats.published, stats.refused, stats.healed,
+        Bank.rosterSkipped > 0 and string.format("｜名冊讀不到 %d 列", Bank.rosterSkipped) or "", last)
 end
 
 ---------------------------------------------------------------------------
