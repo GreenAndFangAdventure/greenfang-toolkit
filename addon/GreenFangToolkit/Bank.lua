@@ -108,7 +108,7 @@ function Bank.rosterLeader()
     local a, name
     local total = ns.num(ns.call(GetNumGuildMembers)) or 0
     if total > 0 and type(GetGuildRosterInfo) == "function" then
-        local found, bad, skipped = 0, false, 0
+        local found, skipped = 0, 0
         for i = 1, total do
             local r = { pcall(GetGuildRosterInfo, i) }
             local n = r[1] and str(r[2]) or ""
@@ -118,10 +118,9 @@ function Bank.rosterLeader()
                 local guid = str(r[18])
                 a = guid:match("^Player%-") and S().authorOf(guid) or nil
                 name = n
-                if not a then bad = true end
             end
         end
-        if bad or found ~= 1 then a, name = nil, nil end
+        if found ~= 1 or not a then a, name = nil, nil end
         Bank.rosterSkipped = skipped
     end
     cache.at, cache.a, cache.name = now, a, name
@@ -376,16 +375,10 @@ local function memberA(who)
     -- always adds "-Realm" to the name, but the roster may give a same-realm
     -- name (my own row at least) without it. Compare the short names too,
     -- only when exactly one roster member matches.
-    local k = ns.keyName(who)
-    local ks = ns.keyName(ns.shortName(who))
-    local realm = who:match("%-(.+)$")
-    local myRealm = ns.keyName(ns.realm())
-    if realm and ns.keyName(realm) ~= myRealm and ns.keyName(realm) ~= (myRealm:gsub("%s", "")) then ks = "" end
+    local k, ks = Bank.queryKeys(who)
     local hit
     for _, r in ipairs(Bank.candidates("")) do
-        -- typed short = roster short; typed full = a roster name that has no realm
-        local rs = ns.keyName(r.short)
-        if r.key == k or rs == k or (ks ~= "" and r.key == rs and rs == ks) then
+        if Bank.rowMatches(r, k, ks, true) then
             if hit and hit.a ~= r.a then return nil end
             hit = r
         end
@@ -433,6 +426,32 @@ end
 -- from the roster snapshot (no game call): { a, name, short, rank, rankIndex,
 -- classToken, online, custodian }, online first, then rank, then name.
 -- The sorted base list is kept per snapshot; a search only filters it.
+-- One rule for typed names (資料層 appoint, the page's box, the picker's search):
+-- k = the whole text; ks = the name without "-Realm" when that realm is mine
+-- (or none was typed), else "". A roster name without realm matches ks.
+function Bank.queryKeys(q)
+    q = str(q)
+    local k = ns.keyName(q)
+    local ks = ns.keyName(ns.shortName(q))
+    local realm = q:match("%-(.+)$")
+    if realm then
+        local mine = ns.keyName(ns.realm())
+        local r = ns.keyName(realm)
+        if r ~= mine and r ~= (mine:gsub("%s", "")) then ks = "" end
+    end
+    return k, ks
+end
+
+-- exact: the whole name (or its short name) equals; else a search (contains).
+function Bank.rowMatches(r, k, ks, exact)
+    local rs = r.shortKey
+    local noRealm = r.key == rs
+    if exact then
+        return r.key == k or rs == k or (ks ~= "" and noRealm and rs == ks)
+    end
+    return k == "" or r.key:find(k, 1, true) ~= nil or (ks ~= "" and noRealm and rs:find(ks, 1, true) ~= nil)
+end
+
 local base = { snap = false }
 function Bank.candidates(query)
     local snap = ns.Roster and ns.Roster.current()
@@ -443,6 +462,7 @@ function Bank.candidates(query)
             local a = m.guid and S().authorOf(m.guid)
             if a then
                 rows[#rows + 1] = { a = a, name = m.name, short = ns.shortName(m.name), key = ns.keyName(m.name),
+                    shortKey = ns.keyName(ns.shortName(m.name)),
                     rank = str(m.guildRank), rankIndex = ns.num(m.rankIndex) or 99, classToken = m.classToken,
                     online = m.online == true }
             end
@@ -454,13 +474,13 @@ function Bank.candidates(query)
         end)
         base = { snap = snap, rows = rows }
     end
-    local q = ns.keyName(query)
+    local k, ks = Bank.queryKeys(query)
     local cur = Bank.current()
     local on = {}
     for _, e in ipairs(cur.state == "ok" and cur.list.entries or {}) do if e.enabled then on[e.a] = true end end
     local out = {}
     for _, r in ipairs(base.rows) do
-        if q == "" or r.key:find(q, 1, true) then
+        if Bank.rowMatches(r, k, ks, false) then
             r.custodian = on[r.a] == true
             out[#out + 1] = r
         end

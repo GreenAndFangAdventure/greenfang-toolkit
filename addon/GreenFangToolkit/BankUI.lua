@@ -166,23 +166,14 @@ UI.PICKER_NAME = "GreenFangToolkit_KeeperPicker"
 UI.PICKER_ROWS = 10
 UI.PICKER_DELAY = 0.15
 
-local function exactly(rows, q)
-    local k, hit = ns.keyName(q), nil
-    for _, r in ipairs(rows) do
-        if r.key == k or ns.keyName(r.short) == k then
-            if hit then return nil end
-            hit = r
-        end
-    end
-    return hit
-end
-
+-- The box's text is resolved by the same rule as Bank.appoint (Bank.memberA):
+-- exactly one roster member appoints; anything else opens the picker.
 function UI.choose(q)
     q = str(q)
-    if q ~= "" then
-        local hit = exactly(B().candidates(q), q)
-        if hit then
-            local r = UI.say(B().appoint({ guid = ns.Share.guidOf(hit.a) }))
+    if q ~= "" and ns.Roster.current() then
+        local a = B().memberA(q)
+        if a then
+            local r = UI.say(B().appoint({ guid = ns.Share.guidOf(a) }))
             if r == "ok" then c.name:SetText("") end
             return r
         end

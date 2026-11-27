@@ -144,6 +144,28 @@ return function(T)
         ok(mine and mine.custodian, "I am in the picker, marked")
     end))
 
+    test("GF-012-FIX the page: a typed 名字-伺服器 finds a roster name without realm", done(function()
+        wow.reset({ roster = roster(), myRankIndex = 0 })
+        for _, m in ipairs(wow.state.roster) do m.name = m.name:gsub("%-.*$", "") end
+        IsGuildLeader = function() return true end
+        local ns = wow.loadAddon(ADDON_DIR)
+        wow.fire("PLAYER_LOGIN"); wow.fire("PLAYER_ENTERING_WORLD"); wow.advance(30); wow.advance(40)
+        ns.Bank.invalidate()
+        local UI = ns.BankUI
+        ns.Framework.open(UI.ID)
+        UI.controls.name:SetText("測試丙-測試伺服器")
+        wow.click(UI.controls.appoint)
+        ok((ns.Bank.isCustodian(C)), "appointed from the page")
+        UI.controls.name:SetText("測試甲")
+        wow.click(UI.controls.appoint)
+        ok((ns.Bank.isCustodian(A)), "myself from the page")
+        eq(#ns.Bank.candidates("測試丁-測試伺服器"), 1, "picker search finds him")
+        eq(#ns.Bank.candidates("測試丁-別的伺服器"), 0, "not on another realm")
+        UI.controls.name:SetText("測試丁-別的伺服器")
+        wow.click(UI.controls.appoint)
+        eq((ns.Bank.isCustodian("0000-0000000D")), false, "another realm: nobody appointed")
+    end))
+
     test("GF-012-FIX roster snapshot not loaded: says so instead of 找不到", done(function()
         local ns = login()
         ns.db.roster.snapshots = {}
