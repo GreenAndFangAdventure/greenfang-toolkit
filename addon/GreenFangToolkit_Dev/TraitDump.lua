@@ -16,7 +16,12 @@
 --   H <key>=<value> ...                 header (class, build, config, tree)
 --   S <index> id=<specID> name=<name> active=<0|1>       specializations
 --   G <tab> id=<groupID> name=<name> spent=<points>     tabs (game order)
---   N <nodeID> tab=<k|-> grp=<groupID|-> rank=<cur>/<max> ... E=<entry>:<def>:<spell>:<name>;...
+--   N <nodeID> tab=<k|-> grp=<groupID,...|-> rank=<cur>/<max> ... E=<entry>:<def>:<spell>:<name>;... by=<how>
+--     grp = every groupID of the node (GF-011-C); tab = the tab the toolkit
+--     counts it in (Talents.assignTabs when the toolkit is loaded), by = how:
+--     group (a tab's own group), sub (a sub-group shared with such a node),
+--     pos (posX between the tabs), - (未分組), direct (toolkit not loaded:
+--     a tab's own group only)
 --   ! MISSING <api> / ! EMPTY <api> n=<count> first=<args>
 -- A value the client did not give is "?". Not checked in the Forever client:
 -- the field names follow Talents.lua / Probe.lua and the retail C_Traits docs.
@@ -183,22 +188,54 @@ function T.collect()
         for _, g in ipairs(groups) do
             if type(g) == "table" then
                 local id = num(g.groupID) or num(g.ID)
-                tabs[#tabs + 1] = { id = id, name = type(g.displayName) == "string" and g.displayName or nil, spent = 0 }
+                tabs[#tabs + 1] = { id = id, name = type(g.displayName) == "string" and g.displayName or nil, spent = 0,
+                    order = num(g.orderIndex) }
                 if id then tabOf[id] = #tabs end
             end
         end
     end
 
+    -- GF-011-C: the toolkit's own tab rule, so this text shows what the roster counts.
+    local core = type(GreenFangToolkit_DevAccess) == "function" and select(2, pcall(GreenFangToolkit_DevAccess)) or nil
+    local Tl = type(core) == "table" and type(core.Talents) == "table" and type(core.Talents.assignTabs) == "function"
+        and core.Talents or nil
+
     -- Nodes first (the tab totals come from their ranks), lines after.
-    local rows, other = {}, 0
+    local infos = {}
     for i = 1, math.min(#nodes, T.MAX_NODES) do
         local nodeID = num(nodes[i])
-        local ni = nodeID and r.call("C_Traits.GetNodeInfo", cfg, nodeID) or nil
+        infos[i] = { id = nodeID, ni = nodeID and r.call("C_Traits.GetNodeInfo", cfg, nodeID) or nil }
+    end
+    local assigned
+    if Tl then
+        local facts = {}
+        for _, it in ipairs(infos) do
+            if it.id and type(it.ni) == "table" then facts[#facts + 1] = Tl.nodeFacts(it.id, it.ni) end
+        end
+        local order = {}
+        for k, t in ipairs(tabs) do order[k] = { id = t.id, order = t.order } end
+        local okA, res = pcall(Tl.assignTabs, order, facts)
+        assigned = okA and type(res) == "table" and res or nil
+    end
+    add(string.format("H assign=%s", assigned and "toolkit" or "direct"))
+    local rows, other = {}, 0
+    for _, it in ipairs(infos) do
+        local nodeID, ni = it.id, it.ni
         if type(ni) ~= "table" then
             rows[#rows + 1] = string.format("N %s ! EMPTY C_Traits.GetNodeInfo", v(nodeID))
         else
-            local gid = type(ni.groupIDs) == "table" and num(ni.groupIDs[1]) or nil
-            local tab = gid and tabOf[gid]
+            local gids = {}
+            for _, g in ipairs(type(ni.groupIDs) == "table" and ni.groupIDs or {}) do
+                if num(g) then gids[#gids + 1] = v(num(g)) end
+            end
+            local tab, by
+            if assigned then
+                tab, by = assigned.tab[nodeID], assigned.by[nodeID]
+            else
+                for _, g in ipairs(type(ni.groupIDs) == "table" and ni.groupIDs or {}) do
+                    if num(g) and tabOf[num(g)] then tab, by = tabOf[num(g)], "direct"; break end
+                end
+            end
             local rank = num(ni.ranksPurchased) or num(ni.activeRank) or num(ni.currentRank)
             if rank and rank > 0 then
                 if tab then tabs[tab].spent = tabs[tab].spent + rank else other = other + rank end
@@ -216,16 +253,16 @@ function T.collect()
                 entries[#entries + 1] = string.format("%s:%s:%s:%s%s", v(entryID), v(def), v(spell), v(name),
                     (active and entryID == active) and ":*" or "")
             end
-            rows[#rows + 1] = string.format("N %s tab=%s grp=%s rank=%s/%s cur=%s active=%s vis=%s type=%s pos=%s,%s sub=%s E=%s",
-                v(nodeID), tab and tostring(tab) or "-", gid and v(gid) or "-", v(rank), v(num(ni.maxRanks)),
+            rows[#rows + 1] = string.format("N %s tab=%s grp=%s rank=%s/%s cur=%s active=%s vis=%s type=%s pos=%s,%s sub=%s E=%s by=%s",
+                v(nodeID), tab and tostring(tab) or "-", #gids > 0 and table.concat(gids, ",") or "-", v(rank), v(num(ni.maxRanks)),
                 v(num(ni.currentRank)), v(num(ni.activeRank)), v(ni.isVisible), v(num(ni.type)), v(num(ni.posX)),
-                v(num(ni.posY)), v(num(ni.subTreeID)), #entries > 0 and table.concat(entries, ";") or "?")
+                v(num(ni.posY)), v(num(ni.subTreeID)), #entries > 0 and table.concat(entries, ";") or "?", by or "-")
         end
     end
 
     for k, t in ipairs(tabs) do add(string.format("G %d id=%s name=%s spent=%d", k, v(t.id), v(t.name), t.spent)) end
     add(string.format("H nodes=%d listed=%d tabs=%d ungroupedSpent=%d", #nodes, #rows, #tabs, other))
-    add("H format: N nodeID tab grp rank=spent/max cur active vis type pos sub E=entryID:definitionID:spellID:name[:* active];...")
+    add("H format: N nodeID tab grp(all groupIDs) rank=spent/max cur active vis type pos sub E=entryID:definitionID:spellID:name[:* active];... by=group|sub|pos|direct|-")
     for _, row in ipairs(rows) do add(row) end
 
     for _, path in ipairs(r.missingOrder) do add("! MISSING " .. path) end

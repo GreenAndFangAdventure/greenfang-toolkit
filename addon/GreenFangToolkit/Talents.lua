@@ -5,9 +5,14 @@
 -- GetActiveTalentGroup, GetUnspentTalentPoints, IsDualSpecUnlocked are all
 -- nil). Talents are a trait tree: C_ClassTalents.GetActiveConfigID ->
 -- C_Traits.GetConfigInfo(cfg).treeIDs[1] -> GetTreeNodes(tree) ->
--- GetNodeInfo(cfg, node) { ranksPurchased, activeRank, groupIDs }; the three
--- groups of GetGroupDisplayInfoByTreeID(tree) { groupID, displayName, icon }
--- are the old three tabs. Points per group = ranks of the nodes in it.
+-- GetNodeInfo(cfg, node) { ranksPurchased, activeRank, groupIDs, posX }; the
+-- groups of GetGroupDisplayInfoByTreeID(tree) { groupID, displayName, icon,
+-- orderIndex } are the old tabs. Points per tab = ranks of the nodes in it.
+-- GF-011-C (owner's paladin trait export 2026-11-27): most nodes carry a
+-- sub-group (11480..), not the tab's group (11486), so a node's tab comes from
+-- Talents.assignTabs: any of its groupIDs, else a sub-group it shares with
+-- such a node, else its posX (the tabs sit side by side). Worked out once per
+-- tree and kept (Talents.layout); a node nothing places stays 「未分組」.
 --
 -- Shared with the guild through GFTKS (Share.lua) as group "T", local = true:
 -- never in GF Sync's outbox, never on the website (upload-api §3.13: the site
@@ -145,12 +150,149 @@ function Talents.treeGroups(tree)
     for _, g in ipairs(list) do
         if type(g) == "table" then
             out[#out + 1] = { id = num(g.groupID) or num(g.ID), name = type(g.displayName) == "string" and g.displayName or nil,
-                icon = num(g.icon) or num(g.iconFileID) }
+                icon = num(g.icon) or num(g.iconFileID), order = num(g.orderIndex) }
         end
         if #out >= Talents.MAX_GROUPS then break end
     end
     return out
 end
+
+---------------------------------------------------------------------------
+-- GF-011-C: which tab each node is in (pure)
+---------------------------------------------------------------------------
+
+Talents.GAP_RATIO = 1.5 -- coordinate fallback without a known node in every tab: a gap between tabs is this much wider than any gap inside one
+
+-- Tab k for an x, given the cut points between neighbouring tabs (left to right).
+local function cluster(x, cuts)
+    local c = 1
+    for _, cut in ipairs(cuts) do if x > cut then c = c + 1 end end
+    return c
+end
+
+-- Cut points between the tabs on posX, or nil when the positions do not
+-- tell them apart. leftToRight = tab indices sorted by orderIndex; known =
+-- tab index -> list of x of nodes already placed by their groups.
+local function positionCuts(leftToRight, known, xs)
+    local n = #leftToRight
+    if n < 1 then return nil end
+    local all = true
+    for _, k in ipairs(leftToRight) do if not known[k] or #known[k] == 0 then all = false end end
+    local cuts = {}
+    if all then
+        -- Each tab's own x range; they must not overlap, in orderIndex order.
+        local lo, hi = {}, {}
+        for i, k in ipairs(leftToRight) do
+            lo[i], hi[i] = math.huge, -math.huge
+            for _, x in ipairs(known[k]) do lo[i] = math.min(lo[i], x); hi[i] = math.max(hi[i], x) end
+        end
+        for i = 1, n - 1 do
+            if not (hi[i] < lo[i + 1]) then return nil end
+            cuts[i] = (hi[i] + lo[i + 1]) / 2
+        end
+        return cuts
+    end
+    -- Some tab has no placed node: the n-1 widest gaps between distinct x.
+    local seen, list = {}, {}
+    for _, x in ipairs(xs) do if not seen[x] then seen[x] = true; list[#list + 1] = x end end
+    table.sort(list)
+    if #list < n then return nil end
+    local gaps = {}
+    for i = 1, #list - 1 do gaps[i] = { w = list[i + 1] - list[i], at = (list[i] + list[i + 1]) / 2 } end
+    table.sort(gaps, function(a, b) return a.w > b.w end)
+    if n > 1 and gaps[n] and gaps[n - 1].w <= gaps[n].w * Talents.GAP_RATIO then return nil end
+    for i = 1, n - 1 do cuts[i] = gaps[i].at end
+    table.sort(cuts)
+    -- Every node its groups already placed must land in its own tab.
+    for i, k in ipairs(leftToRight) do
+        for _, x in ipairs(known[k] or {}) do if cluster(x, cuts) ~= i then return nil end end
+    end
+    return cuts
+end
+
+-- tabs = { { id, order } } (game order; order = orderIndex or nil);
+-- nodes = { { id, groups = { groupID, ... }, x } }. Returns
+-- { tab = { [nodeID] = k }, by = { [nodeID] = "group" | "sub" | "pos" } };
+-- a node in neither is 「未分組」.
+function Talents.assignTabs(tabs, nodes)
+    local tabIndex, tab, by = {}, {}, {}
+    for k, t in ipairs(tabs) do if t.id then tabIndex[t.id] = k end end
+    -- 1. One of the node's groups is a tab's group.
+    local subTab = {} -- sub-group -> tab k, or false when its nodes disagree
+    for _, nd in ipairs(nodes) do
+        local k
+        for _, g in ipairs(nd.groups) do
+            local t = tabIndex[g]
+            if t then
+                if k and k ~= t then k = false; break end
+                k = t
+            end
+        end
+        if k then
+            tab[nd.id], by[nd.id] = k, "group"
+            for _, g in ipairs(nd.groups) do
+                if not tabIndex[g] then
+                    if subTab[g] == nil then subTab[g] = k elseif subTab[g] ~= k then subTab[g] = false end
+                end
+            end
+        end
+    end
+    -- 2. A sub-group shared with nodes of one tab only.
+    for _, nd in ipairs(nodes) do
+        if not tab[nd.id] then
+            local k
+            for _, g in ipairs(nd.groups) do
+                local t = subTab[g]
+                if t then
+                    if k and k ~= t then k = false; break end
+                    k = t
+                end
+            end
+            if k then tab[nd.id], by[nd.id] = k, "sub" end
+        end
+    end
+    -- 3. posX: the tabs side by side, left to right by orderIndex.
+    local leftToRight = {}
+    for k = 1, #tabs do leftToRight[k] = k end
+    table.sort(leftToRight, function(a, b)
+        local oa, ob = tabs[a].order, tabs[b].order
+        if oa and ob and oa ~= ob then return oa < ob end
+        return a < b
+    end)
+    local known, xs = {}, {}
+    for _, nd in ipairs(nodes) do
+        if nd.x then
+            xs[#xs + 1] = nd.x
+            local k = tab[nd.id]
+            if k then known[k] = known[k] or {}; known[k][#known[k] + 1] = nd.x end
+        end
+    end
+    local cuts = #tabs > 0 and positionCuts(leftToRight, known, xs)
+    if cuts then
+        for _, nd in ipairs(nodes) do
+            if not tab[nd.id] and nd.x then tab[nd.id], by[nd.id] = leftToRight[cluster(nd.x, cuts)], "pos" end
+        end
+    end
+    return { tab = tab, by = by }
+end
+
+-- The node facts assignTabs needs, from one GetNodeInfo result.
+function Talents.nodeFacts(id, ni)
+    local groups = {}
+    if type(ni.groupIDs) == "table" then
+        for _, g in ipairs(ni.groupIDs) do
+            g = num(g)
+            if g then groups[#groups + 1] = g end
+        end
+    end
+    return { id = id, groups = groups, x = num(ni.posX) }
+end
+
+-- Tab layout per tree, worked out on the first read and kept: node groups
+-- and positions belong to the tree, not to the points spent. Dropped by
+-- Talents.onEvent on events that can swap the tree (spec, config list, login).
+local layout = nil
+Talents.layoutBuilds = 0
 
 -- Read now. Returns the snapshot (Talents.encode's shape, plus names and
 -- why = nil) or nil, why ("api" no trait API, "config", "tree", "nodes").
@@ -163,25 +305,35 @@ function Talents.read()
     if not tree then return nil, "tree" end
     local nodes = ns.call(fn("C_Traits.GetTreeNodes"), tree)
     if type(nodes) ~= "table" then return nil, "nodes" end
-    local groups = Talents.treeGroups(tree)
-    local index = {}
-    for k, g in ipairs(groups) do if g.id then index[g.id] = k end end
+    local fresh = not (layout and layout.tree == tree and layout.count == #nodes)
+    local groups = fresh and Talents.treeGroups(tree) or layout.groups
     local spent, other = {}, 0
     for k = 1, #groups do spent[k] = 0 end
     local nodeInfo = fn("C_Traits.GetNodeInfo")
+    local facts, ranks = {}, {}
     for i = 1, math.min(#nodes, 1000) do
         local ni = ns.call(nodeInfo, cfg, nodes[i])
         if type(ni) == "table" then
-            local r = num(ni.ranksPurchased) or num(ni.activeRank) or 0
-            if r > 0 then
-                local gid = type(ni.groupIDs) == "table" and num(ni.groupIDs[1]) or nil
-                local k = gid and index[gid]
-                if k then spent[k] = spent[k] + r else other = other + r end
-            end
+            ranks[#ranks + 1] = { id = nodes[i], r = num(ni.ranksPurchased) or num(ni.activeRank) or 0 }
+            if fresh then facts[#facts + 1] = Talents.nodeFacts(nodes[i], ni) end
+        end
+    end
+    if fresh then
+        -- Kept only when every node answered (a half-loaded tree is worked out again next read).
+        layout = { tree = tree, count = #facts == math.min(#nodes, 1000) and #nodes or -1, groups = groups, map = Talents.assignTabs(groups, facts) }
+        Talents.layoutBuilds = Talents.layoutBuilds + 1
+    end
+    local how = { group = 0, sub = 0, pos = 0, none = 0 }
+    for _, n in ipairs(ranks) do
+        if n.r > 0 then
+            local k = layout.map.tab[n.id]
+            if k then spent[k] = spent[k] + n.r else other = other + n.r end
+            local b = layout.map.by[n.id] or "none"
+            how[b] = how[b] + n.r
         end
     end
     local out = { configID = cfg, treeID = tree, specID = specID(),
-        level = num((ns.call(UnitLevel, "player"))) or 1, groups = {}, other = other }
+        level = num((ns.call(UnitLevel, "player"))) or 1, groups = {}, other = other, how = how }
     if #groups == 0 then
         out.groups[1] = { spent = other }
     else
@@ -368,8 +520,9 @@ function Talents.summaryLine()
     if not d then return "本角色天賦：" .. (Talents.WHY[why] or str(why)) end
     local nums = {}
     for k, g in ipairs(d.groups) do nums[k] = tostring(g.spent) .. (g.name and ("(" .. g.name .. ")") or "") end
-    return string.format("本角色天賦：%s｜未分組 %d｜樹 %d｜專精 %d｜等級 %d｜匯出字串 %s｜連結 %s",
-        table.concat(nums, "/"), d.other or 0, d.treeID, d.specID, d.level,
+    local h = d.how or {}
+    return string.format("本角色天賦：%s｜未分組 %d｜歸屬 群組 %d／子群組 %d／座標 %d 點｜樹 %d｜專精 %d｜等級 %d｜匯出字串 %s｜連結 %s",
+        table.concat(nums, "/"), d.other or 0, h.group or 0, h.sub or 0, h.pos or 0, d.treeID, d.specID, d.level,
         d.import and (#d.import .. " 字") or "無", Talents.canLink({ import = d.import, specID = d.specID }) and "可" or "不可")
 end
 
@@ -401,8 +554,14 @@ ns.Share.registerGroup({
 Talents.EVENTS = { "PLAYER_ENTERING_WORLD", "TRAIT_CONFIG_UPDATED", "TRAIT_CONFIG_LIST_UPDATED",
     "ACTIVE_PLAYER_SPECIALIZATION_CHANGED", "ACTIVE_TALENT_GROUP_CHANGED", "PLAYER_TALENT_UPDATE",
     "CHARACTER_POINTS_CHANGED", "PLAYER_LEVEL_UP" }
+-- GF-011-C: events that can bring another tree (or a tree not fully loaded
+-- before) also drop the kept tab layout; point changes keep it.
+Talents.LAYOUT_EVENTS = { PLAYER_ENTERING_WORLD = true, TRAIT_CONFIG_LIST_UPDATED = true,
+    ACTIVE_PLAYER_SPECIALIZATION_CHANGED = true, ACTIVE_TALENT_GROUP_CHANGED = true }
+function Talents.dropLayout() layout = nil end
 local waiting = false
-function Talents.onEvent()
+function Talents.onEvent(event)
+    if Talents.LAYOUT_EVENTS[event] then layout = nil end
     dirty = true
     if waiting then return end
     waiting = true
@@ -415,4 +574,4 @@ function Talents.onEvent()
 end
 local events = CreateFrame("Frame")
 for _, e in ipairs(Talents.EVENTS) do pcall(events.RegisterEvent, events, e) end
-events:SetScript("OnEvent", function() Talents.onEvent() end)
+events:SetScript("OnEvent", function(_, event) Talents.onEvent(event) end)
