@@ -343,6 +343,17 @@ end
 
 -- GF-UI-E: an entry button: the game's icon (20 px) and the 4-character name.
 local function setNavIcon(b, key)
+    -- GF-UI-M (owner): 職工檔案 shows the race head for the character's sex.
+    if key == "profile" and b.icon.SetAtlas then
+        local atlas = ns.Icons.navPortraitAtlas()
+        if atlas and pcall(b.icon.SetAtlas, b.icon, atlas) then
+            b.icon:SetTexCoord(0, 1, 0, 1)
+            b.icon:Show()
+            b.iconPath, b.iconAtlas = atlas, atlas
+            return
+        end
+    end
+    b.iconAtlas = nil
     local list = F.ENTRY_ICON[key] or F.ENTRY_ICON.page
     local shown = nil
     for _, path in ipairs(list) do

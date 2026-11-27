@@ -90,8 +90,7 @@ function Character.refresh()
     if not panel then return end
     local p = ns.Sync.player()
     local color = Icons.classColor(p.classToken)
-    -- GF-UI-K: the race head for the character's sex (Icons.setPortrait), else the class icon.
-    Character.portrait = Icons.setPortrait(classIcon, ns.call(rawget(_G, "UnitSex"), "player"), p.classToken)
+    Character.drawPortrait(p.classToken)
     nameLine:SetText(str(p.name) ~= "" and p.name or "未知角色")
     nameLine:SetTextColor(color[1], color[2], color[3])
     infoLine:SetText(string.format("等級 %s　%s　%s",
@@ -140,6 +139,40 @@ function Character.refresh()
         if inGuild and ns.OrdersUI and ns.OrdersUI.openServices then Character.servicesButton:Show() else Character.servicesButton:Hide() end
     end
     if ns.ProfileUI then ns.ProfileUI.refresh() end
+end
+
+-- GF-UI-M (owner: 「我個人頭像請用個人頭像」): the character's own portrait
+-- (Icons.setUnitPortrait); without it the class icon. The race head by sex
+-- moved to the left bar's 職工檔案 icon (Icons.navPortraitAtlas).
+function Character.drawPortrait(classToken)
+    if not classIcon then return nil end
+    local mode = Icons.setUnitPortrait(classIcon, "player")
+    if not mode then
+        if classIcon.SetTexCoord then classIcon:SetTexCoord(0, 1, 0, 1) end
+        Icons.setClassIcon(classIcon, classToken or ns.Sync.player().classToken)
+        mode = "class"
+    end
+    Character.portrait = mode
+    return mode
+end
+
+-- GF-UI-M: the game says the portrait changed (the model loaded after the
+-- page was drawn, a new look): set it again, only while the page is on
+-- screen and out of combat (the next refresh draws it otherwise).
+Character.PORTRAIT_EVENTS = { "UNIT_PORTRAIT_UPDATE", "PORTRAITS_UPDATED" }
+Character.portraitRedraws = 0
+function Character.onPortraitEvent(event, unit)
+    if event == "UNIT_PORTRAIT_UPDATE" and unit ~= "player" then return false end
+    if not (panel and ns.Framework.isModuleShown("character")) or ns.inCombat() then return false end
+    Character.portraitRedraws = Character.portraitRedraws + 1
+    Character.drawPortrait()
+    return true
+end
+do
+    local f = CreateFrame("Frame")
+    for _, e in ipairs(Character.PORTRAIT_EVENTS) do pcall(f.RegisterEvent, f, e) end
+    f:SetScript("OnEvent", function(_, event, unit) Character.onPortraitEvent(event, unit) end)
+    Character.portraitFrame = f
 end
 
 local function build(p)

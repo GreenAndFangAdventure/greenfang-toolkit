@@ -2,7 +2,7 @@
 -- 公會黑庫. Shows who is guild master, the custodian list and its state, the
 -- guild master's buttons (指定 / 背包 / 銀行 / 撤銷; everybody else sees them
 -- disabled, never lit), a custodian's own 公產 scope (a setting only) and,
--- in place of the stock list, a 「尚未開放」 state panel.
+-- in place of the stock list, a state panel (GF-UI-M: 「庫存：第二階段才有」).
 -- Game art only (class icons, the state panel's icons), 16 px text, button
 -- names of 2-4 characters.
 
@@ -20,6 +20,12 @@ UI.X, UI.RIGHT_X = 20, 720
 UI.TOP = 40
 UI.Y = { title = -UI.TOP, status = -UI.TOP - 32, listHead = -UI.TOP - 68, rows = -UI.TOP - 100, scopeHead = -UI.TOP - 68,
     stockHead = -UI.TOP - 484, stock = -UI.TOP - 514 }
+-- GF-UI-M (owner): what the 庫存 area says in phase 1 (was 「尚未開放｜等會長實機驗證權限後開放」).
+UI.STOCK_TITLE = "庫存：第二階段才有"
+UI.STOCK_DETAIL = "目前只能管理保管人名單；庫存、申領、核准還在開發中"
+-- GF-UI-M (owner): the list scrolls with the wheel (8 pooled rows; up to 10
+-- active + 10 revoked); the same 「還有 N 位」 line as 調貨看板's detail.
+UI.MORE_TEXT = "還有 %d 位，用滑鼠滾輪往下看"
 UI.RESULT = {
     ["no-authority"] = "只有會長可以管理", ["not-found"] = "找不到這位職工", full = "保管人已達上限",
     same = "沒有變更", invalid = "格式不對", ["last-kind"] = "至少留一種，否則請撤銷", ok = "已更新",
@@ -76,6 +82,8 @@ local function row(p, i)
         if r.entry and B().canManage() then UI.say(B().revoke(r.entry.a)) end
     end, 64)
     r.revoke:SetPoint("LEFT", r, "LEFT", 576, 0)
+    if r.EnableMouseWheel then r:EnableMouseWheel(true) end
+    r:SetScript("OnMouseWheel", function(_, delta) UI.scroll(delta) end)
     return r
 end
 
@@ -99,6 +107,8 @@ local function build(p)
     c.role = text(p, ns.FIELD_FONT, X + 140, Y.title, 300)
     c.status = text(p, ns.LABEL_FONT, X, Y.status, 1040)
     c.listHead = header(p, "保管人名單", X, Y.listHead)
+    c.more = text(p, ns.DISABLED_FONT, X + 140, Y.listHead, 520)
+    c.offset = 0
     c.rows = {}
     for i = 1, UI.ROWS do c.rows[i] = row(p, i) end
     c.listState = W().statePanel(p, UI.ROW_W, 120)
@@ -303,8 +313,12 @@ function UI.refresh()
         if x.enabled ~= y.enabled then return x.enabled end
         return x.epoch > y.epoch
     end)
+    c.total = #entries
+    c.offset = math.max(0, math.min(c.offset or 0, #entries - UI.ROWS))
+    local rest = #entries - c.offset - UI.ROWS
+    c.more:SetText(rest > 0 and string.format(UI.MORE_TEXT, rest) or "")
     for i, r in ipairs(c.rows) do
-        local e = entries[i]
+        local e = entries[c.offset + i]
         r.entry = e
         if e then
             local name, token = memberText(e.a)
@@ -352,7 +366,17 @@ function UI.refresh()
     end
     shown(c.scopeNote, isCust)
     if isCust then c.scopeState.set(nil) else c.scopeState.set("empty", "你不是保管人") end
-    c.stock.set("unknown", "尚未開放", "等會長實機驗證權限後開放")
+    c.stock.set("unknown", UI.STOCK_TITLE, UI.STOCK_DETAIL)
+end
+
+-- GF-UI-M: the wheel over the list moves one row; the same 8 rows are refilled.
+function UI.scroll(delta)
+    local before = c.offset or 0
+    local after = math.max(0, math.min((c.total or 0) - UI.ROWS, before - (delta or 0)))
+    if after == before then return false end
+    c.offset = after
+    UI.refresh()
+    return true
 end
 
 ns.Bank.onChanged = function() if panel and panel:IsShown() then UI.refresh() end end

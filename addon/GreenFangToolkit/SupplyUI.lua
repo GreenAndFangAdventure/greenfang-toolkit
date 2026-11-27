@@ -136,6 +136,20 @@ UI.HEADINGS = {
 UI.DETAIL_HEADINGS = { "職工", "數量", "在線", "時效", "條件" } -- GF-009-14 B: 來源 → 交易條件 (自動 rows say 自動)
 UI.NOTE_ICON = "Interface\\Buttons\\UI-GuildButton-PublicNote-Up" -- shown only when there is a note
 UI.NOTE_ICON_SIZE = 14
+-- GF-UI-M (owner: 「看板物品的備註應該要可以完整顯示清楚」): a person row's
+-- note is written out in full on its own line(s) under the row, after the
+-- note icon (the icon now sits in front of the text it stands for); a row
+-- without a note keeps its 40 px. The rows stack by their own height from
+-- DETAIL_TOP down to DETAIL_BOTTOM; what does not fit is reached with the
+-- mouse wheel (the same pooled rows, refilled). 條件 may take two lines.
+UI.MAIN_H, UI.ROW_GAP = 40, 4
+UI.NOTE_X = 4 + UI.NOTE_ICON_SIZE + 4
+UI.NOTE_W = UI.DETAIL_W - UI.NOTE_X - 4
+UI.NOTE_LINE_H = 18
+UI.NOTE_PREFIX = "備註："
+UI.MORE_TEXT = "還有 %d 位，用滑鼠滾輪往下看"
+UI.MORE_H = 22
+UI.DETAIL_BOTTOM = UI.TOP - UI.ROWS * UI.ROW_H -- the left list's bottom
 -- 收集組 only where the lists come from the collection rules.
 UI.GROUP_TABS = { need = true, offer = true }
 -- GF-UI-K (owner: 刊登 stood alone mid-page): 刊登 at the list's left edge on
@@ -552,22 +566,63 @@ end
 -- GF-UI-K: a detail row's place: person rows under the detail header; my
 -- listing's lines (no header) start where the header would be, the value
 -- right after its label.
-function UI.placeDetailRow(r, i, listing)
-    local top = listing and UI.DETAIL_HEAD_Y or UI.DETAIL_TOP
+-- GF-UI-M: y is the row's top (rows have their own height now).
+function UI.placeDetailRow(r, y, listing)
     r:ClearAllPoints()
-    r:SetPoint("TOPLEFT", panel, "TOPLEFT", UI.DETAIL_X, top - (i - 1) * 44)
+    r:SetPoint("TOPLEFT", panel, "TOPLEFT", UI.DETAIL_X, y)
     r.what:ClearAllPoints()
-    r.what:SetPoint("LEFT", r, "LEFT", listing and UI.LISTING_VALUE_X or UI.DCOL.what.x, 0)
+    r.what:SetPoint("LEFT", r, "TOPLEFT", listing and UI.LISTING_VALUE_X or UI.DCOL.what.x, -UI.MAIN_H / 2)
     r.gfListing = listing
+    r.gfTop = y
+end
+
+-- GF-UI-M: the height a wrapped text takes: what the client measures, else
+-- an estimate from the characters (wider than the font, so never too short).
+function UI.wrapHeight(fs, text, w)
+    local h = fs and fs.GetStringHeight and ns.num((fs:GetStringHeight())) or nil
+    if h and h > 0 then return h end
+    local lines = math.max(1, math.ceil((ns.labelWidth(text) - 6) / w))
+    return lines * UI.NOTE_LINE_H
+end
+
+-- GF-UI-M: a row's note line: the icon and the full text, or nothing (the
+-- row keeps its 40 px). x, w: where the text goes; top: its offset in the
+-- row. Returns the row's height.
+function UI.setRowNote(r, text, x, w, top, icon)
+    r.note:ClearAllPoints()
+    r.noteIcon:ClearAllPoints()
+    if not text or text == "" then
+        r.note:SetText(""); r.note:Hide(); r.noteIcon:Hide()
+        r.gfNoteH = 0
+        r:SetHeight(UI.MAIN_H)
+        r.gfHeight = UI.MAIN_H
+        return UI.MAIN_H
+    end
+    r.note:SetPoint("TOPLEFT", r, "TOPLEFT", x, top)
+    r.note:SetWidth(w)
+    r.note:SetText(text)
+    r.note:Show()
+    if icon then
+        r.noteIcon:SetPoint("TOPLEFT", r, "TOPLEFT", 4, top - 1)
+        r.noteIcon:Show()
+    else
+        r.noteIcon:Hide()
+    end
+    local h = UI.wrapHeight(r.note, text, w)
+    r.gfNoteH = h
+    local total = math.max(UI.MAIN_H, -top + h + 6)
+    r:SetHeight(total)
+    r.gfHeight = total
+    return total
 end
 
 local function newDetailRow(i)
     local r = CreateFrame("Frame", nil, panel)
-    r:SetSize(UI.DETAIL_W, 40)
-    r:SetPoint("TOPLEFT", panel, "TOPLEFT", UI.DETAIL_X, UI.DETAIL_TOP - (i - 1) * 44)
+    r:SetSize(UI.DETAIL_W, UI.MAIN_H)
+    r:SetPoint("TOPLEFT", panel, "TOPLEFT", UI.DETAIL_X, UI.DETAIL_TOP)
     local function cell(key, font)
         local fs = r:CreateFontString(nil, "ARTWORK", font)
-        fs:SetPoint("LEFT", r, "LEFT", UI.DCOL[key].x, 0)
+        fs:SetPoint("LEFT", r, "TOPLEFT", UI.DCOL[key].x, -UI.MAIN_H / 2)
         fs:SetWidth(UI.DCOL[key].w)
         fs:SetJustifyH("LEFT")
         if fs.SetWordWrap then fs:SetWordWrap(false) end
@@ -578,14 +633,21 @@ local function newDetailRow(i)
     r.on = cell("on", ns.LABEL_FONT)
     r.fresh = cell("fresh", ns.LABEL_FONT)
     r.src = cell("src", ns.DISABLED_FONT)
-    -- GF-009-14 B: the note icon before the terms; the whole row's tooltip
-    -- shows the terms and the full note.
+    -- GF-UI-M: 條件 is never cut: two lines when it needs them.
+    if r.src.SetWordWrap then r.src:SetWordWrap(true) end
+    -- GF-UI-M: the note under the row, in full (wraps); the note icon in front of it.
+    r.note = r:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
+    r.note:SetJustifyH("LEFT")
+    if r.note.SetJustifyV then r.note:SetJustifyV("TOP") end
+    if r.note.SetWordWrap then r.note:SetWordWrap(true) end
+    r.note:Hide()
     r.noteIcon = r:CreateTexture(nil, "OVERLAY")
     r.noteIcon:SetSize(UI.NOTE_ICON_SIZE, UI.NOTE_ICON_SIZE)
     r.noteIcon:SetTexture(UI.NOTE_ICON)
-    r.noteIcon:SetPoint("RIGHT", r.src, "LEFT", -2, 0)
     r.noteIcon:Hide()
     if r.EnableMouse then r:EnableMouse(true) end
+    if r.EnableMouseWheel then r:EnableMouseWheel(true) end
+    r:SetScript("OnMouseWheel", function(_, delta) UI.scrollDetail(delta) end)
     r:SetScript("OnEnter", function(self)
         if not (self.tipLines and #self.tipLines > 0 and GameTooltip) then return end
         self.gfSupplyTip = true
@@ -597,7 +659,7 @@ local function newDetailRow(i)
     end)
     r:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
     r.contact = Th.button(r, "聯絡", 72, ns.BUTTON_H)
-    r.contact:SetPoint("RIGHT", r, "RIGHT", 0, 0)
+    r.contact:SetPoint("RIGHT", r, "TOPRIGHT", 0, -UI.MAIN_H / 2)
     r.contact:SetScript("OnClick", function(self) if self.entry then Supply.contact(self.entry) end end)
     -- GF-UI-F: the page's one sentence lives here now (no footer line).
     r.contact.tip = UI.CONTACT_TIP
@@ -656,6 +718,7 @@ function UI.drawDetail()
         if detailHeader then detailHeader:Hide() end
         listingButtons(nil)
         hideDetailRows(1)
+        if detail.more then detail.more:Hide() end
         return
     end
     setItemIcon(detail.icon, data.itemID)
@@ -671,20 +734,25 @@ function UI.drawDetail()
         hideDetailRows(1)
         -- GF-009-14 B: 交易條件, then the full note (when there is one).
         -- GF-UI-K: in the header's place (it is hidden here), the value right after its label.
+        -- GF-UI-M: the note wraps in full right of its label (was one cut line).
         local lines = { { "交易條件", L.termsText(l.terms, l.price) } }
-        if l.note and l.note ~= "" then lines[#lines + 1] = { "備註", l.note } end
+        if l.note and l.note ~= "" then lines[#lines + 1] = { "備註", l.note, true } end
+        local y = UI.DETAIL_HEAD_Y
         for i, ln in ipairs(lines) do
             local r = detailRows[i] or newDetailRow(i)
-            UI.placeDetailRow(r, i, true)
+            UI.placeDetailRow(r, y, true)
             r.name:SetText(ln[1])
             r.on:SetText(""); r.fresh:SetText(""); r.src:SetText("")
-            r.noteIcon:Hide()
             r.what:SetWidth(UI.LISTING_VALUE_W)
-            r.what:SetText(ln[2])
-            r.tipLines = { ln[1], ln[2] }
+            r.what:SetText(ln[3] and "" or ln[2])
+            local h = UI.setRowNote(r, ln[3] and ln[2] or nil, UI.LISTING_VALUE_X,
+                UI.DETAIL_W - UI.LISTING_VALUE_X - 4, -(UI.MAIN_H / 2) + 9, false)
+            r.tipLines = nil -- GF-UI-M: everything is on the page
             r.contact:Hide()
             r:Show()
+            y = y - h - UI.ROW_GAP
         end
+        if detail.more then detail.more:Hide() end
         return
     end
     listingButtons(nil)
@@ -692,12 +760,15 @@ function UI.drawDetail()
     local it = data.item
     detail.sub:SetText(data.qty .. (data.match ~= "" and ("｜" .. data.match) or "") .. (data.where and ("｜" .. data.where) or ""))
     local list = it.others
+    -- GF-UI-M: rows stack by their own height, from the scrolled-to person on.
+    state.detailOffset = math.max(0, math.min(state.detailOffset or 0, math.max(0, #list - 1)))
+    local y, used = UI.DETAIL_TOP, 0
+    local bottom = UI.DETAIL_BOTTOM + UI.MORE_H
     for i = 1, UI.DETAIL_ROWS do
-        local e = list[i]
+        local e = list[state.detailOffset + i]
         local r = detailRows[i]
-        if e then
+        if e and y > bottom then
             r = r or newDetailRow(i)
-            UI.placeDetailRow(r, i, false)
             local name, what, on, fresh = UI.personText(e)
             r.name:SetText(name)
             r.what:SetWidth(UI.DCOL.what.w)
@@ -705,17 +776,58 @@ function UI.drawDetail()
             r.on:SetText(on)
             r.fresh:SetText(fresh)
             r.src:SetText(UI.condText(e))
-            local m = UI.manualOf(e)
-            if m and (m.note or "") ~= "" then r.noteIcon:Show() else r.noteIcon:Hide() end
+            local h = UI.setRowNote(r, UI.noteText(e), UI.NOTE_X, UI.NOTE_W, -UI.MAIN_H, true)
+            if y - h < bottom and used > 0 then
+                r:Hide() -- does not fit: the wheel brings it up
+                break
+            end
+            UI.placeDetailRow(r, y, false)
+            -- GF-UI-M: the tooltip names the person in full (the cell may end in 「…」).
             r.tipLines = UI.listingTipLines(e, false)
+            table.insert(r.tipLines, 1, name)
             r.contact.entry = e
             r.contact:Show()
             W.setEnabled(r.contact, Supply.canContact(e))
             r:Show()
+            used = used + 1
+            y = y - h - UI.ROW_GAP
         elseif r then
             r:Hide()
         end
     end
+    hideDetailRows(used + 1)
+    state.detailShown = used
+    local rest = #list - state.detailOffset - used
+    if detail.more then
+        if rest > 0 then
+            detail.more:SetText(string.format(UI.MORE_TEXT, rest))
+            detail.more:Show()
+        else
+            detail.more:Hide()
+        end
+    end
+end
+
+-- GF-UI-M: the wheel over the detail moves one person at a time; it stops
+-- once the last person is in view.
+function UI.scrollDetail(delta)
+    local data = state.selected and state.items[state.selected]
+    if not (data and data.item and not data.listing) then return end
+    local n = #data.item.others
+    local before = state.detailOffset or 0
+    local after = math.max(0, math.min(n - 1, before - (delta or 0)))
+    if after == before then return end
+    if after > before and before + (state.detailShown or 0) >= n then return end
+    state.detailOffset = after
+    UI.drawDetail()
+end
+
+-- GF-UI-M: a person row's note line: 「備註：…」 in full, or nil (no note).
+function UI.noteText(e)
+    local m = UI.manualOf(e)
+    local note = m and m.note or ""
+    if note == "" then return nil end
+    return UI.NOTE_PREFIX .. note
 end
 
 -- GF-UI-H: remove an ended listing of mine from 我的刊登 (it never comes back).
@@ -728,6 +840,7 @@ end
 
 function UI.select(index)
     state.selected = index
+    state.detailOffset = 0
     UI.applyLayout()
     UI.drawList()
     UI.drawDetail()
@@ -1114,6 +1227,10 @@ local function build(p)
     detail.sub:SetPoint("TOPLEFT", p, "TOPLEFT", UI.DETAIL_X + 50, UI.HEAD_Y - 26)
     detail.sub:SetWidth(UI.DETAIL_W - 50)
     if detail.sub.SetWordWrap then detail.sub:SetWordWrap(false) end
+    -- GF-UI-M: 「還有 N 位」 under the detail rows when not all of them fit.
+    detail.more = label(p, "", ns.DISABLED_FONT)
+    detail.more:SetPoint("TOPLEFT", p, "TOPLEFT", UI.DETAIL_X + 4, UI.DETAIL_BOTTOM + UI.MORE_H - 2)
+    detail.more:Hide()
     local by = UI.TOP - UI.ROWS * UI.ROW_H + 40
     detail.edit = Th.button(p, "修改", 80, ns.BUTTON_H)
     detail.edit:SetPoint("TOPLEFT", p, "TOPLEFT", UI.DETAIL_X, by)
