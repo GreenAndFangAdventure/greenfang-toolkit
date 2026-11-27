@@ -15,11 +15,12 @@
   - **v1.3（2026-11-22 claude-addon，GF-001-D24，AddOn 0.9.8／0.10.0；與 GearBot 議定）**：新增選填欄位 `uploader.fullName`（每一種 kind）與 `member.share`／`member.report` 的 `payload.subject.fullName`：角色全名「名字 姓氏」，和網站名冊（Blizzard API）的寫法一樣。用來修正 `character_not_in_roster`（§3 第 2、6 點）。格式其餘不變
   - **v1.5（2026-11-23 claude-pm，GF-002-B，AddOn 0.12.0）**：`character.self`、`member.share` 的 payload 多一個選填欄位 `adventure`（冒險單、職工單、動作；savedvariables §adventure）。網站規則見 §3 第 11 點。不是新的 kind
   - **v1.6（2026-11-25 claude-pm，AddOn 0.13.0～0.16.x；GearBot 2026-11-25 回覆第 3～7 段，owner 同日定案政策）**：都是新增，舊的用戶端照舊能用。網站都還沒實作。
-    - `adventure` 的 v1.6 欄位：時段、定案、成團、成行、成行紀錄 `log`（§3 第 11 點）。**第 1 段 GearBot 回覆待收**
-    - 新 kind `adventure.event`（§8）。**第 2 段 GearBot 回覆待收**；工具箱還沒上傳
+    - `adventure` 的 v1.6 欄位：時段、定案、成團、成行、成行紀錄 `log`（§3 第 11 點）。**GearBot 2026-11-27 確認（見下一條）**
+    - 新 kind `adventure.event`（§8）。**GearBot 2026-11-27 確認**；工具箱還沒上傳
     - 逐筆回執規則與 `reason: "stale_revision"`、`"test_data"`（§2、§2b）
     - 刪除訊號 `removed`、墓碑、網站後台刪除（§4）
     - 舊資料相容、GUID 保留與查閱權限（§3 第 12、13 點）
+  - **v1.6 定稿（2026-11-27 claude-pm；GearBot 2026-11-27 第三～七次回覆逐點確認，owner 同日定案政策）**：§3 第 11 點的 `log` 權威來源、版本、撤銷與離會規則，`slots` 空陣列；§8 `adventure.event` 的欄位格式、上限、驗證順序、不認得的值、`evidence` 對照表。這是**契約文字**定稿，不代表網站已實作或核准上線。標「工具箱尚未寫」的欄位（`log` 的 `at`、`by`、`status: "revoked"`，`tickets`／`log` 的 `revision`）工具箱還沒送出
   - **v1.4a（2026-11-23 claude-pm，GearBot 與審查的回饋）**：`j` 每位工匠一份；決勝規則；新增 `w.returnedAt`、`j.statusAt`
   - **v1.4（2026-11-23 claude-pm，GF-006-B，AddOn 0.11.0）**：`character.self` 和 `member.share` 的 payload 多一個選填欄位 `crafting`（製作服務與訂單，格式見 savedvariables §crafting）。網站的處理規則見 §3 第 10 點，上線順序見 §5。不是新的 kind，舊的用戶端照舊能用
 - 實作位置：網站 repo `green-and-fang-site`，位於 `functions/api/sync/*`（D-002）。PR 送到 `dev`
@@ -207,12 +208,34 @@ Content-Type: application/json; charset=utf-8
     - **`note`**：唯一的自由文字。網站一定要自己再檢查長度（40 個字元）、去掉控制字元，並**一律當純文字轉義顯示**；GF Sync 0.1.0 的 `character.self` 不會先過濾。
     - **Discord**（綠皮 BOT）：開單、錄取、遞補（通知被遞補的人和團長）、開始前 60／15 分鐘、取消時通知；事件要去重。
     - 第一版只顯示和通知；網站和 Discord 開單、報名之後另寫（id 開頭 `x`、`y` 先保留）。
-    - **v1.6 欄位**（AddOn 0.13.0 起已在寫；GearBot 第 1 段回覆待收，欄位名稱可能再調）：
-      - `tickets.value[id]`：`times[]`（`{ id, mode, from, length?, to }`，1～5 段；`id` 是時段編號、編輯時不變；沒有 `length` 時 `to = from + 1800`）、`final`、`finalAt`、`formedAt`、`phase`（`open`／`formed`／`done`／`ended`／`unfinished`／`cancel`）、`reason`（`manual`／`offline`／`time`／`unfinished`）、`status` 新增 `unfinished`、`decisions[GUID].slots`。
-      - `actions.value[id].slots`：報名的時段編號；沒有＝全部時段。
+    - **v1.6 欄位**（AddOn 0.13.0 起已在寫；GearBot 2026-11-27 確認）：
+      - `tickets.value[id]`：`times[]`（`{ id, mode, from, length?, to }`，1～5 段）、`final`、`finalAt`、`formedAt`、`phase`（`open`／`formed`／`done`／`ended`／`unfinished`／`cancel`）、`reason`（`manual`／`offline`／`time`／`unfinished`）、`status` 新增 `unfinished`、`decisions[GUID].slots`、`revision`（**工具箱尚未寫**；見下面「版本序列」）。
+        - **時段檢查**：`times[].id` 在同一張單內唯一，編輯時不變。`final`、`decisions[GUID].slots`、`actions.value[id].slots` 都必須指向這張單存在的 `times[].id`；指向不存在的時段，那個欄位略過。`length` 有填時是正整數，`to` 必須等於 `from + length`；沒填才用相容的 `to = from + 1800`。不符的那個時段略過。
+        - **`phase` 與 `status`**：`phase = "done"` 時 `status` 可能還是 `open`／`departed`（團長還沒寫回），允許暫時不同步。成行統計一律只看 `log`，不看 `phase`。
+      - `actions.value[id].slots`、`decisions[GUID].slots`：時段編號的陣列。**省略＝全部時段**（0.12.x 的報名）。**空陣列＝不參與任何時段**，網站記診斷、其他有效欄位照收（不是 `rejected`）；工具箱正常不會送空陣列。非陣列、重複的編號、不存在的時段編號不適用這個寬容規則，照上面的時段檢查當格式錯誤處理。
       - `worker.value.times[]`：多 `id`、`length`、`from`，最多 5 段。
-      - `adventure.log`：`{ recordedAt, value: { <冒險單 id>: { dungeon?, quests?, slotStart, formedAt, doneAt?, status: "done"|"unfinished", members: [{ guid, role }], auto? } } }`。依冒險單 `id` 去重、長期保存；來源是 `character.self`（團長電腦最近 30 天／50 筆）和 `member.share`（結束 1 天內還在轉傳的那張單）。
-      - 「成行」只算 `log` 裡 `status = "done"`。`phase = "formed"` 只顯示成團；`unfinished`、`ended`、`cancel` 不算成行。退回以團長最新的 `tickets` 為準重算，不累加。
+      - `adventure.log`：`{ recordedAt, value: { <冒險單 id>: { dungeon?, quests?, slotStart, formedAt, doneAt?, status: "done"|"unfinished"|"revoked", members: [{ guid, role }], auto?, at?, by?, revision? } } }`。
+        - `members[].role` 是 `tank`／`healer`／`dps`／`member`（任務單），和事件的 `role`（`t`／`h`／`d`／`any`）是不同字彙。
+        - `at`（團長寫這筆的時間）、`by`（`leader`／`seen`）、`revision`、`status: "revoked"`：名稱已確認，**工具箱尚未寫**。
+        - 來源：`character.self`（團長電腦最近 30 天／50 筆）和 `member.share`（結束約 1 天內還在轉傳的那張單，subject＝團長）。
+      - **`log` 是長期紀錄**：上傳的 30 天／50 筆、1 天轉傳只是上傳範圍，不能整份取代網站已存的紀錄。新上傳沒帶某張舊單，不代表刪除或撤銷；刪除只來自 §4a `removed`。`log` 逐筆合併，不套用上面「合併」那條的「依 `recordedAt` 整份比新舊」。
+      - **成行只算有效的 `log.status = "done"`**：`phase = "formed"` 只顯示成團；`unfinished`、`ended`、`cancel`、被撤銷的 `done` 都不算成行。「已確認來源」不等於算成行。不能只靠單 id 去重或最新收到的轉傳，規則如下。
+      - **`log` 的權威來源、版本與撤銷**：
+        1. **歸屬**：`log` 的作者是團長（`character.self` 的 uploader、`member.share` 的 subject），先通過既有的作者／角色驗證。網站在通過驗證的團長送來 `tickets.value[id]` 時綁定單與團長；「第一次收到」不是所有權證明。不同作者撞同一個單 id 不改綁、記衝突。綁定前先到的孤立 `log` 只能待確認，不能占用所有權。`members` 不含團長的那筆略過。同一包的 `tickets` 與 `log` 的 id、作者、狀態必須一致。
+        2. **來源等級**：
+           - A＝團長本人的 `character.self`。
+           - B＝`member.share` 轉傳，同一包 `tickets.value[id].status` 和 `log.status` 一致；或同一包沒有這張單、而且這筆沒有 `auto`（這是契約採信的轉傳等級，不代表網站另外驗證了團長本人）。
+           - C＝臨時：同一包那張單 `status` 是 `open`／`departed`，或同一包沒有這張單、而且 `auto = true`。
+           - 同一包那張單是其他非完成狀態（例如 `cancel`）或狀態不一致 → 不落入 B，記衝突、不計入。
+           - A、B 是已確認來源；C 只顯示「待團長確認」，不計入、不覆蓋 A／B、不自動升級。
+           - `by` 是客戶端聲明，不能直接信，仍要驗作者、來源與歸屬。
+        3. **版本序列（新格式，帶 `revision`）**：`revision` 是同一張單、由團長維護的遞增版本；**`tickets` 和 `log` 共用同一個序列，不各自累加**。有 `revision` 時它是主要順序，`at` 只當時間與診斷。較高的有效 `revision` 贏，同一秒內退回再成行也照 `revision` 排。同一 `revision` 內容不同 → 留成候選、標衝突、暫不計數，等更高的有效版本；不能用 `at` 打破平手。某張單收過新格式之後，沒有 `revision` 的資料不能再改變它的狀態或撤銷水位。
+        4. **相容格式（沒有 `revision`）**：用團長的狀態時間比，不用收到先後或上傳者的 `capturedAt`。這筆有 `at` 時用 `at`；沒有時 `done` 用 `doneAt`，`unfinished` 用同一包 `tickets.value[id].statusAt`，都沒有就視為時間不明、不能覆蓋已存的 `done`。`doneAt` 只表示實際成行時間。時間大的贏；同時間 A > B > C。同時間、同等級、內容不同：兩份留成候選、標衝突、暫不計數，等更高的有效版本。C 之間保留 `doneAt` 最早的那份，只作待確認的展示，不作正式成行時間。只帶 `at`、`by` 而沒有 `revision` 的過渡資料仍屬相容格式：撤銷與同一秒排序的問題要到 `revoked` 與 `revision` 都寫上才算解決。
+        5. **撤銷（團長退回）**：收到通過作者與單歸屬驗證的團長 `tickets.value[id]`，`statusAt` 是有效時間，而且 `status ≠ "done"`、版本晚於已存的 `done`（新格式比 `revision`，相容格式比時間）→ 那筆 `done` 標成已撤銷（保留），記下撤銷水位，衍生統計重算。工具箱寫 `status: "revoked"` 之後也可以直接用那筆。
+        6. **防復活**：撤銷後，更新的 `done` 才恢復。新格式看 `revision` 較高；相容格式要時間**嚴格晚於**撤銷水位，相等不恢復（同一秒內退回再成行在相容格式下不恢復，等後續有效版本）。更早的一律忽略。
+        7. **和 `removed` 分工**：退回是狀態改變，單還在、可再成行，網站保存撤銷水位防復活；`removed` 刪單、它的 `log`、團長這張單的事件，留永久墓碑（§4a）。墓碑只留必要的防重資料，不永久保留作者、`members` 等個人關聯；不刪成員自己提交的事件和報名。
+        8. **離會**：uploader／subject 不在名冊就拒收，所以不會再有新版本。已存的 A／B 有效成行保留，C 維持待確認。確認離會後 180 天清除作者、`members` 和其他能回溯到個人的關聯，包括原始 payload、衍生表、診斷紀錄；只留不能反查個人的公會彙總，彙總也不能藉冒險單 id 連回個人。
+        9. **已知限制**：工具箱寫 `revoked` 之前，退回的訊號只在單上，單只在結束後約 1 天內、每次最多 20 張的範圍上傳；這段期間沒人上傳，網站會留著舊的 `done`。寫了 `revoked` 之後，30 天視窗只是改善漏傳，團長離線超過 30 天後仍可能補不回來。
       - 舊網站只讀 `time` 時顯示定案的時段（沒定案時是第一段），不會出錯。
       - 欄位詳見 `docs/research/GF-002-H_adventure-upload-v1.6.md`。
     - **刪除**：`removed` 見 §4a。
@@ -302,34 +325,81 @@ AddOn 0.9 的第 1～3 段不寫新 kind，可以先上線。
 - 這個端點不受 426 影響（§2a 只適用 upload 和 device/start）：太舊的 GF Sync 正需要它來找新版。
 - 工具箱的 `addon-manifest.json` 照同樣的原則原樣提供，格式見 `docs/contracts/addon-manifest.md`。
 
-## 8. 新 kind `adventure.event`（v1.6 草案；GearBot 第 2 段回覆待收；工具箱還沒上傳）
+## 8. 新 kind `adventure.event`（v1.6；GearBot 2026-11-27 確認；工具箱還沒上傳）
 
-工具箱 0.16.0 起在本機記背景事件（`GreenFangToolkitDB.events`），還沒接 GF Sync。這一節是我們的提議，等 GearBot 回第 2 段後再定。
+工具箱 0.16.0 起在本機記背景事件（`GreenFangToolkitDB.events`），還沒接 GF Sync。
 
 - 一筆一個事件。共通欄位 `id` = `<eventID>.<revision>`，同一版本重送回 `duplicate`（§2b）。
-- 去重：`(originGUID, eventID)`，以 `revision` 大的為準（GearBot 在第 3 段已用這個鍵）。
+- 去重：`(originGUID, eventID)`。
+- **身分**：`originGUID` 必須等於 `participantGUID`，而且要對應可信的上傳者角色身分（依 §3 第 2 點比對到的 uploader）；只驗證 GUID 在名冊裡不夠。不符 → `rejected`。
+- **`revision`**：正整數。同版本內容不同 → `rejected`（`revision_conflict`）；低版本不覆蓋（`duplicate`＋`stale_revision`）；高版本撤銷後，延遲到的舊版本不能讓它復活。較高的版本可以先到，網站不能要求一定先收到前一版。網站不為任何欄位（例如 `reopenOf`）開同版本衝突的特例。
+- **`observedAt` 固定不變**：同一個 `eventID` 的所有版本都一樣；不同 → 當成內容衝突。
 
-| 欄位 | 必填 | 說明 |
+### 8.1 欄位
+
+| 欄位 | 必填 | 允許值／格式 |
 |---|---|---|
-| `eventID` | 是 | 穩定 ID，同一件事永遠一樣 |
-| `schemaVersion` | 是 | 目前 1 |
-| `originGUID`、`participantGUID` | 是 | 都是本人；網站要比對上傳者，不能只信客戶端 |
-| `adventureID` | 職工單建立以外 | 冒險單 `id` |
-| `workerOrderID` | 職工單事件 | |
+| `eventID` | 是 | v1：`^e[0-9a-z]{2,10}$`；外層上限 16 字元，v1 不因此放寬 |
+| `schemaVersion` | 是 | `1`；其他值照 §8.2「不認得的值」處理，只驗共通封套 |
+| `originGUID`、`participantGUID` | 是 | 本人 GUID，兩者相同，40 字元內 |
+| `adventureID` | `worker_order_created` 以外 | 冒險單 `id`：`a` 開頭、`[0-9a-z.]`、64 字元內 |
+| `workerOrderID` | 職工單事件；走職工媒合的 `participant_admitted`／`participant_done` | `^w[0-9a-z]{1,5}\.[0-9a-z]{1,7}$`，4～14 字元（`w`＋作者雜湊的 base36＋`.`＋職工單建立時間的 base36）。這只是語法範圍：網站依正則與上限驗證，不憑雜湊反推作者；所有權仍走可信角色驗證 |
 | `participationPath` | 是 | `leader`／`worker_match`／`direct_signup` |
-| `eventType` | 是 | `adventure_created`／`finalized`／`formed`／`done`／`cancelled`／`expired`／`unfinished`、`worker_order_created`／`matched`、`signup_applied`、`participant_admitted`、`participant_done` |
+| `eventType` | 是 | `adventure_created`、`adventure_finalized`、`adventure_formed`、`adventure_done`、`adventure_cancelled`、`adventure_expired`、`adventure_unfinished`、`worker_order_created`、`worker_order_matched`、`signup_applied`、`participant_admitted`、`participant_done` |
 | `activityType` | 是 | `dungeon`／`raid`／`quest`／`zone`／`worker`／`other` |
-| `destinationID` | 否 | 地城代碼、`q:<任務 ID>` 或 `z:<區域>` |
+| `destinationID` | 否 | 地城代碼 `^[a-z0-9]{1,12}$`；`q:` 加 1～5 個 quest ID（正整數 1～9,999,999）用 `.` 連接；`z:` 加**受長度限制的區域名稱**（遊戲內地名，40 個 Unicode 字元內）；整體 200 bytes 內 |
 | `role` | 否 | `t`／`h`／`d`／`any` |
-| `observedAt` | 是 | 第一次觀察到的時間，不會改 |
-| `revision` | 是 | |
-| `revisedAt` | 否 | |
-| `status`、`change` | 是 | `active`／`revoked`；`new`／`correction`／`revocation`／`restore` |
-| `revokedReason` | 否 | 目前有 `back`、`no_self_evidence` |
-| `evidence` | 是 | 例如 `leader_done`、`auto`、`self_detected`、`self_party` |
-| `reopenOf` | 否 | 重開時指向舊的冒險單 `id` |
+| `observedAt` | 是 | 第一次記錄時的事實時間（Unix 秒），所有版本相同；可能比收到時間早很多，不因此拒收 |
+| `revision` | 是 | 1～10,000 |
+| `revisedAt` | `revision ≥ 2` 應提供 | 工具箱寫這一版的時間。缺少或早於 `observedAt` → 照收、記診斷；型別錯誤或超出允許時間範圍 → `rejected`。只顯示和診斷，不用來排序版本 |
+| `status`、`change` | 是 | `active`／`revoked`；`new`／`correction`／`revocation`／`restore`。`new` ⇒ `revision = 1` 且 `active`；`revocation` ⇒ `revoked`；`restore`、`correction` ⇒ `active` |
+| `revokedReason` | `revoked` 時 | `back`／`no_self_evidence` |
+| `evidence` | 是 | 依 §8.3 對照表 |
+| `reopenOf` | 否 | 只在 `adventure_created`；格式同 `adventureID` |
 | `test` | 否 | 工具箱不會送；網站看到 `true` 照 §4c |
 
-- 事件裡沒有任何名字或文字，只有本人的 GUID。成員本人成行要有本人的證據才記，整團 60% 不算個人證據。團本只記建立和報名。
+### 8.2 上限、驗證順序、不認得的值
+
+- **定義**：bytes 一律 UTF-8；字元按 Unicode code point 計，不是 UTF-16 長度。每筆事件上限 2,048 bytes，指網站解析後以固定緊湊 JSON 重新序列化的 UTF-8 bytes，未知欄位也算。
+- **網站獨立驗證**：quest ID 是正整數、個數、有效 UTF-8、`z:` 清理後的長度，網站都自己驗，不只信工具箱已處理；`z:` 去掉控制字元、當純文字轉義顯示。
+- **驗證順序**：先驗身分、大小、共通封套；已知 schema 再驗必填、格式和已知值之間的搭配（已知欄位之間的矛盾不能靠另一個未知值繞過）；最後才把含未知值的事件送進待解析。
+- 超過上限、格式不符、已知值的組合不合法（含 `evidence` 是認得的值但和事件類型不對應）→ 那一筆 `rejected`（`invalid_field`），同一次請求的其他筆照常。
+- **不認得的值不拒收**（owner 2026-11-27：AddOn 不應該被網站功能擋住）：
+  - 列舉欄位出現不認得的值，或 `schemaVersion` 不是 1 → **成功持久化後**回 `accepted`＋`reason: "unknown_value"`，標成待解析，不進任何統計。
+  - 未知 `schemaVersion` 只驗共通封套，不套用 v1 的事件特定必填與 `destinationID` 格式，也不照 v1 解讀內容。
+  - 待解析事件也參與 `revision` 排序：較高版本是未知值時，較低版本不能繼續當有效版本計數。
+  - 保留有界限的原始 payload＋診斷計數；不保存 token 等傳輸憑證；重新解析可重跑、不重複計數；遵守 §3 第 13 點的 GUID 刪除政策。
+  - 代價：工具箱收到 `accepted` 就不再重送，網站之後才支援的新類型要靠保存的原始 payload 自己補算。
+- 不認得的欄位：不影響接收，但不能直接拿來顯示或統計。
+
+### 8.3 `evidence` 對照表
+
+`evidence` 是**工具箱回報的證據類型**，不是網站已驗證的遊戲行為。
+
+| `eventType` | `participationPath` | `evidence` |
+|---|---|---|
+| `adventure_created` | `leader` | `self` |
+| `adventure_finalized` | `leader` | `slot` |
+| `adventure_formed` | `leader` | `full`／`group`／`party`／`kept`／`formed` |
+| `adventure_done` | `leader` | `leader_done`／`auto` |
+| `adventure_cancelled` | `leader` | `manual`／`offline`／`state` |
+| `adventure_expired` | `leader` | `time` |
+| `adventure_unfinished` | `leader` | `unfinished` |
+| `worker_order_created` | `worker_match` | `self` |
+| `worker_order_matched` | `worker_match` | `invited` |
+| `signup_applied` | `direct_signup` | `self` |
+| `participant_admitted` | `worker_match`／`direct_signup` | `seat` |
+| `participant_done` | `leader` | `leader_done`／`self_detected`／`self_party` |
+| `participant_done` | `worker_match`／`direct_signup` | `self_detected`／`self_party` |
+
+- 團本（`raid`）只會有 `adventure_created`、`signup_applied`。`adventure_done` 的 `auto` 是單的成行，不是任何人的個人證據。
+- `evidence` 是上表認得的值、但不屬於該事件類型 → `rejected`（`invalid_field`）；上表都沒有的值 → 照 §8.2「不認得的值」處理。
+
+### 8.4 語意
+
+- 事件裡沒有任何人名，只有本人的 GUID；唯一的文字是 `destinationID` 的 `z:` 區域名稱（地名）。成員本人成行要有本人的證據才記，整團 60% 不算個人證據。團本只記建立和報名。
+- **`log` 和 `event` 分工，不相加**：`log` 管整團的成行（一張單算一次），`event` 管個人參與（`participant_done`，同一冒險同一角色算一次）。兩者不相加計次，也不互相補。`participant_done` 撤銷或恢復時，衍生統計跟著重算。
+- **這次成行的時間**：`participant_done` 恢復時 `observedAt` 不變，網站不拿它當這次成行的時間；看該單 `log` 的 `doneAt`，`log` 還沒到時顯示未知、不推測。
+- 工具箱本機會刪除已確認且超過 180 天的事件，不送任何東西；網站不要把「之後沒再收到」當刪除。
 - 「和誰一起冒險」由網站把同一 `adventureID` 的 `participant_done` 合起來算，工具箱不上傳別人的 GUID；第一版不開放給一般成員（§3 第 13 點）。
 - 上線順序照 §5：網站 → GF Sync → AddOn。`adventure.event`、事件 Inbox 回執、刪除訊號都不在 GF Sync 0.2.0 的範圍，也不擋 0.2.0 發布。
