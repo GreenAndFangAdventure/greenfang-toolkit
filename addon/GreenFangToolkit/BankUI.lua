@@ -23,6 +23,7 @@ UI.Y = { title = -UI.TOP, status = -UI.TOP - 32, listHead = -UI.TOP - 68, rows =
 UI.RESULT = {
     ["no-authority"] = "只有會長可以管理", ["not-found"] = "找不到這位職工", full = "保管人已達上限",
     same = "沒有變更", invalid = "格式不對", ["last-kind"] = "至少留一種，否則請撤銷", ok = "已更新",
+    combat = "戰鬥中，結束後再選", roster = "公會名冊尚未載入",
 }
 
 local panel
@@ -105,16 +106,17 @@ local function build(p)
     local addY = Y.rows - UI.ROWS * UI.ROW_H - 10
     c.nameLabel = text(p, ns.FIELD_FONT, X, addY - 6)
     c.nameLabel:SetText("職工") -- GF-UI-K: 成員 = 職工 (spec §3)
-    c.name = ns.Theme.editBox(p, 220, 30)
+    -- GF-012-FIX (owner 2026-11-27: 成員一定是公會內的人，可以用選的): the box
+    -- only searches the guild roster; 選擇職工 appoints a typed name only when
+    -- it is exactly one roster member, otherwise it opens the picker.
+    c.name = ns.Theme.editBox(p, 200, 30)
     c.name:SetPoint("TOPLEFT", p, "TOPLEFT", X + 50, addY)
-    c.appoint = ns.OrdersUI.textButton(p, "指定", function()
-        if not B().canManage() then return end
-        local r = UI.say(B().appoint(str(c.name:GetText())))
-        if r == "ok" then c.name:SetText("") end
-    end, 72)
-    c.appoint:SetPoint("TOPLEFT", p, "TOPLEFT", X + 280, addY)
+    c.appoint = ns.OrdersUI.textButton(p, "選擇職工", function()
+        if B().canManage() then UI.choose(str(c.name:GetText())) end
+    end, 100)
+    c.appoint:SetPoint("TOPLEFT", p, "TOPLEFT", X + 260, addY)
     c.name:SetScript("OnEnterPressed", function() if not c.appoint.disabled then c.appoint:Click() end end)
-    c.result = text(p, ns.LABEL_FONT, X + 364, addY - 6, 300)
+    c.result = text(p, ns.LABEL_FONT, X + 372, addY - 6, 290)
     -- 我的公產範圍
     c.scopeHead = header(p, "我的公產範圍", UI.RIGHT_X, Y.scopeHead)
     c.scopeState = W().statePanel(p, 360, 120)
@@ -146,9 +148,134 @@ local function build(p)
     UI.controls = c
 end
 
+-- GF-012-FIX: a custodian no longer in the roster is shown as 已不在公會
+-- (the list itself is the guild master's; nothing is removed here).
 local function memberText(a)
     local m = ns.Share.memberFor(a)
-    return m and ns.shortName(m.name) or "?", m and m.classToken or nil
+    return m and ns.shortName(m.name) or "已不在公會", m and m.classToken or nil
+end
+
+---------------------------------------------------------------------------
+-- GF-012-FIX: the member picker (the same popup as ＋下單's recipe picker:
+-- a search box, 10 reused rows, the first key redraws at once and keys within
+-- PICKER_DELAY make one more redraw). Rows come from the roster snapshot,
+-- online and offline; nothing is read from the game while typing.
+---------------------------------------------------------------------------
+
+UI.PICKER_NAME = "GreenFangToolkit_KeeperPicker"
+UI.PICKER_ROWS = 10
+UI.PICKER_DELAY = 0.15
+
+-- The box's text is resolved by the same rule as Bank.appoint (Bank.memberA):
+-- exactly one roster member appoints; anything else opens the picker.
+function UI.choose(q)
+    q = str(q)
+    if q ~= "" and ns.Roster.current() then
+        local a = B().memberA(q)
+        if a then
+            local r = UI.say(B().appoint({ guid = ns.Share.guidOf(a) }))
+            if r == "ok" then c.name:SetText("") end
+            return r
+        end
+    end
+    UI.openPicker(q)
+end
+
+function UI.drawPicker()
+    local f = UI.picker
+    if not f then return end
+    local rows = B().candidates(f.query)
+    f.list = rows
+    for i = 1, UI.PICKER_ROWS do
+        local b, r = f.rows[i], rows[i]
+        b.data = r
+        if r then
+            local col = ns.Icons.classColor(r.classToken)
+            if r.classToken and r.classToken ~= "" then ns.Icons.setClassIcon(b.icon, r.classToken); b.icon:Show() else b.icon:Hide() end
+            b.name:SetText(r.short)
+            b.name:SetTextColor(col[1], col[2], col[3])
+            b.rank:SetText(r.rank)
+            b.online:SetText(r.online and "在線" or "離線")
+            local oc = r.online and { 1, 1, 1 } or ns.COLOR.disabled
+            b.online:SetTextColor(oc[1], oc[2], oc[3])
+            b.mark:SetText(r.custodian and "已是保管人" or "")
+            b:Show()
+        else
+            b:Hide()
+        end
+    end
+    f.empty:SetText(#rows == 0 and "找不到這位職工" or "")
+    f.count:SetText(#rows > UI.PICKER_ROWS and ("還有 " .. (#rows - UI.PICKER_ROWS) .. " 位，請再輸入名字縮小") or "")
+end
+
+function UI.pick(r)
+    if not r or not B().canManage() then return end
+    if UI.picker then UI.picker:Hide() end
+    local res = UI.say(B().appoint({ guid = ns.Share.guidOf(r.a) }))
+    if res == "ok" and c.name then c.name:SetText("") end
+    return res
+end
+
+function UI.openPicker(q)
+    if ns.inCombat() then UI.say("combat"); return nil end
+    if not ns.Roster.current() then UI.say("roster"); return nil end
+    if not UI.picker then
+        local O = ns.OrdersUI
+        local f = ns.popupWindow(UI.PICKER_NAME, 640, 540)
+        f:SetPoint("CENTER", 0, 60)
+        f:EnableMouse(true)
+        ns.exclusivePopup(f)
+        if f.TitleText then f.TitleText:SetText("指定保管人：選職工") end
+        O.fieldLabel(f, "搜尋", O.FIELD_X, -46)
+        local X = O.controlX({ "搜尋" })
+        local box = ns.Theme.editBox(f)
+        box:SetSize(300, 30)
+        box:SetPoint("TOPLEFT", f, "TOPLEFT", X + 6, -40)
+        box:SetAutoFocus(true)
+        box:SetMaxLetters(60)
+        box:SetScript("OnTextChanged", function(self)
+            f.query = str(self:GetText())
+            ns.Recipes.soon("bank-picker", UI.PICKER_DELAY, function() if f:IsShown() then UI.drawPicker() end end)
+        end)
+        box:SetScript("OnEscapePressed", function(self) self:ClearFocus(); f:Hide() end)
+        box:SetScript("OnEnterPressed", function() if f.list and #f.list == 1 then UI.pick(f.list[1]) end end)
+        f.search = box
+        O.fieldLabel(f, "職工", O.FIELD_X, -90)
+        O.fieldLabel(f, "階級", 290, -90)
+        O.fieldLabel(f, "狀態", 420, -90)
+        f.rows = {}
+        for i = 1, UI.PICKER_ROWS do
+            local b = CreateFrame("Button", nil, f)
+            b:SetSize(590, ns.PAGE_ROW)
+            b:SetPoint("TOPLEFT", f, "TOPLEFT", O.FIELD_X, -114 - (i - 1) * (ns.PAGE_ROW + 2))
+            if b.SetHighlightTexture then b:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD") end
+            b.icon = b:CreateTexture(nil, "ARTWORK"); b.icon:SetSize(ns.ROW_ICON, ns.ROW_ICON); b.icon:SetPoint("LEFT", b, "LEFT", 2, 0)
+            local function col(x, w)
+                local fs = ns.freeText(b:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
+                fs:SetPoint("LEFT", b, "LEFT", x, 0); fs:SetWidth(w); fs:SetJustifyH("LEFT")
+                if fs.SetWordWrap then fs:SetWordWrap(false) end
+                return fs
+            end
+            b.name = col(38, 220)
+            b.rank = col(272, 120)
+            b.online = col(402, 56)
+            b.mark = col(462, 120)
+            b:SetScript("OnClick", function(self) if self.data then UI.pick(self.data) end end)
+            f.rows[i] = b
+        end
+        f.empty = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT))
+        f.empty:SetPoint("TOPLEFT", f, "TOPLEFT", O.FIELD_X, -116)
+        f.count = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT))
+        f.count:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", O.FIELD_X, 20)
+        f:Hide()
+        UI.picker = f
+    end
+    local f = UI.picker
+    f.query = str(q)
+    f:Show()
+    f.search:SetText(f.query)
+    UI.drawPicker()
+    return f
 end
 
 function UI.refresh()
@@ -208,6 +335,7 @@ function UI.refresh()
         c.listState.set(nil)
     end
     setEnabled(c.appoint, manage)
+    if not manage and UI.picker and UI.picker:IsShown() then UI.picker:Hide() end
     if c.name.SetEnabled then c.name:SetEnabled(manage) end
     -- my scope
     local me = ns.Share.selfAuthor()

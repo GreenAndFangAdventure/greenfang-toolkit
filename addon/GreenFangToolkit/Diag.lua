@@ -146,6 +146,8 @@ Diag.SITE_NOTE = "GF Sync 會在你下線後讀取存檔並上傳。公會網站
 local SECTIONS = {
     { title = "上傳到公會網站", text = function() return ns.Sync.statusText() end },
     { title = "說明", text = function() return Diag.SITE_NOTE end },
+    -- GF-UI-L: what the AddOn can see of GF Sync (the same line as the main window's corner).
+    { title = "GF Sync 偵測", text = function() return ns.Framework.gfSyncDiagText() end },
     { title = "遊戲內分享（公會成員之間自動轉傳）", text = Diag.shareText },
     { title = "製作委託", text = Diag.ordersText },
     { title = "價格（拍賣場、商人、公會分享）", text = Diag.pricesText },
