@@ -34,7 +34,9 @@ UI.ICON = {
     online = "Interface\\FriendsFrame\\StatusIcon-Online",
     unknown = "Interface\\Icons\\INV_Misc_QuestionMark",
 }
-UI.STATE_NAME = { waiting = "等接單", making = "製作中", checking = "待驗收", deal = "已成交", cancel = "已取消" } -- GF-UI-K: 已 on the ended ones (spec §3)
+-- GF-FIX-B (owner, spec v2.0 §3): 待受理／已接單／待交付／已成交; 已取消 apart
+-- from 已成交. Display names only: the state keys (saved, wire) are unchanged.
+UI.STATE_NAME = { waiting = "待受理", making = "已接單", checking = "待交付", deal = "已成交", cancel = "已取消" }
 UI.BUTTON = {
     accept = { icon = "deal", tip = "接單" }, decline = { icon = "cancel", tip = "不接" },
     cancel = { icon = "cancel", tip = "取消" }, deal = { icon = "deal", tip = "成交" },

@@ -60,6 +60,16 @@ local handlers = {}   -- module -> { onAction = fn, focus = { [page] = fn } }
 local focusers = {}   -- page -> fn(id, target): pages without a focus() of their own
 local listeners = {}
 local queue, queueOrder = {}, {}
+-- GF-FIX-B (review low-9): after entries were dropped from queue, drop their
+-- keys from queueOrder too, so they no longer take QUEUE_MAX places (and a
+-- key added again is not listed twice).
+local function compactQueue()
+    local keep, seen = {}, {}
+    for _, qk in ipairs(queueOrder) do
+        if queue[qk] and not seen[qk] then seen[qk] = true; keep[#keep + 1] = qk end
+    end
+    queueOrder = keep
+end
 local burst = {}      -- module -> { at = minute, n = count }
 local lastAlert, alertPending, alertTimer = 0, 0, false
 
@@ -118,6 +128,7 @@ function N.setEnabled(module, on)
     if not on then
         -- Drop what is waiting for that module; the kept ones stay hidden.
         for k, e in pairs(queue) do if e.module == module then queue[k] = nil end end
+        compactQueue()
     end
     N.changed()
 end
@@ -406,6 +417,7 @@ function N.clear(module, test)
     for k, q in pairs(queue) do
         if q.module == module and (not test or test(q.key, q)) then queue[k] = nil end
     end
+    compactQueue()
     if n > 0 then N.changed() end
     return n
 end

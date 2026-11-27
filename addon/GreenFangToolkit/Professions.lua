@@ -153,6 +153,12 @@ function Prof.bind(owner, i, region, prof, x, y, w, h)
     end
     b:SetAttribute("spell", spell)
     b.gfProf, b.gfSpell = prof, spell
+    -- GF-FIX-B: the button lives on UIParent; with the window scaled down
+    -- (Theme.fit, 4:3 screens) it takes the region's scale, so x, y, w, h
+    -- still cover the region's icon.
+    local rs = region.GetEffectiveScale and ns.num((ns.call(region.GetEffectiveScale, region)))
+    local us = UIParent.GetEffectiveScale and ns.num((ns.call(UIParent.GetEffectiveScale, UIParent)))
+    if b.SetScale and rs and us and rs > 0 and us > 0 then b:SetScale(rs / us) end
     b:ClearAllPoints()
     b:SetPoint("TOPLEFT", region, "TOPLEFT", x, y)
     b:SetSize(w, h)

@@ -129,8 +129,9 @@ local function db()
     return d.profile
 end
 
+-- GF-FIX-B (review high-1): one game call (ns.selfGUID), not a full Data.player().
 local function selfGuid()
-    local g = ns.Data and ns.Data.player().guid
+    local g = ns.selfGUID and ns.selfGUID()
     return type(g) == "string" and g:match("^Player%-") and g or nil
 end
 Profile.selfGuid = selfGuid
@@ -154,7 +155,11 @@ function Profile.ownClass() return str(ns.Sync and ns.Sync.player().classToken) 
 
 local listeners = {}
 function Profile.onChange(fn) listeners[#listeners + 1] = fn end
+-- GF-FIX-B: goes up on every change of the own settings (a cache key, with
+-- Share.version and Roster.version, for roles() and census()).
+Profile.version = 0
 local function changed()
+    Profile.version = Profile.version + 1
     for _, fn in ipairs(listeners) do pcall(fn) end
 end
 
@@ -237,8 +242,18 @@ end
 -- Roles of a character: { main = "t"|nil, can = { t = true, ... }, state, at, relayed }
 -- state: "self" (this character), "shared" (received), "unset" (shared but
 -- no main role), "unknown" (nothing received, or withdrawn). Never nil.
-function Profile.roles(guid)
-    guid = str(guid)
+-- GF-FIX-B (review high-1): answers are kept while Share.version,
+-- Roster.version, Profile.version, the guild key and the own GUID stay the
+-- same; any change of those clears them, so a new record shows at once.
+-- The returned tables are shared: read them, never change them.
+local rolesCache = { key = nil, by = {} }
+local function cacheKey()
+    local gk = ns.Sync and ns.Sync.guildKey and ns.Sync.guildKey() or ""
+    return string.format("%d|%d|%d|%s|%s", ns.Share and ns.Share.version or 0,
+        ns.Roster and ns.Roster.version or 0, Profile.version, str(gk), str(selfGuid()))
+end
+Profile.cacheKey = cacheKey
+local function rolesNow(guid)
     if guid ~= "" and guid == selfGuid() then
         local e = Profile.own()
         if e then
@@ -255,6 +270,19 @@ function Profile.roles(guid)
     if not d then return { can = {}, state = "unknown" } end
     return { main = d.main, can = d.can, state = d.main and "shared" or "unset", at = rec.t,
         relayed = not rec.fromAuthor }
+end
+Profile.rolesComputed = 0 -- answers worked out, not taken from the cache (tests, measurements)
+function Profile.roles(guid)
+    guid = str(guid)
+    local key = cacheKey()
+    if rolesCache.key ~= key then rolesCache.key, rolesCache.by = key, {} end
+    local p = rolesCache.by[guid]
+    if not p then
+        p = rolesNow(guid)
+        Profile.rolesComputed = Profile.rolesComputed + 1
+        rolesCache.by[guid] = p
+    end
+    return p
 end
 
 -- For a worker ticket (AdventureUI, at integration): main, alt from the
@@ -284,7 +312,14 @@ end
 -- 人力盤點 (spec §5.2): main roles, roles they can fill and online, over a
 -- list of roster members. Every member is counted once in total.
 -- { total, online, main = { t, h, d, unset, unknown }, can = { t, h, d } }
+-- GF-FIX-B (review high-1): kept for the same list while nothing changed
+-- (Profile.cacheKey: Share.version, Roster.version, own settings).
+local censusCache = {}
 function Profile.census(members)
+    local key = cacheKey()
+    if censusCache.list == members and censusCache.n == #(members or {}) and censusCache.key == key and members then
+        return censusCache.c
+    end
     local c = { total = 0, online = 0, main = { t = 0, h = 0, d = 0, unset = 0, unknown = 0 }, can = { t = 0, h = 0, d = 0 } }
     local seen = {}
     for _, m in ipairs(members or {}) do
@@ -300,6 +335,7 @@ function Profile.census(members)
             for _, r in ipairs(Profile.ROLES) do if p.can[r] then c.can[r] = c.can[r] + 1 end end
         end
     end
+    censusCache.list, censusCache.n, censusCache.key, censusCache.c = members, #(members or {}), key, c
     return c
 end
 
@@ -319,7 +355,8 @@ end
 -- id, state, stateName, title, closed, sort }.
 ---------------------------------------------------------------------------
 
-Profile.ORDER_STATE = { waiting = "等接單", making = "製作中", checking = "待驗收", deal = "已成交", cancel = "已取消" }
+-- GF-FIX-B (spec v2.0 §3): the same names as OrdersUI.STATE_NAME.
+Profile.ORDER_STATE = { waiting = "待受理", making = "已接單", checking = "待交付", deal = "已成交", cancel = "已取消" }
 
 -- GF-UI-K: adventure states that are over (listed after the open ones, greyed).
 Profile.ADV_ENDED = { done = true, ended = true, unfinished = true, cancel = true, closed = true }

@@ -79,6 +79,47 @@ for j, col in ipairs(columns) do UI.CELL[col.key] = j end
 -- Sorting and filtering (pure; covered by offline tests)
 ---------------------------------------------------------------------------
 
+-- GF-FIX-B (review high-1, mid-6): what is worked out of a member's own
+-- roster fields (sort keys, the search text) is kept per member table while
+-- Roster.version stays the same. A scan that changed anything gives a new
+-- version (and changed members are new tables), so nothing stale is shown.
+local memo = { version = false, by = setmetatable({}, { __mode = "k" }) }
+local function memoOf(m)
+    local v = ns.Roster and ns.Roster.version or 0
+    if memo.version ~= v then memo.version, memo.by = v, setmetatable({}, { __mode = "k" }) end
+    local e = memo.by[m]
+    if not e then e = {}; memo.by[m] = e end
+    return e
+end
+UI.memoWork = 0 -- values worked out, not taken from the memo (tests, measurements)
+local NONE = {} -- a memoised nil
+local function memoised(m, k, make)
+    local e = memoOf(m)
+    local v = e[k]
+    if v == nil then
+        UI.memoWork = UI.memoWork + 1
+        v = make(m)
+        if v == nil then v = NONE end
+        e[k] = v
+    end
+    if v == NONE then return nil end
+    return v
+end
+local function nameKey(m) return keyName(m.name) end
+local function textKey(field)
+    return function(m)
+        local value = m[field]
+        if type(value) ~= "string" or value == "" then return nil end
+        return keyName(value)
+    end
+end
+local textKeys = {}
+local function professionsKey(m)
+    if type(m.professions) ~= "table" or #m.professions == 0 then return nil end
+    return keyName(table.concat(m.professions, "、"))
+end
+local ROLE_ORDER = { t = 1, h = 2, d = 3 }
+
 -- Sort only the visible list; never alter the captured report.
 -- Missing values stay at the bottom in either direction.
 local function sortValue(m, key)
@@ -87,36 +128,42 @@ local function sortValue(m, key)
     if key == "rank" then return type(m.rankIndex) == "number" and m.rankIndex or nil end
     if key == "roles" then -- GF-010: by main role (坦克, 治療, 輸出), 未設定 / 未知 last
         local main = ns.Profile and ns.Profile.roles(m.guid).main
-        return main and ({ t = 1, h = 2, d = 3 })[main] or nil
+        return main and ROLE_ORDER[main] or nil
     end
-    if key == "professions" then
-        if type(m.professions) ~= "table" or #m.professions == 0 then return nil end
-        return keyName(table.concat(m.professions, "、"))
-    end
-    local value = m[key]
-    if type(value) ~= "string" or value == "" then return nil end
-    return keyName(value)
+    if key == "professions" then return memoised(m, "sort:professions", professionsKey) end
+    textKeys[key] = textKeys[key] or textKey(key)
+    return memoised(m, "sort:" .. key, textKeys[key])
 end
+UI.sortValue = sortValue
 
+-- GF-FIX-B (review high-1): decorate-sort. Each member's key is worked out
+-- once per sort (the 職責 key once per member, not twice per comparison).
 function UI.sortMembers(list, key, ascending)
+    local vals, names = {}, {}
+    for i = 1, #list do
+        local m = list[i]
+        local v = sortValue(m, key)
+        vals[m] = v == nil and NONE or v
+        names[m] = memoised(m, "name", nameKey) or ""
+    end
     table.sort(list, function(a, b)
-        local va, vb = sortValue(a, key), sortValue(b, key)
-        if va == nil and vb ~= nil then return false end
-        if vb == nil and va ~= nil then return true end
+        local va, vb = vals[a], vals[b]
+        if va == NONE and vb ~= NONE then return false end
+        if vb == NONE and va ~= NONE then return true end
         if va ~= vb then
             if ascending then return va < vb end
             return va > vb
         end
-        return keyName(a.name) < keyName(b.name)
+        return names[a] < names[b]
     end)
     return list
 end
 
 -- skillLineIDs a member is known to have: shared or own skill points, and
 -- the names from the guild roster. { [id] = true }
-function UI.memberSkills(m)
+function UI.memberSkills(m, own)
     local set = {}
-    local detail = UI.detailFor(m)
+    local detail = UI.detailFor(m, own)
     for _, prof in ipairs(detail and detail.professions or {}) do
         local id = ns.Professions.skillLineOf(prof)
         if id then set[id] = true end
@@ -135,17 +182,17 @@ end
 -- GF-010: roles = { t, h, d, unknown } (nil = everything): anyone who can fill a ticked role.
 UI.filters = { skill = nil, class = nil, skills = nil, classes = nil, roles = nil, online = false, minLevel = nil, active = false }
 
-local function passes(m, f)
+local function passes(m, f, own)
     if not f then return true end
     if f.online and m.online ~= true then return false end
     if f.class and m.classToken ~= f.class then return false end
     if f.classes and not f.classes[str(m.classToken)] then return false end
     if f.roles and not (ns.Profile and ns.Profile.matches(m.guid, f.roles)) then return false end
     if f.minLevel and (type(m.level) ~= "number" or m.level < f.minLevel) then return false end
-    if f.skill and not UI.memberSkills(m)[f.skill] then return false end
+    if f.skill and not UI.memberSkills(m, own)[f.skill] then return false end
     if f.skills then
         local any = false
-        for id in pairs(UI.memberSkills(m)) do if f.skills[id] then any = true end end
+        for id in pairs(UI.memberSkills(m, own)) do if f.skills[id] then any = true end end
         if not any then return false end
     end
     -- GF-006-B (R-4.2): only crafters taking orders.
@@ -153,15 +200,21 @@ local function passes(m, f)
     return true
 end
 
+-- GF-FIX-B (review mid-6): the search text of a member is memoised (Roster.version).
+local function searchBlob(m)
+    return keyName(table.concat({
+        str(m.name), str(m.race), str(m.class), Export.professionText(m),
+        str(m.zone), str(m.guildRank)
+    }, " "))
+end
 function UI.filterMembers(members, query, filters)
     local q = keyName(query)
     local out = {}
+    local own = UI.ownContext() -- GF-FIX-B (review mid-7): the own record once per pass
     for _, m in ipairs(members or {}) do
-        local blob = keyName(table.concat({
-            str(m.name), str(m.race), str(m.class), Export.professionText(m),
-            str(m.zone), str(m.guildRank)
-        }, " "))
-        if (q == "" or blob:find(q, 1, true)) and passes(m, filters) then out[#out + 1] = m end
+        if (q == "" or memoised(m, "blob", searchBlob):find(q, 1, true)) and passes(m, filters, own) then
+            out[#out + 1] = m
+        end
     end
     return out
 end
@@ -172,8 +225,9 @@ local PROFESSION_ORDER = { 164, 165, 171, 182, 186, 197, 202, 333, 393, 755, 773
 function UI.professionOptions()
     local s = ns.Roster.current()
     local have = {}
+    local own = UI.ownContext()
     for _, m in ipairs(s and s.members or {}) do
-        for id in pairs(UI.memberSkills(m)) do have[id] = true end
+        for id in pairs(UI.memberSkills(m, own)) do have[id] = true end
     end
     local list = {}
     for _, id in ipairs(PROFESSION_ORDER) do
@@ -203,7 +257,7 @@ function UI.choiceSummary(allText, unit)
     return function(b)
         if b.selected == nil then return allText end
         local on = {}
-        for _, o in ipairs(b.options()) do if b.isOn(o.value) then on[#on + 1] = o end end
+        for _, o in ipairs((b.currentOptions or b.options)()) do if b.isOn(o.value) then on[#on + 1] = o end end
         if #on == 0 then return "未選" end
         if #on == 1 then return on[1].text end
         return #on .. " 個" .. unit
@@ -224,6 +278,22 @@ function UI.setSkillFilter(id)
         UI.filters.skills = id and { [id] = true } or nil
         UI.refresh(true)
     end
+end
+
+-- GF-FIX-B: the first call runs fn at once; calls within gap after it make
+-- one more run at the end of the gap (never later, never dropped).
+UI.SEARCH_DELAY = 0.15
+local held = {}
+function UI.soon(key, gap, fn)
+    if held[key] ~= nil then held[key] = true; return false end
+    held[key] = false
+    ns.after(gap, function() -- first: an error in fn must not hold the key for good
+        local again = held[key]
+        held[key] = nil
+        if again then UI.soon(key, gap, fn) end
+    end)
+    fn()
+    return true
 end
 
 function UI.loadSettings()
@@ -781,14 +851,23 @@ end
 
 -- Detailed professions for a roster member: the player's own character, or
 -- what that member shared in game (D-011). nil = names only, as before.
-function UI.detailFor(m)
-    local own = ns.Sync.player()
+-- GF-FIX-B (review mid-7): own = UI.ownContext(), made once per pass (a
+-- refresh, a filter, a row fill); the own professions are read the first
+-- time the own row is met in that pass and never kept longer.
+function UI.ownContext()
+    return { guid = ns.selfGUID and ns.selfGUID() or nil }
+end
+UI.ownReads = 0 -- own profession reads (tests, measurements)
+function UI.detailFor(m, own)
+    own = own or UI.ownContext()
     if own.guid and m.guid == own.guid then
-        local profs = ns.Data.ownProfessionsDetailed()
-        if #profs > 0 then
-            return { professions = ns.Professions.ordered(profs), source = "本人", at = ns.now() }
+        if own.detail == nil then
+            UI.ownReads = UI.ownReads + 1
+            local profs = ns.Data.ownProfessionsDetailed()
+            own.detail = #profs > 0
+                and { professions = ns.Professions.ordered(profs), source = "本人", at = ns.now() } or false
         end
-        return nil
+        return own.detail or nil
     end
     local peer = ns.Comm and ns.Comm.peerFor(m.name)
     if peer and type(peer.professions) == "table" and #peer.professions > 0 then
@@ -898,7 +977,8 @@ function UI.refresh(resetScroll)
     updateSortHeaders()
     rowContent:SetHeight(math.max(1, #matching * ROW_HEIGHT))
     if resetScroll and rowScroll then rowScroll:SetVerticalScroll(0) end
-    UI.layoutRows()
+    UI.drawnVersion = ns.Roster.version
+    UI.layoutRows(true)
     UI.placeOwnButtons()
 end
 
@@ -910,11 +990,21 @@ function UI.visibleRowCount()
 end
 
 -- Fill the pooled rows with the members in view.
-function UI.layoutRows()
+-- GF-FIX-B (review mid-9): rows sit at their place in the scroll child, so a
+-- scroll that keeps the same first row has nothing to refill; a refresh
+-- (force) or a new first row refills them at once. The rows' scripts are set
+-- once in newRow; nothing is made per scroll.
+UI.rowFills = 0 -- layoutRows passes that refilled rows (tests, measurements)
+local lastFirst, lastCount
+function UI.layoutRows(force)
     if not rowScroll then return end
     local offset = ns.num((rowScroll:GetVerticalScroll())) or 0
     local first = math.max(1, math.floor(offset / ROW_HEIGHT) + 1)
     local count = UI.visibleRowCount()
+    if not force and first == lastFirst and count == lastCount then return end
+    lastFirst, lastCount = first, count
+    UI.rowFills = UI.rowFills + 1
+    local own = UI.ownContext()
     UI.officerLayout()
     for k = 1, math.max(count, #rowWidgets) do
         local i = first + k - 1
@@ -926,7 +1016,7 @@ function UI.layoutRows()
                 row:ClearAllPoints()
                 row:SetPoint("TOPLEFT", rowContent, "TOPLEFT", 0, -(i - 1) * ROW_HEIGHT)
                 ns.stripe(row.bg, i) -- GF-UI-B: the shared stripe
-                UI.fillRow(row, m)
+                UI.fillRow(row, m, own)
                 row:Show()
             else
                 row:Hide(); row.ownList = nil
@@ -1001,8 +1091,8 @@ local function placeEntry(row, s, e, x, room, first)
     return math.min(w, room)
 end
 
-local function fillProfessions(row, cell, m)
-    local detail = UI.detailFor(m)
+local function fillProfessions(row, cell, m, own)
+    local detail = UI.detailFor(m, own)
     local Prof = ns.Professions
     row.detail, row.memberName, row.memberGuid = detail, m.name, m.guid
     row.rosterNames = nil
@@ -1212,7 +1302,7 @@ function UI.drawCensus(list)
 end
 
 -- One roster row: class icon and colour, rank, centred level, coloured status.
-function UI.fillRow(row, m)
+function UI.fillRow(row, m, own)
     local color = Icons.classColor(m.classToken)
     local cells = row.cells
     row.member = m
@@ -1226,7 +1316,7 @@ function UI.fillRow(row, m)
     cell.class:SetText(str(m.class))
     cell.class:SetTextColor(color[1], color[2], color[3])
     UI.fillRoles(row, m)
-    fillProfessions(row, cell.professions, m)
+    fillProfessions(row, cell.professions, m, own)
     cell.level:SetText(tostring(m.level or 0))
     -- GF-UI-B (GF-UI-A §2.2 items 6, 7): a faint "－" for no zone; a 16 px
     -- online / offline icon in front of the status.
@@ -1286,7 +1376,7 @@ end
 function UI.select(m)
     UI.selected = m
     UI.drawActionBar()
-    UI.layoutRows()
+    UI.layoutRows(true)
 end
 
 function UI.drawActionBar()
@@ -1528,7 +1618,9 @@ function UI.afterAutoScan(count)
         ns.say(string.format("名冊已更新：%d 位角色。", count))
         manualScan = false
     end
-    if ns.Framework.isModuleShown("roster") then UI.refresh(true) end
+    -- GF-FIX-B (review mid-5): at once, but the list keeps its scroll place;
+    -- a scan that changed nothing (same Roster.version) has nothing to redraw.
+    if ns.Framework.isModuleShown("roster") and UI.drawnVersion ~= ns.Roster.version then UI.refresh(false) end
 end
 
 -- 「清除」: search text and every filter.
@@ -1541,8 +1633,12 @@ function UI.clearFilters()
     if UI.skillChoice then UI.skillChoice.selected = nil; UI.skillChoice.refreshText() end
     if UI.classChoice then UI.classChoice.selected = nil; UI.classChoice.refreshText() end
     if UI.onlineCheck then UI.onlineCheck.set(false) end
+    -- GF-FIX-B (review low-8): the boxes' OnTextChanged does not redraw
+    -- while clearing; one redraw at the end.
+    UI.clearing = true
     if UI.levelBox then UI.levelBox:SetText("") end
     if searchBox then searchBox:SetText("") end
+    UI.clearing = false
     UI.refresh(true)
 end
 
@@ -1616,7 +1712,12 @@ local function build(p)
     searchBox:SetPoint("TOPLEFT", f, "TOPLEFT", x + 4, Y)
     searchBox:SetAutoFocus(false)
     searchBox:SetMaxLetters(100)
-    searchBox:SetScript("OnTextChanged", function() UI.refresh(true) end)
+    -- GF-FIX-B (review mid-6): the first key redraws at once; keys within
+    -- SEARCH_DELAY after it make one more redraw, with the latest text.
+    searchBox:SetScript("OnTextChanged", function()
+        if UI.clearing then return end
+        UI.soon("search", UI.SEARCH_DELAY, function() if panel then UI.refresh(true) end end)
+    end)
     searchBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     UI.searchBox = searchBox
     after(124)
@@ -1645,7 +1746,8 @@ local function build(p)
     UI.levelBox:SetScript("OnTextChanged", function(self)
         local n = tonumber(str(self:GetText()))
         UI.filters.minLevel = (n and n > 1) and n or nil
-        UI.refresh(true)
+        if UI.clearing then return end
+        UI.soon("level", UI.SEARCH_DELAY, function() if panel then UI.refresh(true) end end)
     end)
     UI.levelBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     x = x + 4 + 40 + 8 -- the box border is drawn ~6 px outside it

@@ -79,12 +79,12 @@ return function(T)
         eq(c.unset.gfEnabled, true, "and it can be pressed")
     end)
 
-    test("GF-UI-K A4 職工檔案 has one page: no lone tab; the title names the entry", function()
+    test("GF-UI-K A4 職工檔案 has one page: its one tab (GF-FIX-B, owner); the title names the entry", function()
         local ns = login()
         local F = ns.Framework
         SlashCmdList.GREENFANGTOOLKIT("character")
         eq(F.current(), "character", "the personnel file")
-        eq(shownTabs(F), 0, "no tab row for one page")
+        eq(shownTabs(F), 1, "GF-FIX-B: the tab row stays for one page")
         eq(title(), "綠皮冒險工具箱｜職工檔案", "title")
     end)
 
