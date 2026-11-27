@@ -436,8 +436,8 @@ function L.tradeable(info) return info ~= nil and not L.NO_TRADE_BIND[info.bindT
 -- it is bound, "free" when one is not, nil when there is none.
 -- GF-FIX-F (review 低-19): the bags the picker and the bound check read:
 -- 0-4 and the reagent bag (Enum.BagIndex.ReagentBag) when the client has
--- one. The automatic collection still reads 0-4 only (Supply.readBags; a
--- PM decision).
+-- one. GF-009-15: the automatic collection reads the reagent bag too
+-- (Supply.reagentBag), plus the bank and mailbox as last seen.
 function L.bagIndexes()
     local list = {}
     for bag = 0, Supply.BAGS do list[#list + 1] = bag end

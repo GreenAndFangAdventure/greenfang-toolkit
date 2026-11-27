@@ -136,8 +136,8 @@ return function(T)
         eq(UI.manualBox.label._text, "手動刊登", "name kept")
         local l = L.create({ direction = "need", itemID = PATTERN, quantity = 1, days = 14, note = "" })
         ok(l, "listed")
-        UI.manualBox:SetChecked(false)
-        UI.manualBox._scripts.OnClick(UI.manualBox)
+        -- GF-009-15: the 「關」 cell of the 「開｜關」 pair.
+        UI.manualBox.cells.off._scripts.OnClick(UI.manualBox.cells.off)
         eq(ns.Supply.manualOn(), false, "off")
         -- Off: my listings are no longer published (an empty snapshot), the 刊登 button is off.
         local rec = ns.Share.get(ns.Share.selfAuthor(), L.GROUP)

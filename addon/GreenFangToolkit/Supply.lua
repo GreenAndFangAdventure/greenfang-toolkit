@@ -40,6 +40,20 @@ Supply.MAX_QTY = 200                -- per item in a snapshot
 Supply.MAX_VALUE = 600              -- bytes of one snapshot value
 Supply.MAX_FOREIGN_ITEMS = 64       -- items in a snapshot of a rules version we do not know
 Supply.BAGS = 4                     -- bag 0 (backpack) .. 4
+-- GF-009-15: where the automatic collection counts from. 行囊 (bags 0-4) and
+-- 材料袋 are read at every scan; 銀行 and 信箱 only while they are open, kept
+-- per character in the saved variables (supply.seen) and used from there.
+-- Missing counts every source. The surplus shared with the guild is each
+-- player's own setting (owner 2026-11-27): supply.shareAll nil / true =
+-- every source (the default), false = only what is on the character
+-- (行囊 + 材料袋). Where things are is never sent.
+Supply.SOURCES = { "bags", "reagent", "bank", "mail" }
+Supply.SOURCE_TEXT = { bags = "行囊", reagent = "材料袋", bank = "銀行", mail = "信箱（未收）" }
+Supply.SHARE_ALL = { bags = true, reagent = true, bank = true, mail = true }
+Supply.SHARE_ON_HAND = { bags = true, reagent = true }
+Supply.NOT_SEEN = "還沒看過"
+Supply.MAIL_SLOTS = 16              -- attachments of one mail (ATTACHMENTS_MAX_RECEIVE)
+Supply.MAIL_MAX = 100               -- mails read at most (the client loads 50)
 
 Supply.rand = function(a, b) return a + math.random() * (b - a) end -- tests replace it
 
@@ -67,6 +81,7 @@ function Supply.db()
     local s = db.supply
     if type(s.listings) ~= "table" then s.listings = {} end
     if type(s.sentAt) ~= "table" then s.sentAt = {} end
+    if type(s.seen) ~= "table" then s.seen = {} end -- GF-009-15
     return s
 end
 
@@ -81,6 +96,12 @@ function Supply.manualOn()
     local s = Supply.db()
     return not (s and s.manual == false)
 end
+-- GF-009-15: the shared surplus counts every source unless the player chose 只算身上.
+function Supply.shareAllOn()
+    local s = Supply.db()
+    return not (s and s.shareAll == false)
+end
+function Supply.shareSources() return Supply.shareAllOn() and Supply.SHARE_ALL or Supply.SHARE_ON_HAND end
 function Supply.activeRules()
     if not Supply.autoOn() then return {} end
     local s = Supply.db()
@@ -135,16 +156,19 @@ end
 -- { [itemID] = { count = n, eligible = n } }; eligible leaves out bound or
 -- locked items and items whose state is unknown. nil when the bags cannot
 -- be read.
-function Supply.readBags(wanted)
+-- GF-009-15: the same read for any list of containers; also returns the
+-- number of slots seen (0 for a bank that is not open).
+function Supply.readContainers(wanted, bags)
     local C = type(C_Container) == "table" and C_Container or nil
     if not C or type(C.GetContainerNumSlots) ~= "function" or type(C.GetContainerItemInfo) ~= "function" then
         return nil, "no-bag-api"
     end
-    local out = {}
-    for bag = 0, Supply.BAGS do
+    local out, slots = {}, 0
+    for _, bag in ipairs(bags) do
         local okN, n = try(C.GetContainerNumSlots, bag)
         if not okN then return nil, "bag-error" end
         n = tonumber(n) or 0
+        slots = slots + math.max(0, n)
         for slot = 1, n do
             local okI, info = try(C.GetContainerItemInfo, bag, slot)
             if not okI then return nil, "bag-error" end
@@ -155,6 +179,206 @@ function Supply.readBags(wanted)
                 c.count = c.count + k
                 if info.isBound == false and not info.isLocked then c.eligible = c.eligible + k end
                 out[id] = c
+            end
+        end
+    end
+    return out, slots
+end
+
+local BAG_LIST = {}
+for bag = 0, Supply.BAGS do BAG_LIST[#BAG_LIST + 1] = bag end
+function Supply.readBags(wanted)
+    local out, why = Supply.readContainers(wanted, BAG_LIST)
+    if not out then return nil, why end
+    return out
+end
+
+-- GF-009-15: the reagent bag's index, only when the client names one
+-- (Enum.BagIndex.ReagentBag; also used by the bag picker, SupplyListings).
+function Supply.reagentBag()
+    local B = type(Enum) == "table" and type(Enum.BagIndex) == "table" and Enum.BagIndex or nil
+    local i = B and tonumber(B.ReagentBag) or nil
+    if i and i > Supply.BAGS then return i end
+    return nil
+end
+
+-- GF-009-15: this character's bank containers, only the ones the client
+-- names in Enum.BagIndex (Bank, Reagentbank, BankBag_N, CharacterBankTab_N).
+-- The account bank (AccountBankTab_N) is not this character's: left out,
+-- as in Bank.lua. No names = no bank (never a guessed number).
+function Supply.bankBags()
+    local B = type(Enum) == "table" and type(Enum.BagIndex) == "table" and Enum.BagIndex or nil
+    if not B then return {} end
+    local list = {}
+    for k, v in pairs(B) do
+        if type(k) == "string" and type(v) == "number" and (k == "Bank" or k == "Reagentbank"
+            or k:match("^BankBag_%d+$") or k:match("^CharacterBankTab_%d+$")) then
+            list[#list + 1] = v
+        end
+    end
+    table.sort(list)
+    return list
+end
+
+-- The ItemIDs the automatic collection looks for now (active rules only).
+function Supply.wanted()
+    local wanted = {}
+    for _, rule in ipairs(Supply.activeRules()) do for id in pairs(rule.items) do wanted[id] = true end end
+    return wanted
+end
+
+-- GF-009-15: the attachments still in the mailbox (not taken yet):
+-- { [itemID] = { count, eligible } } or nil when the mailbox cannot be read.
+-- Attachments count as tradeable (eligible = count): a guess, not checked.
+local function itemIDOfLink(link)
+    if type(link) ~= "string" then return nil end
+    return tonumber(link:match("item:(%d+)"))
+end
+function Supply.readMail(wanted)
+    if type(GetInboxNumItems) ~= "function" or type(GetInboxItem) ~= "function" then return nil, "no-mail-api" end
+    local okN, n = try(GetInboxNumItems)
+    if not okN or type(n) ~= "number" then return nil, "mail-error" end
+    local header = type(GetInboxHeaderInfo) == "function" and GetInboxHeaderInfo or nil
+    local out = {}
+    -- Headers first: once a header shows the attachment count, mails without one are skipped.
+    local has, sawField = {}, false
+    for i = 1, math.min(n, Supply.MAIL_MAX) do
+        if header then
+            local okH, _, _, _, _, _, _, _, hasItem = pcall(header, i)
+            if okH and hasItem ~= nil then sawField = true end
+            has[i] = okH and hasItem or nil
+        end
+    end
+    for i = 1, math.min(n, Supply.MAIL_MAX) do
+        local h = has[i]
+        if not (sawField and (h == nil or h == false or h == 0)) then
+            for j = 1, Supply.MAIL_SLOTS do
+                local okI, _, itemID, _, count = pcall(GetInboxItem, i, j)
+                if not okI then return nil, "mail-error" end
+                local id = tonumber(itemID)
+                if not id and type(GetInboxItemLink) == "function" then
+                    local okL, link = pcall(GetInboxItemLink, i, j)
+                    id = okL and itemIDOfLink(link) or nil
+                end
+                if id and wanted[id] then
+                    local k = tonumber(count) or 1
+                    local c = out[id] or { count = 0, eligible = 0 }
+                    c.count, c.eligible = c.count + k, c.eligible + k
+                    out[id] = c
+                end
+            end
+        end
+    end
+    return out
+end
+
+---------------------------------------------------------------------------
+-- GF-009-15: 銀行 / 信箱 as last seen (per character, saved): supply.seen[key]
+-- = { bank = { t, n = { [itemID] = count }, e = { [itemID] = eligible } },
+-- mail = { ... } }. Only whitelist items and the read time are kept.
+---------------------------------------------------------------------------
+
+function Supply.charKey()
+    local g = ns.selfGUID and ns.call(ns.selfGUID)
+    if type(g) == "string" and g ~= "" then return g end
+    return nil
+end
+function Supply.seenOf(kind)
+    local s, key = Supply.db(), Supply.charKey()
+    local me = s and key and s.seen[key]
+    local e = type(me) == "table" and me[kind] or nil
+    if type(e) ~= "table" or type(e.t) ~= "number" or type(e.n) ~= "table" then return nil end
+    return e
+end
+-- The last seen counts as { [itemID] = { count, eligible } }, and the time.
+function Supply.seenCounts(kind)
+    local e = Supply.seenOf(kind)
+    if not e then return nil end
+    local out = {}
+    for id, n in pairs(e.n) do
+        if type(id) == "number" and type(n) == "number" and n > 0 then
+            out[id] = { count = n, eligible = math.min(n, tonumber(e.e and e.e[id]) or 0) }
+        end
+    end
+    return out, e.t
+end
+Supply.seenVersion = 0
+-- Keep what was read; true when the counts changed (the time always moves).
+function Supply.storeSeen(kind, counts)
+    local s, key = Supply.db(), Supply.charKey()
+    if not s or not key then return false end
+    if type(s.seen[key]) ~= "table" then s.seen[key] = {} end
+    local n, e = {}, {}
+    for id, c in pairs(counts) do
+        if c.count > 0 then n[id] = c.count end
+        if c.eligible > 0 then e[id] = c.eligible end
+    end
+    local old = s.seen[key][kind]
+    local same = type(old) == "table" and type(old.n) == "table" and type(old.e) == "table"
+    if same then
+        for id, v in pairs(n) do if old.n[id] ~= v then same = false end end
+        for id in pairs(old.n) do if n[id] == nil then same = false end end
+        for id, v in pairs(e) do if old.e[id] ~= v then same = false end end
+        for id in pairs(old.e) do if e[id] == nil then same = false end end
+    end
+    s.seen[key][kind] = { t = ns.Share.serverNow(), n = n, e = e }
+    if not same then Supply.seenVersion = Supply.seenVersion + 1 end
+    return not same
+end
+
+-- Read the open bank / mailbox now (out of combat, collection on). A read
+-- that sees nothing of the bank (0 slots) keeps the old copy.
+Supply.open = { bank = false, mail = false }
+Supply.sourceReads = { bank = 0, mail = 0 } -- tests and 同步與診斷
+function Supply.readSource(kind)
+    if not Supply.open[kind] or ns.inCombat() or not Supply.autoOn() then return "skip" end
+    local wanted = Supply.wanted()
+    if not next(wanted) then return "skip" end
+    local counts, why
+    if kind == "bank" then
+        local bags = Supply.bankBags()
+        if #bags == 0 then return "no-bank-index" end
+        local second
+        counts, second = Supply.readContainers(wanted, bags)
+        if not counts then why = second elseif (second or 0) == 0 then return "bank-empty" end
+    else
+        counts, why = Supply.readMail(wanted)
+    end
+    if not counts then note((kind == "bank" and "銀行" or "信箱") .. "讀不到（" .. tostring(why) .. "）"); return "error" end
+    Supply.sourceReads[kind] = Supply.sourceReads[kind] + 1
+    if Supply.storeSeen(kind, counts) then Supply.markDirty() end
+    return "ok"
+end
+-- Several events in one frame: one read on the next frame (never later).
+local readPending = {}
+function Supply.readSoon(kind)
+    if readPending[kind] or not Supply.open[kind] then return end
+    readPending[kind] = true
+    ns.after(0, function() readPending[kind] = nil; Supply.readSource(kind) end)
+end
+
+-- GF-009-15: a short text of every count by source (the page redraws when it changes).
+function Supply.whereSig(sources)
+    local parts = {}
+    for _, key in ipairs(Supply.SOURCES) do
+        local ids = {}
+        for id, c in pairs(sources[key] or {}) do ids[#ids + 1] = id .. "=" .. c.count .. "/" .. c.eligible end
+        table.sort(ids)
+        parts[#parts + 1] = key .. (sources[key] and ":" or "-") .. table.concat(ids, ",")
+    end
+    return table.concat(parts, ";")
+end
+
+-- Totals over the given sources (a set of keys), wanted items only.
+function Supply.total(sources, wanted, which)
+    local out = {}
+    for _, key in ipairs(Supply.SOURCES) do
+        local m = (not which or which[key]) and sources[key] or nil
+        for id, c in pairs(m or {}) do
+            if wanted[id] then
+                local t = out[id] or { count = 0, eligible = 0 }
+                t.count, t.eligible = t.count + (c.count or 0), t.eligible + (c.eligible or 0)
+                out[id] = t
             end
         end
     end
@@ -169,7 +393,10 @@ end
 -- Returns { missing = { [itemID] = n }, surplus = { [itemID] = n },
 -- unknown = { [itemID] = true } }. A chapter whose state is unknown adds
 -- nothing (no guessed need, no guessed surplus).
-function Supply.compute(rule, questState, bags)
+-- GF-009-15: bags = every source (what is missing); share = the
+-- Supply.shareSources() totals (what may be extra); without share, bags.
+function Supply.compute(rule, questState, bags, share)
+    share = share or bags
     local snap = { missing = {}, surplus = {}, unknown = {} }
     local parentDone = rule.parentQuestID and questState(rule.parentQuestID) == "done"
     for _, ch in ipairs(rule.chapters) do
@@ -186,7 +413,8 @@ function Supply.compute(rule, questState, bags)
                 local missing = math.max(0, need - (b.count or 0))
                 if missing > 0 then snap.missing[id] = math.min(missing, Supply.MAX_QTY) end
                 if rule.candidateTradeable then
-                    local extra = math.max(0, (b.eligible or 0) - reserve)
+                    local sb = share[id] or { count = 0, eligible = 0 }
+                    local extra = math.max(0, (sb.eligible or 0) - reserve)
                     if extra > 0 then snap.surplus[id] = math.min(extra, Supply.MAX_QTY) end
                 end
             end
@@ -322,7 +550,7 @@ function Supply.scanNow()
     -- changed something it shows (a snapshot stored, the counts, a read
     -- that failed or came back, the first scan).
     local before = table.concat({ tostring(last.scanAt ~= nil), tostring(last.questOK), tostring(last.bagOK),
-        tostring(last.missing), tostring(last.surplus) }, "|")
+        tostring(last.missing), tostring(last.surplus), tostring(last.whereSig) }, "|")
     local stored = false
     last.scanAt = ns.Share.serverNow()
     local active = Supply.activeRules()
@@ -341,14 +569,24 @@ function Supply.scanNow()
     local questState = Supply.questReader()
     last.questOK = questState ~= nil
     if not questState then note("任務資料讀不到：自動集料暫停"); return "no-quest-api" end
-    local wanted = {}
-    for _, rule in ipairs(active) do for id in pairs(rule.items) do wanted[id] = true end end
+    local wanted = Supply.wanted()
     local bags, why = Supply.readBags(wanted)
     last.bagOK = bags ~= nil
     if not bags then note("背包讀不到：自動集料暫停（" .. tostring(why) .. "）"); return why end
+    -- GF-009-15: 材料袋 now (when the client has one; a failed read = not read),
+    -- 銀行 / 信箱 as last seen.
+    local sources = { bags = bags }
+    local reagent = Supply.reagentBag()
+    if reagent then sources.reagent = Supply.readContainers(wanted, { reagent }) end
+    sources.bank = Supply.seenCounts("bank")
+    sources.mail = Supply.seenCounts("mail")
+    last.sources = sources
+    last.whereSig = Supply.whereSig(sources)
+    local have = Supply.total(sources, wanted)
+    local share = Supply.total(sources, wanted, Supply.shareSources())
     local missing, surplus = 0, 0
     for _, rule in ipairs(active) do
-        local snap = Supply.compute(rule, questState, bags)
+        local snap = Supply.compute(rule, questState, have, share)
         last.snaps[rule.collectionID] = snap
         for _ in pairs(snap.missing) do missing = missing + 1 end
         for _ in pairs(snap.surplus) do surplus = surplus + 1 end
@@ -357,7 +595,7 @@ function Supply.scanNow()
     end
     last.missing, last.surplus = missing, surplus
     local after = table.concat({ "true", tostring(last.questOK), tostring(last.bagOK),
-        tostring(last.missing), tostring(last.surplus) }, "|")
+        tostring(last.missing), tostring(last.surplus), tostring(last.whereSig) }, "|")
     if (stored or after ~= before) and Supply.onChanged then Supply.onChanged() end
     return "ok"
 end
@@ -408,6 +646,14 @@ function Supply.setAuto(on)
     if Supply.started then Supply.scanNow() end
     if Supply.onChanged then Supply.onChanged() end
 end
+-- GF-009-15: 分享的餘料 全部 / 只算身上; a new scan at once (sent only when the snapshot changed).
+function Supply.setShareAll(on)
+    local s = Supply.db()
+    if not s then return end
+    s.shareAll = on and true or false
+    if Supply.started and Supply.autoOn() then Supply.scanNow() end
+    if Supply.onChanged then Supply.onChanged() end
+end
 function Supply.setManual(on)
     local s = Supply.db()
     if not s then return end
@@ -423,7 +669,28 @@ local events = CreateFrame("Frame")
 Supply.EVENTS = { "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "BAG_UPDATE_DELAYED", "QUEST_LOG_UPDATE", "QUEST_ACCEPTED",
     "QUEST_TURNED_IN", "QUEST_REMOVED", "PLAYER_REGEN_ENABLED" }
 for _, e in ipairs(Supply.EVENTS) do pcall(events.RegisterEvent, events, e) end
+-- GF-009-15: the bank and the mailbox, read only while open. Each event is
+-- registered under pcall; one the client does not know is listed in
+-- Supply.missingEvents and that source stays 還沒看過.
+Supply.SOURCE_EVENTS = { "BANKFRAME_OPENED", "BANKFRAME_CLOSED", "PLAYERBANKSLOTS_CHANGED",
+    "PLAYERREAGENTBANKSLOTS_CHANGED", "BANK_TABS_CHANGED", "MAIL_SHOW", "MAIL_INBOX_UPDATE", "MAIL_CLOSED" }
+Supply.missingEvents = {}
+for _, e in ipairs(Supply.SOURCE_EVENTS) do
+    if not pcall(events.RegisterEvent, events, e) then Supply.missingEvents[#Supply.missingEvents + 1] = e end
+end
+local BANK_CHANGE = { PLAYERBANKSLOTS_CHANGED = true, PLAYERREAGENTBANKSLOTS_CHANGED = true, BANK_TABS_CHANGED = true }
+function Supply.onSourceEvent(event)
+    if event == "BANKFRAME_OPENED" then Supply.open.bank = true; Supply.readSoon("bank")
+    elseif event == "BANKFRAME_CLOSED" then Supply.open.bank = false
+    elseif BANK_CHANGE[event] then Supply.readSoon("bank")
+    elseif event == "MAIL_SHOW" then Supply.open.mail = true; Supply.readSoon("mail")
+    elseif event == "MAIL_INBOX_UPDATE" then Supply.readSoon("mail")
+    elseif event == "MAIL_CLOSED" then Supply.open.mail = false
+    else return false end
+    return true
+end
 events:SetScript("OnEvent", function(_, event, a, b)
+    if Supply.onSourceEvent(event) then return end
     if event == "PLAYER_LOGIN" or event == "PLAYER_ENTERING_WORLD" then
         -- After the share login (Init.lua) so the guild and roster are known.
         if not Supply.started then
@@ -437,7 +704,10 @@ events:SetScript("OnEvent", function(_, event, a, b)
         end)
     else
         -- GF-FIX-F (中-18): the finder's bag list is read again after a change.
-        if event == "BAG_UPDATE_DELAYED" then Supply.bagVersion = Supply.bagVersion + 1 end
+        if event == "BAG_UPDATE_DELAYED" then
+            Supply.bagVersion = Supply.bagVersion + 1
+            Supply.readSoon("bank") -- GF-009-15: the bank's own bags (only while it is open)
+        end
         Supply.markDirty()
     end
 end)
@@ -449,6 +719,68 @@ ns.Widgets.onItemAnswer(function(itemID, success)
     if ns.SupplyListings and ns.SupplyListings.itemAnswer then ns.SupplyListings.itemAnswer(itemID, success) end
     if Supply.onItemInfo then Supply.onItemInfo(itemID, success) end
 end)
+
+---------------------------------------------------------------------------
+-- GF-009-15: where my items are (my own page only; never sent)
+---------------------------------------------------------------------------
+
+-- 「11-27 14:05」 for a last-seen time.
+function Supply.seenTime(t)
+    if not (date and t) then return "" end
+    local okD, r = pcall(date, "%m-%d %H:%M", t)
+    return okD and type(r) == "string" and r or ""
+end
+
+-- { { key, text, n, t, seen } } in Supply.SOURCES order. 材料袋 only when
+-- the client has one; 銀行 / 信箱 always (seen = false: 還沒看過).
+function Supply.locations(itemID)
+    local out = {}
+    local src = last.sources or {}
+    for _, key in ipairs(Supply.SOURCES) do
+        if key == "bank" or key == "mail" then
+            local counts, t = Supply.seenCounts(key)
+            local c = counts and counts[itemID]
+            out[#out + 1] = { key = key, text = Supply.SOURCE_TEXT[key], n = c and c.count or 0, t = t, seen = counts ~= nil }
+        elseif key == "bags" or src[key] then
+            local c = src[key] and src[key][itemID]
+            out[#out + 1] = { key = key, text = Supply.SOURCE_TEXT[key], n = c and c.count or 0, seen = src[key] ~= nil }
+        end
+    end
+    return out
+end
+-- Tooltip lines: 「行囊：2」「銀行：1（上次看到 11-27 14:05）」「信箱（未收）：還沒看過」.
+function Supply.whereLines(itemID)
+    local lines = {}
+    for _, l in ipairs(Supply.locations(itemID)) do
+        local v
+        if not l.seen then v = Supply.NOT_SEEN
+        else
+            v = tostring(l.n)
+            if l.t then v = v .. "（上次看到 " .. Supply.seenTime(l.t) .. "）" end
+        end
+        lines[#lines + 1] = l.text .. "：" .. v
+    end
+    return lines
+end
+-- One short line (owner: 「行囊 3｜材料袋 2｜銀行 5｜信箱（未收）1」): only the
+-- places that have some, 銀行 / 信箱 with the last seen time; "" when none.
+function Supply.whereShort(itemID)
+    local have = {}
+    for _, l in ipairs(Supply.locations(itemID)) do
+        if l.seen and l.n > 0 then
+            have[#have + 1] = l.text .. " " .. l.n .. (l.t and ("（" .. Supply.seenTime(l.t) .. "）") or "")
+        end
+    end
+    return table.concat(have, "｜")
+end
+-- 「行囊和材料袋」 / 「行囊、材料袋、銀行和信箱（未收）」 from the setting.
+function Supply.shareSourcesText()
+    local names = {}
+    local which = Supply.shareSources()
+    for _, key in ipairs(Supply.SOURCES) do if which[key] then names[#names + 1] = Supply.SOURCE_TEXT[key] end end
+    if #names <= 1 then return names[1] or "" end
+    return table.concat(names, "、", 1, #names - 1) .. "和" .. names[#names]
+end
 
 ---------------------------------------------------------------------------
 -- Everybody's snapshots (read side; 附錄 A §6.3, §7.4)
@@ -722,10 +1054,19 @@ function Supply.diagText()
     end
     parts[#parts + 1] = string.format("規則庫 v%d｜已驗證：%s｜實驗：%s", Rules.LIBRARY_VERSION,
         #enabled > 0 and table.concat(enabled, "、") or "無", #exp > 0 and table.concat(exp, "、") or "無")
-    parts[#parts + 1] = "自動集料：" .. (Supply.autoOn() and "開" or "關") .. "｜手動刊登：" .. (Supply.manualOn() and "開" or "關")
+    parts[#parts + 1] = "自動集料：" .. (Supply.autoOn() and "開" or "關") .. "｜分享的餘料：" .. (Supply.shareAllOn() and "全部" or "只算身上")
+        .. "｜手動刊登：" .. (Supply.manualOn() and "開" or "關")
     local function yn(v) if v == nil then return "未讀" end return v and "成功" or "失敗" end
     parts[#parts + 1] = string.format("任務讀取 %s｜背包讀取 %s｜最後掃描 %s｜缺口 %d 種、可能多 %d 種",
         yn(last.questOK), yn(last.bagOK), last.scanAt and ns.localTime(last.scanAt) or "尚未", last.missing or 0, last.surplus or 0)
+    -- GF-009-15: the bank and the mailbox as last seen.
+    local function seenText(kind)
+        local e = Supply.seenOf(kind)
+        return e and ("上次看到 " .. Supply.seenTime(e.t)) or Supply.NOT_SEEN
+    end
+    parts[#parts + 1] = string.format("銀行 %s｜信箱（未收） %s｜這次登入讀銀行 %d、信箱 %d 次%s", seenText("bank"), seenText("mail"),
+        Supply.sourceReads.bank, Supply.sourceReads.mail,
+        #Supply.missingEvents > 0 and ("｜不支援的事件：" .. table.concat(Supply.missingEvents, "、")) or "")
     local c = Supply.snapshotCounts()
     parts[#parts + 1] = string.format("收到的快照：有效 %d、過期 %d、規則版本不同 %d｜拒收的資料 %d 則",
         c.valid, c.expired, c.unsupported, stats.rejected)
@@ -744,4 +1085,8 @@ function Supply.resetSession()
     timerOn, firstAt, lastAt = false, nil, nil
     Supply.started, Supply.dirty = false, false
     snapCache = {}
+    Supply.open.bank, Supply.open.mail = false, false
+    Supply.sourceReads.bank, Supply.sourceReads.mail = 0, 0
+    last.sources, last.whereSig = nil, nil
+    for k in pairs(readPending) do readPending[k] = nil end
 end

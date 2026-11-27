@@ -37,17 +37,21 @@ UI.BAR_Y, UI.TOOL_Y = -40, -84
 -- (the state in words; gold when on), one line of what it does now, and 說明
 -- (a card with the full text; 自動集料's also lists the collection items).
 UI.AUTO_TEXT, UI.MANUAL_TEXT = "自動集料", "手動刊登" -- switches, not filters (GF-UI-I): names kept
-UI.SWITCH_X = { name = 586, button = 664, line = 720 }
-UI.SWITCH_W = 48
+-- GF-009-15 (owner): the state is two cells side by side, 「開｜關」: the
+-- current one lit (gold edge, gold text), the other grey; a click on a cell
+-- sets that state. SWITCH_W is the pair's width.
+UI.SWITCH_X = { name = 586, button = 664, line = 760 } -- line: 8 px after the pair
+UI.SWITCH_CELL_W = 44
+UI.SWITCH_W = 2 * UI.SWITCH_CELL_W
 UI.SWITCH_STATE = { on = "開", off = "關" }
 UI.SWITCH_HELP = { auto = { text = "說明與項目", w = 100 }, manual = { text = "說明", w = 62 } }
 UI.SWITCH_RIGHT = 1078 -- the detail column's right edge (DETAIL_X + DETAIL_W)
 UI.SWITCH_LINE = {
-    auto = { on = "依任務與背包算缺件並分享", off = "已關閉：不計算、不分享" },
+    auto = { on = "依任務與存貨算缺件並分享", off = "已關閉：不計算、不分享" }, -- GF-009-15
     manual = { on = "自己發布徵求或供應並分享", off = "已關閉：不分享、不顯示刊登" },
 }
 UI.SWITCH_TIP = {
-    auto = "自動集料（實驗功能，預設關）：依白名單任務的進度和背包，自動算出缺的和可能多的物品，"
+    auto = "自動集料（實驗功能，預設關）：依白名單任務的進度和你的行囊、材料袋、銀行、信箱，自動算出缺的和可能多的物品，"
         .. "只把這些物品的數量分享給公會。按「說明與項目」看完整說明和包含的物品。",
     manual = "手動刊登：自己發布徵求或供應，分享給公會。關掉後不再分享我的刊登，也不顯示別人的刊登。",
 }
@@ -61,10 +65,14 @@ UI.CARD_SUB = {
 }
 UI.CARD_LINES = {
     auto = {
-        "它會做什麼：依白名單裡的收集任務，對照你的任務進度和背包數量，自動算出你還缺的物品和可能多出來的物品。",
-        "資料從哪來：只讀這個角色的任務狀態和背包（行囊、背包 1～4），不讀銀行。",
-        "分享給公會什麼：只有白名單物品的「缺幾個／可能多幾個」；公會成員在調貨所看得到。",
-        "不會做什麼：不公開整個背包、不讀銀行、不自動交易或郵寄；要不要聯絡、怎麼交換都由你決定。",
+        "它會做什麼：依白名單裡的收集任務，對照你的任務進度和身上各處的數量，自動算出你還缺的物品和可能多出來的物品。",
+        -- GF-009-15: four sources; 銀行 / 信箱 as last seen.
+        "資料從哪來：這個角色的任務狀態、行囊（背包 0～4）、材料袋、自己的銀行，和信箱裡還沒收下的附件。"
+            .. "銀行和信箱只有打開時讀得到，所以用上次看到的數量；還沒打開過就當作沒有，畫面寫「還沒看過」。",
+        "分享給公會什麼：只有白名單物品的「缺幾個／可能多幾個」。缺幾個把上面四處都算進去；可能多幾個依上面「分享的餘料」："
+            .. "全部＝四處都算，只算身上＝只算行囊和材料袋（現在算{share}）。銀行和信箱的數量是上次打開時看到的，"
+            .. "之後拿走或放進去要再打開一次才會更新。東西放在哪裡只有你自己看得到，不會分享。",
+        "不會做什麼：不公開整個背包或銀行、不自動收信、不自動交易或郵寄；要不要聯絡、怎麼交換都由你決定。",
         "關掉後：不再計算，已分享的缺件和餘料會清空；你也看不到別人的自動集料資料。",
         "為什麼預設關：這是實驗功能，白名單的任務和書頁規則還沒在 Forever 實機確認，確認前由你自己決定要不要開。",
     },
@@ -76,6 +84,12 @@ UI.CARD_LINES = {
     },
 }
 UI.CARD_ITEMS_TITLE = "包含的項目"
+-- GF-009-15 (owner 2026-11-27): each player chooses what the shared surplus
+-- counts; the same two-cell look as 「開｜關」; default 全部.
+UI.SHARE_TEXT = "分享的餘料"
+UI.SHARE_STATE = { on = "全部", off = "只算身上" }
+UI.SHARE_CELL_W = { on = 56, off = 84 }
+UI.SHARE_TIP = "分享給公會的「可能多幾個」要算哪裡：全部＝行囊、材料袋、銀行、信箱（未收）；只算身上＝行囊和材料袋。缺幾個一律四處都算。"
 UI.CARD_RULE_STATE = { experimental = "實驗，尚未實機確認", enabled = "已實機確認" }
 UI.CARD_COLS, UI.CARD_ROW_H = 3, 30
 -- GF-UI-K: an ended listing of mine sits after the live ones, faded.
@@ -276,7 +290,8 @@ end
 -- Move a row's (or the header's) cells for list width w: 物品 grows, the
 -- other columns keep their width and move right.
 local COL_KEYS = { "name", "qty", "match", "fresh" }
-function UI.placeCells(owner, cells, w)
+function UI.placeCells(owner, cells, w, dy)
+    dy = dy or 0
     local d = w - UI.LIST_W
     local C = UI.COL
     for i, key in ipairs(COL_KEYS) do
@@ -285,14 +300,24 @@ function UI.placeCells(owner, cells, w)
             local x = key == "name" and (fs.gfHeadX or C.name.x) or (C[key].x + d)
             local cw = key == "name" and ((fs.gfHeadW or C.name.w) + d) or C[key].w
             fs:ClearAllPoints()
-            fs:SetPoint("LEFT", owner, "LEFT", x, 0)
+            fs:SetPoint("LEFT", owner, "LEFT", x, dy)
             fs:SetWidth(cw)
         end
     end
 end
+-- GF-009-15: a row with r.whereText set has two lines: the cells move up
+-- and 「行囊 3｜銀行 5（11-27 14:05）」 runs under them (full width; the
+-- tooltip has the whole list).
+UI.WHERE_DY = 8
 function UI.placeRow(r, w)
     r:SetWidth(w)
-    UI.placeCells(r, { r.name, r.qty, r.match, r.fresh }, w)
+    local two = r.gfTwoLine == true
+    UI.placeCells(r, { r.name, r.qty, r.match, r.fresh }, w, two and UI.WHERE_DY or 0)
+    if r.where then
+        r.where:ClearAllPoints()
+        r.where:SetPoint("LEFT", r, "LEFT", UI.COL.name.x, -UI.WHERE_DY - 2)
+        r.where:SetWidth(w - UI.COL.name.x - 8)
+    end
 end
 
 local function newRow(i)
@@ -327,6 +352,10 @@ local function newRow(i)
     r.qty = cell("qty", ns.FIELD_FONT, "RIGHT")
     r.match = cell("match", ns.LABEL_FONT)
     r.fresh = cell("fresh", ns.LABEL_FONT)
+    r.where = r:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT) -- GF-009-15
+    r.where:SetJustifyH("LEFT")
+    if r.where.SetWordWrap then r.where:SetWordWrap(false) end
+    r.where:Hide()
     UI.placeRow(r, UI.listWidth())
     r:SetScript("OnClick", function(self) UI.select(self.index) end)
     r:SetScript("OnEnter", function(self)
@@ -367,6 +396,14 @@ function UI.listFor(kind)
         if not rule or (rule.items and rule.items[it.itemID]) then
             local tip = {}
             if it.mine then tip[#tip + 1] = "來源：" .. sourceText(it.mine) end
+            -- GF-009-15: where my own items are (自動集料 on; never sent).
+            local mineAuto = it.mine and it.mine.auto and Supply.autoOn()
+            local where = mineAuto and Supply.whereShort(it.itemID) or nil
+            if where == "" then where = nil end
+            if mineAuto then
+                tip[#tip + 1] = "我的存放位置："
+                for _, line in ipairs(Supply.whereLines(it.itemID)) do tip[#tip + 1] = "　" .. line end
+            end
             -- GF-009-14 B: every viewable manual listing: terms and the full note.
             local hasNote = false
             for _, e in ipairs(it.others or {}) do
@@ -377,7 +414,7 @@ function UI.listFor(kind)
             end
             out[#out + 1] = { itemID = it.itemID, item = it, qty = UI.qtyText(kind, it), match = UI.matchText(kind, it),
                 qtyShort = UI.qtyShort(kind, it), matchShort = UI.matchShort(kind, it), fresh = UI.freshShort(it),
-                tip = tip, hasNote = hasNote }
+                tip = tip, hasNote = hasNote, where = where }
         end
     end
     return out
@@ -404,6 +441,11 @@ function UI.drawList()
             r.qty:SetText(data.qtyShort or data.qty or "")
             r.match:SetText(data.matchShort or data.match or "")
             r.fresh:SetText(data.fresh or "")
+            -- GF-009-15: where my own items are, on a second line.
+            local two = (data.where or "") ~= ""
+            if two ~= (r.gfTwoLine == true) then r.gfTwoLine = two; UI.placeRow(r, UI.listWidth()) end
+            r.where:SetText(two and data.where or "")
+            if two then r.where:Show() else r.where:Hide() end
             r.noteIcon:ClearAllPoints()
             r.noteIcon:SetPoint("BOTTOMRIGHT", r.icon, "BOTTOMRIGHT", 4, -4)
             if data.hasNote then r.noteIcon:Show() else r.noteIcon:Hide() end
@@ -635,7 +677,7 @@ function UI.drawDetail()
     listingButtons(nil)
     if detailHeader then if #data.item.others > 0 then detailHeader:Show() else detailHeader:Hide() end end
     local it = data.item
-    detail.sub:SetText(data.qty .. (data.match ~= "" and ("｜" .. data.match) or ""))
+    detail.sub:SetText(data.qty .. (data.match ~= "" and ("｜" .. data.match) or "") .. (data.where and ("｜" .. data.where) or ""))
     local list = it.others
     for i = 1, UI.DETAIL_ROWS do
         local e = list[i]
@@ -738,21 +780,83 @@ end
 function UI.switchState(on) return on and UI.SWITCH_STATE.on or UI.SWITCH_STATE.off end
 function UI.switchLine(key, on) return UI.SWITCH_LINE[key][on and "on" or "off"] end
 
--- GF-FIX-F: one switch: the name, a check button drawn as a theme button
--- whose text is the state (開 gold / 關 grey; a click turns it over), the
--- line of what it does now and the 說明 button. c.label is the name.
+-- GF-FIX-F / GF-009-15: one switch: the name, the 「開｜關」 pair (c, a
+-- frame holding the two cells c.cells.on / c.cells.off), the line of what it
+-- does now and the 說明 button. c.label is the name; c.stateText is the lit
+-- cell's text.
+local function paintCell(b, lit)
+    local col = lit and Th.C.gold or Th.C.muted
+    b.text:SetTextColor(col[1], col[2], col[3])
+    for _, t in ipairs(b.gfEdges or {}) do Th.color(t, lit and Th.C.selLine or Th.C.line) end
+    Th.color(b.gfFill, lit and Th.C.goldFill or Th.C.fill)
+    b.gfLit = lit
+end
+-- GF-009-15: a 「開｜關」-style pair: cells.on then cells.off side by side;
+-- p.setOn(on) lights one; a click on the other cell calls onClick(state).
+local function cellPair(parent, texts, widths, tip, onClick)
+    local p = CreateFrame("Frame", nil, parent)
+    p:SetSize(widths.on + widths.off, ns.BUTTON_H)
+    p.cells = {}
+    for i, state in ipairs({ "on", "off" }) do
+        local b = CreateFrame("Button", nil, p)
+        b:SetSize(widths[state], ns.BUTTON_H)
+        b:SetPoint("TOPLEFT", p, "TOPLEFT", i == 1 and 0 or widths.on, 0)
+        b.gfFill = Th.fill(b, Th.C.fill, "BACKGROUND")
+        b.gfEdges = Th.border(b, Th.C.line, "BORDER")
+        b.gfHover = Th.fill(b, Th.C.hover, "HIGHLIGHT")
+        b.gfHoverEdges = Th.border(b, Th.C.lineHover, "HIGHLIGHT")
+        b.text = b:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT)
+        b.text:SetPoint("CENTER", b, "CENTER", 0, 0)
+        b.text:SetText(texts[state])
+        b.gfState = state
+        b:SetScript("OnClick", function(self)
+            local want = self.gfState == "on"
+            if want ~= p.gfOn then onClick(want) end
+        end)
+        b.tip = tip
+        withTip(b)
+        Th.guardHover(b)
+        p.cells[state] = b
+    end
+    function p.setOn(on)
+        on = on and true or false
+        p.gfOn = on
+        paintCell(p.cells.on, on)
+        paintCell(p.cells.off, not on)
+    end
+    return p
+end
+UI.cellPair = cellPair
+
 local function switchRow(parent, key, text, y, onClick)
     local X = UI.SWITCH_X
-    local c = CreateFrame("CheckButton", nil, parent)
+    local c = CreateFrame("Frame", nil, parent)
     c:SetSize(UI.SWITCH_W, ns.BUTTON_H)
     c:SetPoint("TOPLEFT", parent, "TOPLEFT", X.button, y)
     c.gfSwitch = key
-    c.gfFill = Th.fill(c, Th.C.fill, "BACKGROUND")
-    c.gfEdges = Th.border(c, Th.C.line, "BORDER")
-    c.gfHover = Th.fill(c, Th.C.hover, "HIGHLIGHT")
-    c.gfHoverEdges = Th.border(c, Th.C.lineHover, "HIGHLIGHT")
-    c.stateText = c:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT)
-    c.stateText:SetPoint("CENTER", c, "CENTER", 0, 0)
+    c.cells = {}
+    for i, state in ipairs({ "on", "off" }) do
+        local b = CreateFrame("Button", nil, c)
+        b:SetSize(UI.SWITCH_CELL_W, ns.BUTTON_H)
+        b:SetPoint("TOPLEFT", c, "TOPLEFT", (i - 1) * UI.SWITCH_CELL_W, 0)
+        b.gfFill = Th.fill(b, Th.C.fill, "BACKGROUND")
+        b.gfEdges = Th.border(b, Th.C.line, "BORDER")
+        b.gfHover = Th.fill(b, Th.C.hover, "HIGHLIGHT")
+        b.gfHoverEdges = Th.border(b, Th.C.lineHover, "HIGHLIGHT")
+        b.text = b:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT)
+        b.text:SetPoint("CENTER", b, "CENTER", 0, 0)
+        b.text:SetText(UI.SWITCH_STATE[state])
+        b.gfState = state
+        -- A click sets that cell's state; the lit one does nothing.
+        b:SetScript("OnClick", function(self)
+            local want = self.gfState == "on"
+            if want ~= c.gfOn then onClick(want) end
+        end)
+        b.tip = UI.SWITCH_TIP[key]
+        withTip(b)
+        Th.guardHover(b)
+        c.cells[state] = b
+    end
     c.label = label(parent, text, ns.FIELD_FONT)
     c.label:SetPoint("TOPLEFT", parent, "TOPLEFT", X.name, y - 6)
     c.line = label(parent, "", ns.LABEL_FONT)
@@ -765,20 +869,13 @@ local function switchRow(parent, key, text, y, onClick)
     if c.line.SetWordWrap then c.line:SetWordWrap(false) end
     function c.setOn(on)
         on = on and true or false
-        c:SetChecked(on)
         c.gfOn = on
-        c.stateText:SetText(UI.switchState(on))
-        local col = on and Th.C.gold or Th.C.muted
-        c.stateText:SetTextColor(col[1], col[2], col[3])
-        local edge = on and Th.C.selLine or Th.C.line
-        for _, t in ipairs(c.gfEdges or {}) do Th.color(t, edge) end
-        Th.color(c.gfFill, on and Th.C.goldFill or Th.C.fill)
+        paintCell(c.cells.on, on)
+        paintCell(c.cells.off, not on)
+        c.stateText = on and c.cells.on.text or c.cells.off.text
         c.line:SetText(UI.switchLine(key, on))
     end
-    -- A click turns the shown state over (the client's own check flag is set again by setOn).
-    c:SetScript("OnClick", function(self) onClick(not self.gfOn) end)
     c.tip = UI.SWITCH_TIP[key]
-    Th.guardHover(c)
     return c
 end
 UI.switchRow = switchRow
@@ -818,6 +915,14 @@ local function cardText(f, font)
     end
     return fs
 end
+-- GF-009-15: the card's lines; {share} = the sources the shared surplus counts.
+function UI.cardLines(key)
+    local out = {}
+    for i, line in ipairs(UI.CARD_LINES[key] or {}) do
+        out[i] = (line:gsub("{share}", function() return Supply.shareSourcesText() end))
+    end
+    return out
+end
 function UI.drawCard(key)
     local f = cards[key]
     if not f then return nil end
@@ -837,8 +942,24 @@ function UI.drawCard(key)
         return fs
     end
     f.sub = put(UI.CARD_SUB[key], ns.LABEL_FONT, Th.C.muted, 10)
+    if key == "auto" then
+        -- GF-009-15: 分享的餘料 全部｜只算身上 (the player's own setting).
+        if not f.share then
+            f.shareLabel = f:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT)
+            f.shareLabel:SetText(UI.SHARE_TEXT)
+            f.share = cellPair(f, UI.SHARE_STATE, UI.SHARE_CELL_W, UI.SHARE_TIP, function(on)
+                Supply.setShareAll(on); UI.drawCard("auto"); UI.refresh()
+            end)
+        end
+        f.shareLabel:ClearAllPoints()
+        f.shareLabel:SetPoint("TOPLEFT", f, "TOPLEFT", pad, y - 6)
+        f.share:ClearAllPoints()
+        f.share:SetPoint("TOPLEFT", f, "TOPLEFT", pad + 96, y)
+        f.share.setOn(Supply.shareAllOn())
+        y = y - ns.BUTTON_H - 10
+    end
     f.lines = {}
-    for _, line in ipairs(UI.CARD_LINES[key]) do f.lines[#f.lines + 1] = put(line) end
+    for _, line in ipairs(UI.cardLines(key)) do f.lines[#f.lines + 1] = put(line) end
     f.itemRows = f.itemRows or {}
     local used = 0
     f.groups = nil
@@ -895,7 +1016,6 @@ local function build(p)
     -- GF-FIX-F: two switch rows on the right (was 「啟用：」 + two check boxes).
     autoBox = switchRow(p, "auto", UI.AUTO_TEXT, UI.BAR_Y, function(on) Supply.setAuto(on); UI.refresh() end)
     manualBox = switchRow(p, "manual", UI.MANUAL_TEXT, UI.TOOL_Y, function(on) Supply.setManual(on); UI.refresh() end)
-    withTip(autoBox); withTip(manualBox)
     autoBox.help.tip, manualBox.help.tip = "自動集料做什麼、分享什麼、包含哪些物品", "手動刊登做什麼、關掉後會怎樣"
     withTip(autoBox.help); withTip(manualBox.help)
     tabs = Th.tabStrip(p, (function()
