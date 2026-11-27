@@ -15,6 +15,8 @@
 --             the module's onAction(entry, key) handles them)
 --     ttl     seconds the notice is kept (default N.TTL)
 --     summary false: not counted in the chat line (the module printed its own; GF-014-03)
+--     overflow true: past N.BURST a minute, merged into one "另有 N 則" notice of
+--             the module (its page) instead of only counted (GF-014-04)
 --   returns "stored" / "merged" / "quiet" / "queued" / "off" / "burst" / "bad"
 --
 -- Rules: a module the player switched off adds nothing. In combat a push only
@@ -40,6 +42,8 @@ N.ALERT_GAP = 60
 N.BURST = 10            -- new notices per module per minute
 N.QUEUE_MAX = 100       -- waiting in combat (merged by key)
 N.TEXT_MAX = 120        -- bytes
+N.MORE_KEY = "+more"   -- GF-014-04: push({ overflow = true }) past N.BURST
+N.MORE_TEXT = "另有 %d 則「%s」，請到頁面查看"
 
 -- The modules that may notify, in the order of the switches. A module that is
 -- not listed still works (switch on by default), so a page can start using
@@ -48,6 +52,13 @@ N.MODULES = {
     { key = "supply", text = "調貨所配對", tip = "有人可能有你缺的，或需要你可能有多的" },
     { key = "radar", text = "需求雷達", tip = "背包裡有公會正在徵求的物品（只有你看得到）" },
     { key = "adventure", text = "職工單配對", tip = "我的職工單符合別人的冒險單（WorkerMatch.lua；各角色自己的設定）" }, -- GF-014-02
+    -- GF-014-04: what 委託業務 / 冒險業務 / 臨時黑箱 tell me when others act (one switch each).
+    { key = "order_new", text = "有人對我下單", tip = "有人指定我做的委託（含網站下單）" },
+    { key = "order_status", text = "委託狀態改變", tip = "對方接單、交貨、放棄、退回、成交或取消我的委託" },
+    { key = "adv_signup", text = "有人報名我的冒險單", tip = "我開的冒險單有人報名或接受邀請" },
+    { key = "adv_result", text = "錄取／遞補／邀請", tip = "隊長錄取、邀請或移出我，或我從候補遞補上" },
+    { key = "adv_final", text = "冒險單定案或取消", tip = "我報名的冒險單定案了時間，或被取消" },
+    { key = "bank_keeper", text = "黑箱保管人", tip = "會長指定我為保管人，或撤銷我的保管人資格" },
 }
 N.MODULE_TEXT = {}
 for _, m in ipairs(N.MODULES) do N.MODULE_TEXT[m.key] = m.text end
@@ -71,6 +82,7 @@ local function compactQueue()
     queueOrder = keep
 end
 local burst = {}      -- module -> { at = minute, n = count }
+local combatHooks = {} -- GF-014-04: scans that waited for the end of combat
 local lastAlert, alertPending, alertTimer = 0, 0, false
 
 ---------------------------------------------------------------------------
@@ -279,7 +291,30 @@ local function apply(n)
     local minute = math.floor(t / 60)
     local b = burst[n.module]
     if not b or b.at ~= minute then b = { at = minute, n = 0 }; burst[n.module] = b end
-    if b.n >= N.BURST then stats.burst = stats.burst + 1; return "burst" end
+    if b.n >= N.BURST then
+        stats.burst = stats.burst + 1
+        if not n.overflow then return "burst" end
+        -- GF-014-04: past the limit these merge into one "另有 N 則" notice of the module.
+        local more = find(s, n.module, N.MORE_KEY)
+        if more then
+            more.more = (more.more or 1) + 1
+            more.count = (more.count or 1) + 1
+            more.text = string.format(N.MORE_TEXT, more.more, N.MODULE_TEXT[n.module] or "通知")
+            more.t, more.expires = t, t + n.ttl
+            if not more.unread then more.unread, more.alertAt = true, t; alert() end
+            N.changed()
+            return "merged"
+        end
+        s.seq = s.seq + 1
+        s.list[#s.list + 1] = { id = s.seq, module = n.module, key = N.MORE_KEY, more = 1,
+            text = string.format(N.MORE_TEXT, 1, N.MODULE_TEXT[n.module] or "通知"),
+            target = n.target and n.target.page and { page = n.target.page } or nil,
+            t = t, alertAt = t, expires = t + n.ttl, unread = true, count = 1 }
+        N.prune(s)
+        alert()
+        N.changed()
+        return "stored"
+    end
     b.n = b.n + 1
     s.seq = s.seq + 1
     s.list[#s.list + 1] = { id = s.seq, module = n.module, key = n.key, text = n.text, target = n.target,
@@ -303,6 +338,7 @@ function N.push(n)
         target = cleanTarget(n.target), actions = cleanActions(n.actions),
         ttl = math.max(60, math.min(tonumber(n.ttl) or N.TTL, 30 * 86400)),
         summary = n.summary ~= false, -- GF-014-03: false = not counted in the chat line
+        overflow = n.overflow == true, -- GF-014-04: past N.BURST merge into one "另有 N 則"
     }
     if ns.inCombat() then
         local qk = clean.module .. "\1" .. clean.key
@@ -319,9 +355,56 @@ end
 
 function N.queued() return #queueOrder end
 
+-- GF-014-04: a module whose scan was asked for in combat runs it here, right
+-- after combat, before the queue (no frame or event of its own).
+-- Files that load before this one leave theirs in ns.notifyHooks.
+function N.onAfterCombat(fn) combatHooks[#combatHooks + 1] = fn end
+for _, fn in ipairs(ns.notifyHooks or {}) do combatHooks[#combatHooks + 1] = fn end
+ns.notifyHooks = nil
+
+-- GF-014-04: one event (a fact with its own key, e.g. "<order id>|making|<time>")
+-- is announced once per character, ever: kept in N.memory(module).done, so a
+-- resend, a relay or the replay after /reload never notifies it again.
+-- Returns true only the first time. A switched-off module still marks it.
+function N.once(module, key, at)
+    local mem = N.memory(module)
+    if type(mem.done) ~= "table" then mem.done = {} end
+    key = tostring(key)
+    if mem.done[key] then return false end
+    mem.done[key] = tonumber(at) or now()
+    return true
+end
+function N.known(module, key)
+    local mem = N.memory(module)
+    return type(mem.done) == "table" and mem.done[tostring(key)] ~= nil
+end
+-- Is an event new enough to announce? Not from before this module first
+-- watched on this character (mem.since: the first load with GF-014-04, so an
+-- upgrade does not announce the old history) and not older than N.TTL.
+local loadedAt = time and time() or 0
+function N.fresh(module, at)
+    local mem = N.memory(module)
+    if type(mem.since) ~= "number" then mem.since = loadedAt end
+    at = tonumber(at)
+    if not at then return false end
+    return at >= mem.since and now() - at < N.TTL
+end
+
+-- Forget the events keep(key, at) says no to (records that are gone).
+function N.forget(module, keep)
+    local mem = N.memory(module)
+    if type(mem.done) ~= "table" then return 0 end
+    local n = 0
+    for k, at in pairs(mem.done) do
+        if not keep(k, at) then mem.done[k] = nil; n = n + 1 end
+    end
+    return n
+end
+
 -- After combat: the queue in the order it came, then the chat line.
 function N.afterCombat()
     if ns.inCombat() then return end
+    for _, fn in ipairs(combatHooks) do pcall(fn) end -- GF-014-04
     local order = queueOrder
     queueOrder = {}
     for _, qk in ipairs(order) do

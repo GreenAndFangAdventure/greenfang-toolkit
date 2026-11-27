@@ -192,7 +192,7 @@ Orders.ledger = ns.Ledger.new({
     validAuthor = validAuthor, validGroup = validGroup, validValue = validValue,
     selfAuthor = function() return S().selfAuthor() end,
     changeDelay = 2,
-    onChange = function() cache.version = -1; if Orders.onChanged then Orders.onChanged() end end,
+    onChange = function() cache.version = -1; if Orders.onChanged then Orders.onChanged() end; Orders.notifySoon() end,
     onCustom = function(...) return Orders.onCustom(...) end,
     mergeSelf = function(g, v) return Orders.mergeSelf(g, v) end,
 })
@@ -1370,3 +1370,107 @@ function Orders.resetSession()
     asked, answering, cache, svCache, activeCache = {}, {}, { version = -1 }, {}, { version = -1 }
     led:resetSession()
 end
+
+---------------------------------------------------------------------------
+-- GF-014-04: 業務通知 for what others did to my orders (Notify.lua). Two
+-- kinds, one switch each: order_new (someone ordered from me by name, the
+-- website too) and order_status (the other side took, delivered, dropped,
+-- returned, closed or cancelled it). One event = one fact with its own time
+-- ("<id>|making|<since>"), announced once ever (Notify.once): a relay, a
+-- resend or the replay after /reload says nothing again. What I did myself
+-- (my own side of the order, test orders) is never announced. In combat the
+-- scan waits for the end of combat (Notify.onAfterCombat). The scan reads the
+-- cached views (Orders.all) once per ledger change, on the next frame.
+---------------------------------------------------------------------------
+
+Orders.NOTIFY_TEXT = {
+    new = "%s 指定你做 %s",
+    taken = "%s 接了你的委託 %s",
+    delivered = "%s 交貨了 %s，請確認收貨",
+    dropped = "%s放棄了你的委託 %s，已回到等接單",
+    ["cancel-crafter"] = "%s 取消了你的委託 %s",
+    ["deal-crafter"] = "%s 交貨已滿期，委託 %s 自動成交",
+    returned = "%s 退回了 %s，請再交一次",
+    ["deal-customer"] = "%s 確認成交 %s",
+    ["cancel-customer"] = "%s 取消了委託 %s",
+    ["cancel-web"] = "%s 在網站取消了委託 %s",
+}
+Orders.notifyStats = { scans = 0, events = 0, pushed = 0, waited = 0 }
+
+local function N() return ns.Notify end
+
+-- The events of one order for me: { { module, key, code, at, who } }.
+function Orders.notifyEvents(v, me)
+    local out = {}
+    if not (v and me) or v.test or Orders.isTestId(v.id) then return out end
+    local isCustomer, isCrafter = v.customer == me, v.crafter == me
+    if isCustomer == isCrafter then return out end -- not mine, or my own order to myself
+    local function add(module, kind, code, at, who)
+        out[#out + 1] = { module = module, key = v.id .. "|" .. kind .. "|" .. tostring(at or 0), code = code, at = at, who = who }
+    end
+    local closed = v.state == "deal" or v.state == "cancel"
+    if isCrafter then
+        if v.state == "waiting" and not v.guild then add("order_new", "new", "new", v.created, v.customer) end
+        if v.state == "making" and v.returned then add("order_status", "returned", "returned", v.since, v.customer) end
+        if closed and (v.closedBy == "customer" or v.closedBy == "web") then
+            add("order_status", "close", v.state .. "-" .. v.closedBy, v.since, v.customer)
+        end
+    else
+        if v.state == "making" and not v.returned and v.crafter then add("order_status", "making", "taken", v.since, v.crafter) end
+        if v.state == "checking" and not v.uncertain and v.crafter then add("order_status", "checking", "delivered", v.since, v.crafter) end
+        if v.state == "waiting" and v.guild and v.droppedAt then
+            add("order_status", "dropped", "dropped", v.droppedAt, nil)
+        end
+        if closed and v.closedBy == "crafter" then add("order_status", "close", v.state .. "-crafter", v.since, v.crafter) end
+    end
+    return out
+end
+
+local function nameOf(a, code)
+    if code == "dropped" then return "接單的工匠" end
+    local m = a and S().memberFor(a)
+    return m and ns.shortName(m.name) or "有人"
+end
+function Orders.notifyItemName(v)
+    local name = v.item and ns.itemInfo(v.item)
+    if type(name) ~= "string" or name == "" then name = v.item and ("物品 #" .. tostring(v.item)) or "委託" end
+    if (v.qty or 1) > 1 then name = name .. " x" .. v.qty end
+    return name
+end
+function Orders.notifyText(v, ev)
+    local fmt = Orders.NOTIFY_TEXT[ev.code] or "%s 更新了委託 %s"
+    return string.format(fmt, nameOf(ev.who, ev.code), Orders.notifyItemName(v))
+end
+
+function Orders.notifyScan()
+    local Nt = N()
+    if not Nt then return 0 end
+    if ns.inCombat() then Orders.notifyStats.waited = Orders.notifyStats.waited + 1; Orders.notifyPending = true; return 0 end
+    Orders.notifyPending = false
+    local me = S().selfAuthor()
+    if not me or ns.guildState() ~= "target" then return 0 end
+    Orders.notifyStats.scans = Orders.notifyStats.scans + 1
+    local views, pushed = Orders.all(), 0
+    for _, v in pairs(views) do
+        for _, ev in ipairs(Orders.notifyEvents(v, me)) do
+            if Nt.once(ev.module, ev.key, ev.at) then
+                Orders.notifyStats.events = Orders.notifyStats.events + 1
+                if Nt.fresh(ev.module, ev.at) then
+                    local r = Nt.push({ module = ev.module, key = (ev.module == "order_new" and "new|" or "order|") .. v.id,
+                        text = Orders.notifyText(v, ev), target = { page = "orders", id = v.id }, overflow = true })
+                    if r == "stored" or r == "merged" or r == "quiet" or r == "queued" then pushed = pushed + 1 end
+                end
+            end
+        end
+    end
+    Orders.notifyStats.pushed = Orders.notifyStats.pushed + pushed
+    -- Events of orders that left the ledger are forgotten (their keys start with the id).
+    for _, module in ipairs({ "order_new", "order_status" }) do
+        Nt.forget(module, function(k) local id = k:match("^(.-)|"); return id ~= nil and views[id] ~= nil end)
+    end
+    return pushed
+end
+function Orders.notifySoon() ns.coalesce("orders-notify", 0, Orders.notifyScan) end
+-- Notify.lua loads after this file: it takes ns.notifyHooks over at its load.
+ns.notifyHooks = ns.notifyHooks or {}
+table.insert(ns.notifyHooks, function() if Orders.notifyPending then Orders.notifyScan() end end)

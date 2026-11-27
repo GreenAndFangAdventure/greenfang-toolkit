@@ -27,7 +27,8 @@ UI.W = 520
 UI.ROWS = 6
 UI.ROW_H = 66
 UI.TOP = -44
-UI.MODULE_SHORT = { supply = "調貨", radar = "雷達", adventure = "冒險", orders = "委託" }
+UI.MODULE_SHORT = { supply = "調貨", radar = "雷達", adventure = "冒險", orders = "委託",
+    order_new = "委託", order_status = "委託", adv_signup = "冒險", adv_result = "冒險", adv_final = "冒險", bank_keeper = "黑箱" } -- GF-014-04
 
 local button, list
 local state = { offset = 0, items = {}, settings = false }
@@ -182,12 +183,22 @@ local function settingsRows()
     return out
 end
 
+-- GF-014-04: 13 switches: the rows close up (36 px down to 30) so they stay
+-- inside the list (UI.ROWS * UI.ROW_H + 76 high).
+UI.SETTING_STEP, UI.SETTING_MIN = 36, 30
+function UI.settingStep(n)
+    local room = UI.ROWS * UI.ROW_H + 76 + UI.TOP - 16
+    return math.max(UI.SETTING_MIN, math.min(UI.SETTING_STEP, math.floor(room / math.max(1, n))))
+end
+
 function UI.buildSettings(parent, x, y)
     local boxes = {}
     local sync
-    for i, m in ipairs(settingsRows()) do
+    local rows = settingsRows()
+    local step = UI.settingStep(#rows)
+    for i, m in ipairs(rows) do
         local c = Th.checkBox(parent, 28)
-        c:SetPoint("TOPLEFT", parent, "TOPLEFT", (x or 12) + (m.sub and 28 or 0), (y or UI.TOP) - (i - 1) * 36)
+        c:SetPoint("TOPLEFT", parent, "TOPLEFT", (x or 12) + (m.sub and 28 or 0), (y or UI.TOP) - (i - 1) * step)
         c.text = label(parent, m.text, ns.LABEL_FONT)
         c.text:SetPoint("LEFT", c, "RIGHT", 6, 0)
         c.tip = m.tip

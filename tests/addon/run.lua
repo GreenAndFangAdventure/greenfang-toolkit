@@ -4759,6 +4759,10 @@ assert(loadfile(ROOT .. "/tests/addon/gffixd_tests.lua"))()({ test = test, eq = 
 assert(loadfile(ROOT .. "/tests/addon/gffixb_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
+-- GF-014-04: 委託 / 冒險 / 黑箱 events as 業務通知 (tests/addon/gf01404_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf01404_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+
 
 -- GF-FIX-F: 0.16.6 review batch F: item events, finder reload, radar, 臨時黑箱; the supply switches (tests/addon/gffixf_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gffixf_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
