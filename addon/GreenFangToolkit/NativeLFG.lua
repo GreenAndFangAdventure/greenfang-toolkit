@@ -103,8 +103,9 @@ function L.read()
                 if okC and type(counts) == "table" then
                     for r, k in pairs(ROLE_KEYS) do need[r] = ns.num(counts[k]) end
                 end
-                out[#out + 1] = { id = id, dungeon = dungeon, leader = str(info.leaderName), members = ns.num(info.numMembers) or 0,
-                    need = need, comment = str(info.comment), name = str(info.name) }
+                -- GF-FIX-D (review 中-3): other players' text: no "|" sequences, short.
+                out[#out + 1] = { id = id, dungeon = dungeon, leader = ns.cleanText(info.leaderName, 64), members = ns.num(info.numMembers) or 0,
+                    need = need, comment = ns.cleanText(info.comment, 160), name = ns.cleanText(info.name, 160) }
             end
         end
     end
@@ -171,9 +172,12 @@ function L.diagText()
 end
 
 -- The game says a search finished (the player's or ours): read it.
+-- GF-FIX-D (review 中-14): a client without these events loads on (pcall, as elsewhere).
 local f = CreateFrame("Frame")
-f:RegisterEvent("LFG_LIST_SEARCH_RESULTS_RECEIVED")
-f:RegisterEvent("LFG_LIST_SEARCH_RESULT_UPDATED")
+L.missingEvents = {}
+for _, e in ipairs({ "LFG_LIST_SEARCH_RESULTS_RECEIVED", "LFG_LIST_SEARCH_RESULT_UPDATED" }) do
+    if not pcall(f.RegisterEvent, f, e) then L.missingEvents[#L.missingEvents + 1] = e end
+end
 f:SetScript("OnEvent", function()
     ns.coalesce("native-lfg", 1, function() L.refresh() end)
 end)
