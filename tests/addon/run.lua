@@ -131,7 +131,7 @@ test("fresh install creates schema v2 defaults", function()
     local db = GreenFangToolkitDB
     eq(db.schema, "gf.toolkit", "schema")
     eq(db.schemaVersion, 2, "schemaVersion")
-    eq(db.addonVersion, "0.16.7", "addonVersion")
+    eq(db.addonVersion, "0.16.8", "addonVersion")
     eq(db.sync.enabled, true, "sync.enabled default")
     eq(db.sync.noticeShown, false, "noticeShown before login")
     eq(#db.sync.outbox, 0, "outbox empty")
@@ -157,7 +157,7 @@ test("TOC declares the agreed names and loads every file", function()
     ok(toc:find("## Interface: 16001", 1, true), "Interface")
     ok(toc:find("## Title: 綠皮冒險工具箱", 1, true), "Title")
     ok(toc:find("## Author: 綠皮與獠牙冒險事務所", 1, true), "Author")
-    ok(toc:find("## Version: 0.16.7", 1, true), "Version")
+    ok(toc:find("## Version: 0.16.8", 1, true), "Version")
     ok(toc:find("## SavedVariables: GreenFangToolkitDB\r?\n"), "SavedVariables")
     local listed = {}
     for line in toc:gmatch("[^\r\n]+") do
@@ -429,7 +429,7 @@ test("unknown fields in an existing v2 table are preserved", function()
         sync = { enabled = false, noticeShown = true, outbox = {} },
     } })
     eq(GreenFangToolkitDB.futureModule.keep, true, "unknown field kept")
-    eq(GreenFangToolkitDB.addonVersion, "0.16.7", "addonVersion updated")
+    eq(GreenFangToolkitDB.addonVersion, "0.16.8", "addonVersion updated")
     eq(GreenFangToolkitDB.sync.enabled, true, "old off ignored (D-015)")
 end)
 
@@ -479,7 +479,7 @@ test("TSV/JSON export keep the v0.3.1 format", function()
     local s = ns.Roster.current()
     local json = ns.Export.jsonParts(s)
     eq(#json, 1, "one part")
-    ok(json[1]:find('^{"schema":"gfguildroster.report","schemaVersion":1,"addonVersion":"0.16.7"'), "json header")
+    ok(json[1]:find('^{"schema":"gfguildroster.report","schemaVersion":1,"addonVersion":"0.16.8"'), "json header")
     ok(json[1]:find('"part":1,"partCount":1', 1, true), "parts")
     ok(json[1]:find('"onlineAtCapture":true', 1, true), "member online in manual export")
     ok(not json[1]:find('"guid":', 1, true), "no guid in v1 export")
@@ -2678,7 +2678,7 @@ test("D10 diag window: sections, sharing stats, export moved here, /gftk sync st
     ok(has(all, "GF Sync 只是補充來源"), "site note")
     ok(has(all, "記錄 ") and has(all, "這次登入：送出"), "sharing statistics")
     ok(has(all, "掃描時間："), "roster scan")
-    ok(has(all, "工具箱 0.16.7"), "version")
+    ok(has(all, "工具箱 0.16.8"), "version")
     wow.click(ns.Diag.exportJSONButton)
     ok(_G.GreenFangToolkit_ExportWindow and _G.GreenFangToolkit_ExportWindow:IsShown(), "export from the window")
     GreenFangToolkitDB.settings.minimapAngle = 10
@@ -3875,6 +3875,7 @@ test("D19 roster filters: profession (incl. secondary), class, online, minimum l
     eq(shown(), "測試乙,測試甲", "level 30+")
     ns.UI.levelBox:SetText("50")
     ns.UI.levelBox._scripts.OnTextChanged(ns.UI.levelBox)
+    wow.advance(0.16) -- GF-FIX-B: keys within 0.15 s make one more redraw at the end of it
     eq(shown(), "測試乙", "level 50+")
     ns.UI.skillChoice.setOnly(197)
     eq(shown(), "", "nobody: tailoring and 50+")
@@ -4728,6 +4729,19 @@ assert(loadfile(ROOT .. "/tests/addon/gffixa_tests.lua"))()({ test = test, eq = 
 
 -- GF-FIX-E: 0.16.6 review batch E: prices cap, mail delivery, pasted web orders, notes (tests/addon/gffixe_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gffixe_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-FIX-D: 0.16.6 review batch D: adventure quest log cache, rowsFor once per change, guards (tests/addon/gffixd_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gffixd_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+
+
+-- GF-FIX-B: 0.16.6 review batch B: roster caches, search, scroll; one-page tabs, 4:3 fit, order state names (tests/addon/gffixb_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gffixb_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+
+
+-- GF-FIX-F: 0.16.6 review batch F: item events, finder reload, radar, 臨時黑箱; the supply switches (tests/addon/gffixf_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gffixf_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 

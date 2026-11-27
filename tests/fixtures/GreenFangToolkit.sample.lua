@@ -4,7 +4,7 @@
 -- GF Sync 只讀 sync 區塊。roster.snapshots 是遊戲內畫面用的資料，含 zone／online，不得上傳。
 
 GreenFangToolkitDB = {
-	["addonVersion"] = "0.16.7",
+	["addonVersion"] = "0.16.8",
 	["adventure"] = {
 		["deleted"] = {
 		},

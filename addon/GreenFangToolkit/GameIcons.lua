@@ -189,12 +189,17 @@ function G.pick(key)
 end
 
 -- Put art on a texture: true when one of the candidates worked.
+-- GF-FIX-B (review low-7): a file the client is known not to have (G.has
+-- cache) is not tried again on every row; each try's result is remembered.
 function G.set(tex, key)
     if not tex then return false end
     local list = G.ART[key]
     if not list then tex:Hide(); return false end
     for _, c in ipairs(list) do
-        if ns.Icons.set(tex, c[1]) then
+        local file = c[1]
+        local works = known[file] ~= false and ns.Icons.set(tex, file)
+        if known[file] == nil then known[file] = works and true or false end
+        if works then
             if tex.SetTexCoord then tex:SetTexCoord(coords(c)) end
             tex:Show()
             return true

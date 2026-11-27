@@ -396,6 +396,7 @@ W.ITEM_ICON, W.ITEM_ROW_H = 36, 44
 W.ITEM_PLACEHOLDER = { "Interface\\Icons\\INV_Misc_QuestionMark", "Interface\\RaidFrame\\ReadyCheck-Waiting" }
 W.TEXT = {
     itemLoading = "物品資料載入中",
+    itemMissing = "找不到這個物品", -- GF-FIX-F: the server said no such item
     empty = "目前沒有資料", loading = "載入中", unknown = "狀態未知", stale = "資料過期", error = "暫時無法讀取",
     fresh = { recent = "近期", earlier = "稍早", stale = "過期", unknown = "未知" },
 }
@@ -408,20 +409,67 @@ local function try(f, ...)
     return unpack(res, 2, 11)
 end
 
--- What the client knows about an item now. Pure read; asks the client to
--- load it (C_Item.RequestLoadItemDataByID) when the name is not there yet.
+-- GF-FIX-F (review 中-16, 中-17): the toolkit's item data requests, in one
+-- place. ITEM_DATA_LOAD_RESULT / GET_ITEM_INFO_RECEIVED come for every item
+-- the game loads (auction house, other AddOns); the pages act only on items
+-- asked for here. One request per item until it is answered (again after
+-- REQUEST_AGAIN seconds without an answer); an item the server called
+-- missing (success = false) is never asked again this session.
+W.REQUEST_AGAIN = 30
+local requested, failedItems = {}, {}
+local requestCount = 0
+W.failedItems = failedItems
+-- Asks the client for itemID (or notes that the client is already loading
+-- it: a GetItemInfo miss does that by itself). false for a missing item.
+function W.requestItem(itemID, noCall)
+    local id = tonumber(itemID)
+    if not id or failedItems[id] then return false end
+    local t = ns.now and ns.now() or 0
+    local at = requested[id]
+    if at and t - at < W.REQUEST_AGAIN then return true end
+    requested[id] = t
+    if noCall then return true end
+    local C = type(C_Item) == "table" and C_Item or nil
+    if C and fnc(C.RequestLoadItemDataByID) then
+        requestCount = requestCount + 1
+        pcall(C.RequestLoadItemDataByID, id)
+    end
+    return true
+end
+function W.itemRequested(itemID) return requested[tonumber(itemID) or 0] ~= nil end
+function W.itemFailed(itemID) return failedItems[tonumber(itemID) or 0] == true end
+function W.requestCount() return requestCount end
+function W.resetRequests()
+    for k in pairs(requested) do requested[k] = nil end
+    for k in pairs(failedItems) do failedItems[k] = nil end
+    requestCount = 0
+end
+-- Listeners for answers to our own requests only: fn(itemID, success).
+local itemListeners = {}
+function W.onItemAnswer(fn) itemListeners[#itemListeners + 1] = fn end
+
+-- What the client knows about an item now. Asks the client to load it
+-- (W.requestItem, once) when the name is not there yet; failed = the server
+-- said there is no such item.
 function W.itemInfo(itemID)
     local id = tonumber(itemID)
     local info = { id = id, loaded = false }
     if not id then return info end
     local C = type(C_Item) == "table" and C_Item or {}
+    -- GF-FIX-F: a missing item is not read again (a GetItemInfo miss asks the server).
+    if failedItems[id] then
+        info.failed, info.icon = true, try(C.GetItemIconByID, id)
+        return info
+    end
     local name, link, quality, _, _, _, _, _, _, icon = try(ns.itemInfoFn(), id) -- GF-009-13 fix: no global GetItemInfo on Forever
     name = name or try(C.GetItemNameByID, id)
     icon = icon or try(C.GetItemIconByID, id) or try(GetItemIcon, id)
     if type(name) == "string" and name ~= "" then
         info.name, info.loaded = name, true
+    elseif failedItems[id] then
+        info.failed = true
     else
-        try(C.RequestLoadItemDataByID, id)
+        W.requestItem(id)
     end
     info.icon = icon
     info.link = type(link) == "string" and link or nil
@@ -433,14 +481,32 @@ local waiting = setmetatable({}, { __mode = "k" }) -- row -> itemID still loadin
 local itemEvents = CreateFrame("Frame")
 pcall(itemEvents.RegisterEvent, itemEvents, "GET_ITEM_INFO_RECEIVED")
 pcall(itemEvents.RegisterEvent, itemEvents, "ITEM_DATA_LOAD_RESULT") -- GF-009-13 fix: RequestLoadItemDataByID's answer
-itemEvents:SetScript("OnEvent", function(_, _, itemID)
+-- GF-FIX-F (中-16): an answer for an item nobody here asked for and no row
+-- waits for is dropped at once (no redraw, no page work).
+local itemEventStats = { seen = 0, ours = 0 }
+W.itemEventStats = itemEventStats
+function W.itemAnswer(itemID, success)
     local id = tonumber(itemID)
+    itemEventStats.seen = itemEventStats.seen + 1
     local list = {}
     for row, wanted in pairs(waiting) do
         if id == nil or wanted == id then list[#list + 1] = row end
     end
+    if id and success ~= false then failedItems[id] = nil end
+    local ours = id ~= nil and requested[id] ~= nil
+    if not ours and #list == 0 then return false end
+    itemEventStats.ours = itemEventStats.ours + 1
+    if id then
+        requested[id] = nil
+        if success == false then failedItems[id] = true end
+    end
     for _, row in ipairs(list) do row.redraw() end
-end)
+    if id then
+        for _, fn in ipairs(itemListeners) do pcall(fn, id, success) end
+    end
+    return true
+end
+itemEvents:SetScript("OnEvent", function(_, _, itemID, success) W.itemAnswer(itemID, success) end)
 W.itemEventFrame = itemEvents
 function W.itemsWaiting()
     local n = 0
@@ -544,10 +610,10 @@ function W.itemRow(parent, w, h)
         if row.icon.SetDesaturated then row.icon:SetDesaturated(row.placeholder) end
         row.iconPath = path
         row.loading = not info.loaded
-        row.name:SetText(info.loaded and info.name or W.TEXT.itemLoading)
+        row.name:SetText(info.loaded and info.name or (info.failed and W.TEXT.itemMissing) or W.TEXT.itemLoading)
         local col = info.loaded and W.COLOR.white or W.COLOR.muted
         row.name:SetTextColor(col[1], col[2], col[3])
-        if info.loaded then waiting[row] = nil else waiting[row] = info.id end
+        if info.loaded or info.failed then waiting[row] = nil else waiting[row] = info.id end
         row.layout()
     end
 

@@ -238,11 +238,11 @@ function F.moduleSettings(id)
     return settings.modules[id]
 end
 
--- Stable key for the logged-in character: its GUID, else Name-Realm.
+-- Stable key for the logged-in character: its GUID, or nil (nothing is
+-- stored then). GF-FIX-B (review low-11, savedvariables §5): never a name.
 function F.charKey()
-    local p = ns.Data.player()
-    if p.guid then return p.guid end
-    if p.name ~= "" then return p.name .. "-" .. p.realm end
+    local g = ns.selfGUID and ns.selfGUID()
+    if type(g) == "string" and g:match("^Player%-") then return g end
     return nil
 end
 
@@ -286,6 +286,17 @@ local function createWindow()
     bar:SetSize(F.PANEL_WIDTH, ns.BUTTON_H + 2)
     bar.line = ns.Theme.hline(f, F.SUBTAB_Y - ns.BUTTON_H - 4, F.NAV_WIDTH + 20, 20)
     f.subBar = bar
+    -- GF-FIX-B (owner: 4:3): the window fits the screen (Theme.fit, when it
+    -- opens); a new resolution or UI scale fits it, and the open windows, again.
+    f.gfFitMain = true
+    -- Guarded: an event name this client does not know must not stop the window from being built.
+    pcall(f.RegisterEvent, f, "DISPLAY_SIZE_CHANGED")
+    pcall(f.RegisterEvent, f, "UI_SCALE_CHANGED")
+    f:SetScript("OnEvent", function(self, event)
+        if event == "PLAYER_REGEN_ENABLED" then self:UnregisterEvent(event) end
+        ns.Theme.refit()
+        if ns.Theme.fitPending then self:RegisterEvent("PLAYER_REGEN_ENABLED") end
+    end)
     f:Hide()
     window = f
     return f
@@ -386,9 +397,8 @@ end
 local function rebuildSubTabs(key)
     for _, b in ipairs(subTabs) do b:Hide() end
     local pages = key and F.pagesOf(key) or {}
-    -- GF-UI-K (owner: one lone tab 「角色資料」): an entry with one page shows no
-    -- tab; the window title names the entry. The page keeps its place.
-    if #pages < 2 then return pages end
+    -- GF-FIX-B (owner, after GF-UI-K): an entry with one page shows its one
+    -- tab too, like the others (more pages will come under these entries).
     local x = 20
     for i, def in ipairs(pages) do
         local b = subTabs[i]
@@ -924,9 +934,20 @@ function ns.multiChoiceButton(parent, w, x, y, options, onChange, summary)
     local ROW, WIDTH = 28, math.max(w + 40, 210)
 
     function b.isOn(value) return b.selected == nil or b.selected[value] == true end
+    -- GF-FIX-B (review mid-8): while the list is open, one options() read
+    -- (made when it opened) serves every tick; closed, it is read live.
+    b.optionReads = 0 -- options() calls (tests)
+    function b.currentOptions()
+        if menu:IsShown() and b.lastOptions then return b.lastOptions end
+        b.optionReads = b.optionReads + 1
+        local list = b.options()
+        if menu:IsShown() then b.lastOptions = list end
+        return list
+    end
+    menu:HookScript("OnHide", function() b.lastOptions = nil end)
     function b.count()
         local n = 0
-        for _, o in ipairs(b.options()) do if b.isOn(o.value) then n = n + 1 end end
+        for _, o in ipairs(b.currentOptions()) do if b.isOn(o.value) then n = n + 1 end end
         return n
     end
     ns.dropArrow(b)
@@ -934,7 +955,7 @@ function ns.multiChoiceButton(parent, w, x, y, options, onChange, summary)
     local function changed()
         -- Everything ticked is the same as "everything" (nil), so options
         -- added later (a new profession) are included.
-        if b.selected and b.count() == #b.options() then b.selected = nil end
+        if b.selected and b.count() == #b.currentOptions() then b.selected = nil end
         b.refreshText()
         if menu:IsShown() then b.drawItems() end
         onChange()
@@ -944,7 +965,7 @@ function ns.multiChoiceButton(parent, w, x, y, options, onChange, summary)
     function b.toggle(value)
         if b.selected == nil then
             b.selected = {}
-            for _, o in ipairs(b.options()) do b.selected[o.value] = true end
+            for _, o in ipairs(b.currentOptions()) do b.selected[o.value] = true end
         end
         b.selected[value] = (not b.selected[value]) or nil
         changed()
@@ -972,7 +993,7 @@ function ns.multiChoiceButton(parent, w, x, y, options, onChange, summary)
     end
 
     function b.drawItems()
-        local list = b.options()
+        local list = b.currentOptions()
         local entries = { { text = "全選", fn = b.selectAll }, { text = "全不選", fn = b.selectNone } }
         -- GF-UI-C: every name starts at one x (after the box, and after the icon column when any option has one).
         local anyIcon = false
@@ -1005,8 +1026,9 @@ function ns.multiChoiceButton(parent, w, x, y, options, onChange, summary)
     b:SetScript("OnClick", function()
         if menu:IsShown() then closeMenu(); return end
         closeMenu()
+        b.lastOptions = nil
+        menu:Show() -- shown first: the one options() read below is kept while it is open
         b.drawItems()
-        menu:Show()
         openMenu = menu
     end)
     b:HookScript("OnHide", function() if openMenu == menu then closeMenu() end end)
