@@ -21,7 +21,7 @@ UI.TOP = 40
 UI.Y = { title = -UI.TOP, status = -UI.TOP - 32, listHead = -UI.TOP - 68, rows = -UI.TOP - 100, scopeHead = -UI.TOP - 68,
     stockHead = -UI.TOP - 484, stock = -UI.TOP - 514 }
 UI.RESULT = {
-    ["no-authority"] = "只有會長可以管理", ["not-found"] = "找不到這位成員", full = "保管人已達上限",
+    ["no-authority"] = "只有會長可以管理", ["not-found"] = "找不到這位職工", full = "保管人已達上限",
     same = "沒有變更", invalid = "格式不對", ["last-kind"] = "至少留一種，否則請撤銷", ok = "已更新",
 }
 
@@ -104,7 +104,7 @@ local function build(p)
     c.listState:SetPoint("TOPLEFT", p, "TOPLEFT", X, Y.rows - 20)
     local addY = Y.rows - UI.ROWS * UI.ROW_H - 10
     c.nameLabel = text(p, ns.FIELD_FONT, X, addY - 6)
-    c.nameLabel:SetText("成員")
+    c.nameLabel:SetText("職工") -- GF-UI-K: 成員 = 職工 (spec §3)
     c.name = ns.Theme.editBox(p, 220, 30)
     c.name:SetPoint("TOPLEFT", p, "TOPLEFT", X + 50, addY)
     c.appoint = ns.OrdersUI.textButton(p, "指定", function()

@@ -402,33 +402,78 @@ local function attachment(index, attach)
     return id, ns.num(count)
 end
 
-local function readMail(index)
-    local _, _, sender, _, _, cod, _, _, _, wasReturned = ns.call(GetInboxHeaderInfo, index)
-    local items = {}
+-- GF-FIX-E (review M-22): the header says whether a mail has attachments
+-- (hasItem: a count on retail, nil when none). nil only counts as "none" once
+-- this client has shown the field at least once; until then every slot is read.
+local headerHasItem = false
+local function readHeader(index)
+    local _, _, sender, _, _, cod, _, hasItem, _, wasReturned = ns.call(GetInboxHeaderInfo, index)
+    if hasItem ~= nil then headerHasItem = true end
+    return { sender = str(sender), cod = ns.num(cod) or 0, returned = wasReturned == true or wasReturned == 1,
+        items = {}, hasItem = hasItem }
+end
+local function readSlots(index, m)
+    if m.read then return m end
+    local h = m.hasItem
+    m.hasItem, m.read = nil, true
+    if h == false or h == 0 or (h == nil and headerHasItem) then return m end
     for j = 1, Delivery.RECEIVE_SLOTS do
         local id, n = attachment(index, j)
-        if id and n then items[j] = { id = id, n = n } end
+        if id and n then m.items[j] = { id = id, n = n } end
     end
-    return { sender = str(sender), cod = ns.num(cod) or 0, returned = wasReturned == true or wasReturned == 1, items = items }
+    return m
 end
+local function readMail(index) return readSlots(index, readHeader(index)) end
 
+-- Open orders of mine (customer or crafter) exist.
+local function anyOpenOrder()
+    local my = me()
+    if not my then return false end
+    for _, v in pairs(O().all()) do
+        if v.state ~= "deal" and v.state ~= "cancel" and (v.customer == my or v.crafter == my) then return true end
+    end
+    return false
+end
+Delivery.anyOpenOrder = anyOpenOrder
+Delivery.inboxReads = 0 -- tests: mails read by the last MAIL_INBOX_UPDATE
+
+local lastTakeKey, lastTakeClock
 function Delivery.onInboxUpdate()
-    if not fn(GetInboxHeaderInfo) then return end
+    -- The inbox changed: a mail at the same index is another mail now (review M-23).
+    lastTakeKey, lastTakeClock = nil, nil
     inboxCache = {}
+    Delivery.inboxReads = 0
+    if not fn(GetInboxHeaderInfo) then return end
+    -- Review M-22: no open order = nothing a mail could settle; the take itself
+    -- still reads the mail live (evidence for 可用 is never lost).
+    if not anyOpenOrder() then return end
     local n = fn(GetInboxNumItems) and ns.num((ns.call(GetInboxNumItems))) or 50
+    -- Headers first (learns whether hasItem exists), then slots of mails with items.
+    local heads = {}
     for i = 1, math.min(n, 100) do
-        local m = readMail(i)
-        if m.sender == "" and not next(m.items) then if not fn(GetInboxNumItems) then break end
-        else inboxCache[i] = m end
+        local m = readHeader(i)
+        if m.sender == "" and m.hasItem == nil and not fn(GetInboxNumItems) then
+            -- No count from the client: an empty header may still have slots; read them to decide.
+            readSlots(i, m)
+            if not next(m.items) then break end
+        end
+        heads[#heads + 1] = { i = i, m = m }
+    end
+    for _, x in ipairs(heads) do
+        local m = readSlots(x.i, x.m)
+        Delivery.inboxReads = Delivery.inboxReads + 1
+        if not (m.sender == "" and not next(m.items)) then inboxCache[x.i] = m end
     end
 end
 
-local lastTakeKey
+-- The client's frame time: two hooks of one call see the same value; two takes
+-- never do (each waits for the server).
+local function takeClock()
+    if fn(GetTime) then local t = ns.num((ns.call(GetTime))); if t then return "f" .. t end end
+    return "s" .. tostring(ns.now())
+end
+
 function Delivery.onTake(index, attach)
-    -- The same take reported twice in the same instant (a second hook) counts once.
-    local key = tostring(index) .. ":" .. tostring(attach)
-    if key == lastTakeKey and ns.now() == lastTakeAt then return "duplicate" end
-    lastTakeKey = key
     local live = readMail(index)
     local cached = inboxCache[index]
     local m = (live.sender ~= "" and next(live.items)) and live or cached
@@ -441,6 +486,16 @@ function Delivery.onTake(index, attach)
         if not attach or j == attach then items[#items + 1] = { id = it.id, n = it.n } end
     end
     if #items == 0 then Delivery.log("mail", "not-loaded"); return "not-loaded" end
+    -- GF-FIX-E (review M-23): the same take reported twice (a second hook) counts
+    -- once: same slot, same mail (sender and items), same frame, no inbox change
+    -- in between. The next mail moving into slot 1 within the same second is
+    -- another mail (MAIL_INBOX_UPDATE came between, or other sender or items).
+    table.sort(items, function(x, y) if x.id ~= y.id then return x.id < y.id end return x.n < y.n end)
+    local parts = { tostring(index), tostring(attach), m.sender }
+    for _, it in ipairs(items) do parts[#parts + 1] = it.id .. "x" .. it.n end
+    local key, clock = table.concat(parts, ":"), takeClock()
+    if key == lastTakeKey and clock == lastTakeClock then return "duplicate" end
+    lastTakeKey, lastTakeClock = key, clock
     if cached and attach then cached.items[attach] = nil elseif cached then cached.items = {} end
     takings[#takings + 1] = { sender = authorByName(m.sender), returned = m.returned, items = items,
         cod = m.cod, at = ns.now() }
@@ -520,4 +575,7 @@ function Delivery.install()
     if fn(AutoLootMailItem) then pcall(hooksecurefunc, "AutoLootMailItem", function(i) Delivery.onTake(i) end) end
 end
 
-function Delivery.resetSession() trade, sending, completeAt = nil, nil, nil; takings, inboxCache, lastTakeAt = {}, {}, 0 end
+function Delivery.resetSession()
+    trade, sending, completeAt = nil, nil, nil; takings, inboxCache, lastTakeAt = {}, {}, 0
+    lastTakeKey, lastTakeClock, headerHasItem = nil, nil, false
+end

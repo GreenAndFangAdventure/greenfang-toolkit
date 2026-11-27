@@ -285,20 +285,52 @@ function G.remove(m)
     if not G.allowed(m, "remove") then return false end
     return G.confirm("把 " .. ns.shortName(m.name) .. " 踢出公會？", function() GuildUninvite(m.name); afterChange() end) ~= nil
 end
+-- GF-FIX-E (review M-26): the roster index of name at this moment. The
+-- cached index is checked against the live roster (GetGuildRosterInfo(index)
+-- must still be that name); if it is not, the roster is read again once. nil =
+-- not found: nothing is written (never onto someone else).
+local function nameAt(i)
+    local ok, n = pcall(GetGuildRosterInfo, i)
+    n = ok and str(n) or ""
+    return n ~= "" and ns.keyName(n) or nil
+end
+function G.liveIndex(name)
+    local key = ns.keyName(name)
+    local e = G.entry(name)
+    if e and nameAt(e.index) == key then return e.index end
+    G.invalidate()
+    e = G.entry(name)
+    if e and nameAt(e.index) == key then return e.index end
+    return nil
+end
+
+-- Write a note through setter(index, text); the text is never kept (the
+-- officer note stays out of SavedVariables and every upload).
+local function writeNote(m, setter, what, text)
+    local i = G.liveIndex(m.name)
+    if not i then
+        G.invalidate()
+        ns.say("名冊剛變動，找不到 " .. ns.shortName(m.name) .. "，" .. what .. "沒有寫入；請再試一次。")
+        return false
+    end
+    setter(i, text)
+    afterChange()
+    return true
+end
+G.writeNote = writeNote
+
 function G.editPublicNote(m)
     if not G.allowed(m, "publicNote") then return false end
     local note = G.notes(m.name)
     return G.edit(ns.shortName(m.name) .. " 的公會註記", note, 31, function(text)
-        local e = G.entry(m.name)
-        if e then GuildRosterSetPublicNote(e.index, text); afterChange() end
+        writeNote(m, GuildRosterSetPublicNote, "公會註記", text)
     end) ~= nil
 end
 function G.editOfficerNote(m)
     if not G.allowed(m, "officerNote") then return false end
     local _, officer = G.notes(m.name)
     return G.edit(ns.shortName(m.name) .. " 的幹部註記", officer or "", 31, function(text)
-        local e = G.entry(m.name)
-        if e then GuildRosterSetOfficerNote(e.index, text); afterChange() end
+        writeNote(m, GuildRosterSetOfficerNote, "幹部註記", text)
     end) ~= nil
 end
 function G.inviteGuild()

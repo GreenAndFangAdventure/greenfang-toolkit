@@ -78,7 +78,7 @@ return function(T)
     -- 1. 調貨所: the list takes the room when the right side has nothing
     ---------------------------------------------------------------------------
 
-    test("GF-UI-I 調貨所: nothing on the right = the list is wide and the divider is gone; ＋刊登 at the list's right edge", done(function()
+    test("GF-UI-I 調貨所: nothing on the right = the list is wide and the divider is gone; 刊登 at the list's left edge (GF-UI-K)", done(function()
         local ns = login({})
         ns.Framework.open("supply")
         local UI = ns.SupplyUI
@@ -91,8 +91,10 @@ return function(T)
         ok(not UI.divider:IsShown(), "no divider")
         eq(UI.LIST_X + UI.LIST_W_WIDE, F.PANEL_WIDTH - UI.LIST_X, "the same margin left and right")
         local pt = UI.postButton._points[1]
-        eq(pt[4] + UI.POST_W, UI.LIST_X + UI.LIST_W_WIDE, "＋刊登 ends at the list's right edge")
-        eq(UI.postButton._text, "＋刊登", "its name")
+        -- GF-UI-K (owner): 「刊登」 with no ＋, at the list's left edge over the header.
+        eq(pt[4], UI.LIST_X, "刊登 starts at the list's left edge")
+        eq(pt[5], UI.TOOL_Y, "on the tool row, over the column header")
+        eq(UI.postButton._text, "刊登", "its name")
         -- The 時效 header cell moves to the right end; 物品 gets the room.
         local fresh = UI.header.cells[4]._points[1]
         eq(fresh[4] + UI.COL.fresh.w, UI.LIST_W_WIDE - (UI.LIST_W - UI.COL.fresh.x - UI.COL.fresh.w), "時效 at the right end")
@@ -118,7 +120,7 @@ return function(T)
         ok(-pt[5] + UI.divider._h <= ns.Framework.PANEL_HEIGHT, "ends inside the page: " .. (-pt[5] + UI.divider._h))
         eq(-pt[5] + UI.divider._h, -(UI.TOP - UI.ROWS * UI.ROW_H), "ends at the list's bottom")
         local bp = UI.postButton._points[1]
-        eq(bp[4] + UI.POST_W, UI.LIST_X + UI.LIST_W, "＋刊登 follows the narrow list")
+        eq(bp[4], UI.LIST_X, "GF-UI-K: 刊登 stays at the list's left edge")
         ok(ns.Framework.panel("supply") and UI.detail and UI.detailHeader:IsShown(), "detail header shown")
         -- 我的刊登: a listing always has its buttons on the right.
         UI.setTab("mine")
@@ -140,7 +142,7 @@ return function(T)
         -- Off: my listings are no longer published (an empty snapshot), the 刊登 button is off.
         local rec = ns.Share.get(ns.Share.selfAuthor(), L.GROUP)
         eq(rec and rec.v, "", "published snapshot emptied")
-        eq(UI.postButton.disabled, true, "＋刊登 cannot be pressed")
+        eq(UI.postButton.disabled, true, "刊登 cannot be pressed")
     end))
 
     ---------------------------------------------------------------------------

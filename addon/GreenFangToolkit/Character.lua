@@ -19,6 +19,8 @@ local MAX_ROWS = 6
 local BAR_TEXTURE = "Interface\\TargetingFrame\\UI-StatusBar"
 local panel, classIcon, nameLine, infoLine, guildLine, locationLine, profTitle, emptyLine
 local profRows = {}
+Character.profRows = profRows -- GF-UI-K: tests look at the rows
+Character.RECIPE_GAP, Character.RECIPE_W = 10, 120 -- GF-UI-K: bar 46..426, text 436..556 (row 560)
 
 -- "151 / 225", or just the current value when the maximum is unknown.
 function Character.skillText(p)
@@ -71,10 +73,13 @@ local function newProfRow(i)
     ns.Theme.color(row.barBg, ns.Theme.C.input)
     row.value = row.bar:CreateFontString(nil, "OVERLAY", ns.LABEL_FONT)
     row.value:SetPoint("CENTER", row.bar, "CENTER", 0, 0)
+    -- GF-UI-K (owner: 「配方 N 個」 sat on the bar's top edge): right of the bar,
+    -- on its middle line, in the row's remaining width.
     row.recipes = row:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT)
-    row.recipes:SetPoint("TOPLEFT", row, "TOPLEFT", 250, -4)
-    row.recipes:SetWidth(300)
+    row.recipes:SetPoint("LEFT", row.bar, "RIGHT", Character.RECIPE_GAP, 0)
+    row.recipes:SetWidth(Character.RECIPE_W)
     row.recipes:SetJustifyH("LEFT")
+    if row.recipes.SetWordWrap then row.recipes:SetWordWrap(false) end
     row.valueOnly = row:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
     row.valueOnly:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 46, 4)
     profRows[i] = row
@@ -85,7 +90,8 @@ function Character.refresh()
     if not panel then return end
     local p = ns.Sync.player()
     local color = Icons.classColor(p.classToken)
-    Icons.setClassIcon(classIcon, p.classToken)
+    -- GF-UI-K: the race head for the character's sex (Icons.setPortrait), else the class icon.
+    Character.portrait = Icons.setPortrait(classIcon, ns.call(rawget(_G, "UnitSex"), "player"), p.classToken)
     nameLine:SetText(str(p.name) ~= "" and p.name or "未知角色")
     nameLine:SetTextColor(color[1], color[2], color[3])
     infoLine:SetText(string.format("等級 %s　%s　%s",
@@ -141,6 +147,7 @@ local function build(p)
     classIcon = p:CreateTexture(nil, "ARTWORK")
     classIcon:SetSize(52, 52)
     classIcon:SetPoint("TOPLEFT", p, "TOPLEFT", 22, -40)
+    Character.portraitTexture = classIcon -- GF-UI-K: tests and /gftk probe look at it
     nameLine = p:CreateFontString(nil, "ARTWORK", ns.TITLE_FONT)
     nameLine:SetPoint("TOPLEFT", p, "TOPLEFT", 86, -42)
     nameLine:SetJustifyH("LEFT")

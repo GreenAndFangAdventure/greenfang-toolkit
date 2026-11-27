@@ -188,7 +188,7 @@ return function(T)
         local r = UI.rows and UI.rows() or nil
         UI.setTab("offer"); eq(heads(), "物品,數量,需要,時效", "我可能有多的")
         UI.setTab("guild"); eq(heads(), "物品,徵求／供應,在線,時效", "調貨看板")
-        UI.setTab("mine"); eq(heads(), "物品,數量,狀態,時效", "我的刊登")
+        UI.setTab("mine"); eq(heads(), "物品,類型／數量,狀態,時效", "我的刊登 (GF-UI-K: the cell reads 徵求 1)")
         UI.setTab("need")
         local texts = pageTexts(supplyPage(ns))
         ok(not has(texts, UI.CONTACT_TIP), "no sentence on the page")
@@ -210,7 +210,7 @@ return function(T)
         ok(has(pageTexts(supplyPage(ns)), "自動"), "自動 kept in the detail")
     end))
 
-    test("GF-UI-F 調貨所: rows that open a detail show the game's + / -; the open one is -", done(function()
+    test("GF-UI-F 調貨所: no + / - in front of a row (GF-UI-K); a click opens the detail on the right", done(function()
         local ns = login({ quests = { [339] = "active" } })
         ns.Supply.scanNow()
         from(ns, PEER_B, vMsg(ns, A_B, "C1", T0() - 60, cval(ns, nil, { [page(1)] = 2, [page(4)] = 1 })))
@@ -222,29 +222,16 @@ return function(T)
         end
         table.sort(rows, function(a, b) return a.index < b.index end)
         ok(#rows >= 3, "rows: " .. #rows)
-        local withMatch, without = 0, 0
-        for _, r in ipairs(rows) do
-            local data = UI.state.items[r.index]
-            if data.expandable then
-                withMatch = withMatch + 1
-                ok(r.expand._shown, "indicator on a row with matches")
-                local want = r.index == UI.state.selected and UI.EXPAND_OPEN or UI.EXPAND_CLOSED
-                eq(r.expand._texture, want, "+ / - on row " .. r.index)
-            else
-                without = without + 1
-                ok(not r.expand._shown, "no indicator without a detail")
-            end
-        end
-        ok(withMatch >= 2 and without >= 1, "both kinds: " .. withMatch .. "/" .. without)
-        ok(UI.EXPAND_OPEN:find("^Interface\\Buttons\\") and UI.EXPAND_CLOSED:find("^Interface\\Buttons\\"), "the game's art")
-        -- Choose another row with a match: it turns into -, the first into +.
+        for _, r in ipairs(rows) do ok(not r.expand._shown, "no + / - on row " .. r.index) end
         local other
-        for _, r in ipairs(rows) do if UI.state.items[r.index].expandable and r.index ~= UI.state.selected then other = r end end
-        local before = UI.state.selected
+        for _, r in ipairs(rows) do
+            if r.index ~= UI.state.selected and UI.hasDetail(UI.state.items[r.index]) then other = r end
+        end
+        ok(other, "a second row with a detail")
         wow.click(other)
         eq(UI.state.selected, other.index, "chosen")
-        eq(other.expand._texture, UI.EXPAND_OPEN, "now -")
-        for _, r in ipairs(rows) do if r.index == before then eq(r.expand._texture, UI.EXPAND_CLOSED, "back to +") end end
+        ok(other.sel and UI.detailHeader:IsShown(), "its detail is on the right")
+        for _, r in ipairs(rows) do ok(not r.expand._shown, "still no + / -") end
     end))
 
     test("GF-UI-F 調貨所: 收集組 only on 我缺的 and 我可能有多的; it filters by the rule", done(function()
@@ -326,7 +313,7 @@ return function(T)
         local r = UI.detailRows and UI.detailRows() or nil
         local nameCell
         for _, o in ipairs(wow.allObjects()) do
-            if o._kind == "FontString" and o._fixedWidth == UI.DCOL.name.w and visible(o) and o._text ~= "成員" then nameCell = o end
+            if o._kind == "FontString" and o._fixedWidth == UI.DCOL.name.w and visible(o) and o._text ~= "職工" then nameCell = o end
         end
         ok(nameCell, "a member cell")
         nameCell:SetText(ns.shortName(longMember))

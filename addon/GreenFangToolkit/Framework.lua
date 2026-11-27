@@ -84,7 +84,7 @@ F.NAMES = {
     -- Sub-tab names of the pages there are today (spec §3 建議子頁).
     page = {
         character = "角色資料", roster = "在籍職工", recipes = "工匠配方", orders = "製作委託",
-        adventure = "業務大廳", sleepingbag = "睡袋指南", supply = "調貨所",
+        adventure = "業務大廳", sleepingbag = "睡袋指南", supply = "綠皮調貨所", -- GF-UI-K: the owner's name, now only on the tab (the title says 物資調度)
     },
     settingsTip = "同步與診斷",
 }
@@ -299,11 +299,15 @@ F.SHORT_TITLE = { roster = "名冊", recipes = "配方", orders = "訂單", adve
 function F.shortTitle(def)
     return def and (F.SHORT_TITLE[def.id] or def.short or def.title) or ""
 end
+-- GF-UI-K (spec v2.0 §3): 「綠皮冒險工具箱｜<主入口名>」 on every page (the
+-- sub-tab names the page); what a module adds (def.windowTitle(), the roster's
+-- guild name) follows after one more ｜.
 function F.windowTitle(def)
-    local text = def and def.title or ""
-    if def and type(def.windowTitle) == "function" then
+    if not def then return "綠皮冒險工具箱" end
+    local text = F.entryName(F.entryOf(def))
+    if type(def.windowTitle) == "function" then
         local ok, t = pcall(def.windowTitle)
-        if ok and type(t) == "string" and t ~= "" then text = t end
+        if ok and type(t) == "string" and t ~= "" then text = text .. "｜" .. t end
     end
     return "綠皮冒險工具箱｜" .. text
 end
@@ -382,6 +386,9 @@ end
 local function rebuildSubTabs(key)
     for _, b in ipairs(subTabs) do b:Hide() end
     local pages = key and F.pagesOf(key) or {}
+    -- GF-UI-K (owner: one lone tab 「角色資料」): an entry with one page shows no
+    -- tab; the window title names the entry. The page keeps its place.
+    if #pages < 2 then return pages end
     local x = 20
     for i, def in ipairs(pages) do
         local b = subTabs[i]

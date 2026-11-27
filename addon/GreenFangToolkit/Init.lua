@@ -18,40 +18,61 @@ local LEAVE_SETTLE = 30
 
 local recordSelfNow -- defined below
 
+-- What follows a good roster scan: the login entry, own data, and each
+-- subsystem once its delay after login has passed.
+local rosterReady = false -- a roster scan of the target guild went through this session
+local function afterRoster()
+    -- GF-001-D24: the roster gives the full name; write the login entry now.
+    if not loginSelfRecorded then recordSelfNow() end
+    -- Guild confirmed and roster loaded: share own data (D-011).
+    Comm.broadcast(false)
+    -- D-014 sharing: once per session, a while after login.
+    if not ns.shareStarted and ns.now() - loginAt >= Share.LOGIN_DELAY then
+        ns.shareStarted = Share.login()
+    end
+    -- GF-006-B: orders (GFTKO) and shared prices (GFTKP), later and slower.
+    if not ns.ordersStarted and ns.now() - loginAt >= ORDERS_DELAY then
+        ns.ordersStarted = Orders.ledger:announce()
+        -- GF-006-C (R-9.4): web orders GF Sync left in GreenFangToolkit_Inbox.
+        if ns.ordersStarted then pcall(ns.WebOrders.readInbox) end
+        Delivery.checkPending()
+    end
+    -- GF-002-B: adventure tickets (GFTKA); my tickets that should have closed while I was away.
+    if not ns.adventureStarted and ns.now() - loginAt >= ADVENTURE_DELAY then
+        ns.adventureStarted = ns.Adventure.ledger:announce()
+        if ns.adventureStarted then pcall(ns.Adventure.onLogin) end
+    end
+    if not ns.pricesStarted and ns.now() - loginAt >= PRICES_DELAY then
+        ns.pricesStarted = Prices.login()
+    end
+end
+
 local function collectSoon(delay)
     if scanQueued then return end
     scanQueued = true
     ns.after(delay or 0.8, function()
         scanQueued = false
-        local ok, count = Roster.collect()
+        local ok, count, _, changed = Roster.collect()
         if ok then
-            UI.afterAutoScan(count)
-            -- GF-001-D24: the roster gives the full name; write the login entry now.
-            if not loginSelfRecorded then recordSelfNow() end
-            -- Guild confirmed and roster loaded: share own data (D-011).
-            Comm.broadcast(false)
-            -- D-014 sharing: once per session, a while after login.
-            if not ns.shareStarted and ns.now() - loginAt >= Share.LOGIN_DELAY then
-                ns.shareStarted = Share.login()
-            end
-            -- GF-006-B: orders (GFTKO) and shared prices (GFTKP), later and slower.
-            if not ns.ordersStarted and ns.now() - loginAt >= ORDERS_DELAY then
-                ns.ordersStarted = Orders.ledger:announce()
-                -- GF-006-C (R-9.4): web orders GF Sync left in GreenFangToolkit_Inbox.
-                if ns.ordersStarted then pcall(ns.WebOrders.readInbox) end
-                Delivery.checkPending()
-            end
-            -- GF-002-B: adventure tickets (GFTKA); my tickets that should have closed while I was away.
-            if not ns.adventureStarted and ns.now() - loginAt >= ADVENTURE_DELAY then
-                ns.adventureStarted = ns.Adventure.ledger:announce()
-                if ns.adventureStarted then pcall(ns.Adventure.onLogin) end
-            end
-            if not ns.pricesStarted and ns.now() - loginAt >= PRICES_DELAY then
-                ns.pricesStarted = Prices.login()
-            end
+            rosterReady = true
+            -- GF-FIX-C: the same content as the last scan redraws nothing.
+            if changed ~= false then UI.afterAutoScan(count) end
+            afterRoster()
         end
     end)
 end
+
+-- GF-FIX-C (review high-2): the login steps no longer rescan the roster;
+-- they run on the last good scan. Without one yet (roster still loading,
+-- combat, another guild) they scan as before.
+local function startupStep()
+    if rosterReady and Roster.available() and not ns.inCombat() and not Roster.queuedAfterCombat then
+        afterRoster()
+    else
+        collectSoon(0)
+    end
+end
+ns.rosterStartupStep = startupStep -- tests
 
 -- The first character.self of a session is always written (one per login);
 -- later ones only when level, race, class, guild or professions changed.
@@ -154,10 +175,10 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
         ns.after(3, Sync.showNoticeOnce)
         ns.after(2, Roster.request)
         loginAt = ns.now()
-        ns.after(Share.LOGIN_DELAY + 1, function() collectSoon(0) end)
-        ns.after(ORDERS_DELAY + 1, function() collectSoon(0) end)
-        ns.after(ADVENTURE_DELAY + 1, function() collectSoon(0) end)
-        ns.after(PRICES_DELAY + 1, function() collectSoon(0) end)
+        ns.after(Share.LOGIN_DELAY + 1, startupStep)
+        ns.after(ORDERS_DELAY + 1, startupStep)
+        ns.after(ADVENTURE_DELAY + 1, startupStep)
+        ns.after(PRICES_DELAY + 1, startupStep)
         -- GF-006-B: lock guild orders, move closed rows to history, badge.
         local function maintain()
             if ns.guildState() == "target" then
@@ -183,6 +204,8 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
         if ns.Adventure then pcall(ns.Adventure.onLogout) end
         if not ns.inCombat() then
             recordSelfNow(not loginSelfRecorded)
+            -- GF-FIX-C: the time of the last roster scan, when nothing new was written since.
+            Roster.flush()
             -- Phase 4 (GF-001-D14): relayed data and recipe names for the site.
             Sync.recordShares()
             Sync.recordRecipeNames()
@@ -237,6 +260,7 @@ end)
 local orderEvents = CreateFrame("Frame")
 ns.orderEventFrame = orderEvents
 ns.missingEvents = {}
+local questLogLoaded = false -- GF-FIX-C (review mid-12)
 for _, e in ipairs({ "TRADE_SHOW", "TRADE_CLOSED", "TRADE_ACCEPT_UPDATE", "TRADE_PLAYER_ITEM_CHANGED",
     "TRADE_TARGET_ITEM_CHANGED", "TRADE_REQUEST_CANCEL", "UI_INFO_MESSAGE", "UI_ERROR_MESSAGE",
     "BAG_UPDATE_DELAYED", "MAIL_SEND_SUCCESS", "MAIL_FAILED", "MAIL_INBOX_UPDATE", "MERCHANT_SHOW", "MERCHANT_UPDATE",
@@ -271,7 +295,8 @@ orderEvents:SetScript("OnEvent", function(_, event, arg1, arg2)
         Prices.onSearchResult(arg1)
     elseif event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" then
         -- GF-002-H (R-16.22): where I am; inside the destination with enough accepted people = 成行.
-        if ns.adventureStarted then ns.after(2, function() pcall(ns.Adventure.onEnterWorld) end) end
+        -- GF-FIX-C (review low-24): at login both events come; one check 2 s after the first.
+        if ns.adventureStarted then ns.coalesce("adventure-enter", 2, function() pcall(ns.Adventure.onEnterWorld) end) end
     elseif event == "GROUP_ROSTER_UPDATE" then
         if ns.adventureStarted then ns.coalesce("adventure-auto", 2, function() pcall(ns.Adventure.checkAuto) end) end
     elseif event == "QUEST_ACCEPTED" then
@@ -282,9 +307,14 @@ orderEvents:SetScript("OnEvent", function(_, event, arg1, arg2)
         -- GF-002-H (R-16.23): a quest of my quest ticket turned in (arg1 = questID).
         if event == "QUEST_TURNED_IN" and ns.adventureStarted then pcall(ns.Adventure.checkAuto, arg1) end
         -- GF-002-B (R-5.2): quests that left my log come off my worker ticket.
+        -- GF-FIX-C (review mid-12): an empty log is passed on only once the log
+        -- is known to be loaded (a quest seen in it this session, or a quest
+        -- just removed or turned in); early at login it is just not filled yet.
+        if event ~= "QUEST_LOG_UPDATE" then questLogLoaded = true end
         ns.coalesce("adventure-quests", 2, function()
-            local log = ns.Adventure.questLog()
-            if log then pcall(ns.Adventure.syncQuests, log) end
+            local log, found = ns.Adventure.questLog()
+            if found then questLogLoaded = true end
+            if log and (found or questLogLoaded) then pcall(ns.Adventure.syncQuests, log) end
         end)
     end
 end)

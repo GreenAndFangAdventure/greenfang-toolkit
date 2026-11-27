@@ -87,6 +87,8 @@ Probe.APIS = {
     "ProfessionsFrame_LoadUI", "C_TradeSkillUI.GetTradeSkillLineForRecipe", "C_TradeSkillUI.IsRecipeProfessionLearned",
     -- general
     "InCombatLockdown", "issecretvalue", "GetBuildInfo",
+    -- GF-UI-K: the personnel file's race head (Icons.setPortrait)
+    "UnitSex", "C_Texture.GetAtlasInfo", "C_CreatureInfo.GetRaceInfo",
 }
 
 Probe.EVENTS = {
@@ -594,6 +596,20 @@ end
 -- Run
 ---------------------------------------------------------------------------
 
+-- GF-UI-K: which race-head atlases the client has (Icons.setPortrait): the
+-- character's sex (2 male, 3 female), the race files of 天裔精靈 (raceID 96,
+-- 95; public game data) and yes / no for every atlas name tried.
+local function portraits()
+    local I = ns.Icons
+    local out = { sex = tostring(ns.call(rawget(_G, "UnitSex"), "player")) }
+    for _, id in ipairs(I.PORTRAIT_FEMALE_RACES) do out["race" .. id] = I.raceFile(id) or "nil" end
+    for _, sex in ipairs({ I.SEX_MALE, I.SEX_FEMALE }) do
+        for _, name in ipairs(I.portraitAtlases(sex)) do out[name] = I.atlasExists(name) and "yes" or "no" end
+    end
+    return out
+end
+Probe.portraits = portraits
+
 local function header(kind)
     local res = { pcall(GetBuildInfo) }
     return {
@@ -630,6 +646,7 @@ function Probe.run(kind)
         section("questLog", questLog)
         section("professions", professions)
         section("mail", mail)
+        section("portraits", portraits)
     end
     section("bank", bank, kind == "bank")
     section("frames", frames)
@@ -733,7 +750,7 @@ local function runText(r, out)
         out[#out + 1] = string.format("events %d/%d; missing: %s", r.events.ok or 0, r.events.total or 0,
             table.concat(r.events.missing or {}, ","))
     end
-    for _, name in ipairs({ "talents", "inspect", "questLog", "professions", "mail", "bank" }) do
+    for _, name in ipairs({ "talents", "inspect", "questLog", "professions", "mail", "bank", "portraits" }) do
         if type(r[name]) == "table" then out[#out + 1] = name .. ": " .. kv(r[name]) end
     end
     if r.stv then

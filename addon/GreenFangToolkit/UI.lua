@@ -852,9 +852,9 @@ function UI.unavailableText()
     if state == "target" then return nil end
     if state == "loading" then return "公會資料讀取中，請稍候。" end
     if state == "none" then
-        return string.format("這個角色沒有加入公會。公會名冊只提供給%s的成員使用。", ns.targetGuildName())
+        return string.format("這個角色沒有加入公會。職工名冊只提供給%s的職工使用。", ns.targetGuildName())
     end
-    return string.format("這個角色不在%s，無法使用公會名冊。", ns.targetGuildName())
+    return string.format("這個角色不在%s，無法使用職工名冊。", ns.targetGuildName())
 end
 
 local function setEnabled(w, on)

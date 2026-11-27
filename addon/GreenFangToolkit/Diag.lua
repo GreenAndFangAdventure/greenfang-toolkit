@@ -147,12 +147,12 @@ local SECTIONS = {
     { title = "上傳到公會網站", text = function() return ns.Sync.statusText() end },
     { title = "說明", text = function() return Diag.SITE_NOTE end },
     { title = "遊戲內分享（公會成員之間自動轉傳）", text = Diag.shareText },
-    { title = "訂單（製作與訂單）", text = Diag.ordersText },
+    { title = "製作委託", text = Diag.ordersText },
     { title = "價格（拍賣場、商人、公會分享）", text = Diag.pricesText },
     { title = "冒險（冒險單與職工單）", text = function() return Diag.adventureText() .. (ns.NativeLFG and ("｜尋求組隊：" .. ns.NativeLFG.diagText()) or "")
         -- GF-002-H: the completion log this computer keeps (R-16.19).
         .. ((ns.Adventure and ns.db and type(ns.db.adventure) == "table") and ("｜成行紀錄：" .. #ns.Adventure.myLog()) or "") end },
-    { title = "公會名冊", text = Diag.rosterText },
+    { title = "職工名冊", text = Diag.rosterText },
     { title = "公會管理（GF-001-Q）", text = function() return ns.GuildAdmin and ns.GuildAdmin.diagText() or "" end },
     { title = "職責定位（GF-010）", text = function() return ns.Profile and ns.Profile.diagText() or "" end },
     { title = "名冊天賦（GF-011）", text = function() return ns.Talents and ns.Talents.diagText() or "" end },
@@ -207,6 +207,7 @@ function Diag.refresh()
     end
     window.state:SetText(ns.Sync.shortStatus())
     if Diag.testCheck then Diag.testCheck.set(ns.Orders and ns.Orders.testOn() or false) end
+    if Diag.locationCheck then Diag.locationCheck.set(ns.Sync.shareLocation()) end -- GF-FIX-A (D-019)
     Diag.layout()
 end
 
@@ -279,6 +280,15 @@ local function create()
         if ns.OrdersUI and ns.OrdersUI.refresh then ns.OrdersUI.refresh() end
         if ns.Recipes and ns.Framework.isModuleShown("recipes") then ns.Recipes.refresh() end
     end)
+    -- GF-FIX-A (D-019): share my location, on unless the player turns it off.
+    -- Off withdraws the shared one (Sync.setShareLocation). Top right, on the
+    -- status line (the bottom row is full).
+    local lx = Diag.WIDTH - 40 - 28 - ns.labelWidth("分享位置")
+    Diag.locationCheck = ns.checkBox(f, "分享位置", lx, -30, function(on)
+        ns.Sync.setShareLocation(on)
+        Diag.refresh()
+    end)
+    Diag.locationCheck.set(ns.Sync.shareLocation())
     f:SetScript("OnShow", Diag.refresh)
     f:Hide()
     window = f
@@ -305,9 +315,10 @@ function Diag.askClearOrders()
     end)
 end
 
+-- GF-FIX-C (review low-17): OnShow refreshes; an open window is refreshed once here.
 function Diag.open()
-    create():Show()
-    Diag.refresh()
+    local w = create()
+    if w:IsShown() then Diag.refresh() else w:Show() end
     return window
 end
 

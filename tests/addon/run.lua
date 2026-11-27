@@ -131,7 +131,7 @@ test("fresh install creates schema v2 defaults", function()
     local db = GreenFangToolkitDB
     eq(db.schema, "gf.toolkit", "schema")
     eq(db.schemaVersion, 2, "schemaVersion")
-    eq(db.addonVersion, "0.16.6", "addonVersion")
+    eq(db.addonVersion, "0.16.7", "addonVersion")
     eq(db.sync.enabled, true, "sync.enabled default")
     eq(db.sync.noticeShown, false, "noticeShown before login")
     eq(#db.sync.outbox, 0, "outbox empty")
@@ -157,7 +157,7 @@ test("TOC declares the agreed names and loads every file", function()
     ok(toc:find("## Interface: 16001", 1, true), "Interface")
     ok(toc:find("## Title: 綠皮冒險工具箱", 1, true), "Title")
     ok(toc:find("## Author: 綠皮與獠牙冒險事務所", 1, true), "Author")
-    ok(toc:find("## Version: 0.16.6", 1, true), "Version")
+    ok(toc:find("## Version: 0.16.7", 1, true), "Version")
     ok(toc:find("## SavedVariables: GreenFangToolkitDB\r?\n"), "SavedVariables")
     local listed = {}
     for line in toc:gmatch("[^\r\n]+") do
@@ -429,7 +429,7 @@ test("unknown fields in an existing v2 table are preserved", function()
         sync = { enabled = false, noticeShown = true, outbox = {} },
     } })
     eq(GreenFangToolkitDB.futureModule.keep, true, "unknown field kept")
-    eq(GreenFangToolkitDB.addonVersion, "0.16.6", "addonVersion updated")
+    eq(GreenFangToolkitDB.addonVersion, "0.16.7", "addonVersion updated")
     eq(GreenFangToolkitDB.sync.enabled, true, "old off ignored (D-015)")
 end)
 
@@ -479,7 +479,7 @@ test("TSV/JSON export keep the v0.3.1 format", function()
     local s = ns.Roster.current()
     local json = ns.Export.jsonParts(s)
     eq(#json, 1, "one part")
-    ok(json[1]:find('^{"schema":"gfguildroster.report","schemaVersion":1,"addonVersion":"0.16.6"'), "json header")
+    ok(json[1]:find('^{"schema":"gfguildroster.report","schemaVersion":1,"addonVersion":"0.16.7"'), "json header")
     ok(json[1]:find('"part":1,"partCount":1', 1, true), "parts")
     ok(json[1]:find('"onlineAtCapture":true', 1, true), "member online in manual export")
     ok(not json[1]:find('"guid":', 1, true), "no guid in v1 export")
@@ -536,7 +536,7 @@ test("framework: roster is the first module; no settings page", function()
     SlashCmdList.GREENFANGTOOLKIT("")
     eq(ns.Framework.current(), "roster", "opens roster by default")
     -- GF-UI-B: the guild name in the title (it left the page).
-    eq(_G.GreenFangToolkit_MainWindow.TitleText:GetText(), "綠皮冒險工具箱｜綠皮與獠牙冒險事務所", "title")
+    eq(_G.GreenFangToolkit_MainWindow.TitleText:GetText(), "綠皮冒險工具箱｜職工名冊｜綠皮與獠牙冒險事務所", "title")
     ok(ns.Framework.panel("roster"):IsShown(), "roster panel shown")
 end)
 
@@ -637,7 +637,7 @@ test("sleepingbag: Horde route data is complete and marked unverified", function
         ok(st.questID == nil, "no quest IDs yet")
         if st.round == 1 and st.x and not st.approx then first3[#first3 + 1] = st.zone end -- GF-008-C: the guide's coordinates
     end
-    eq(table.concat(first3, ">"), "貧瘠之地>西部荒野", "round-1 stops with coordinates start Barrens then Westfall")
+    ok(table.concat(first3, ">"):find("^貧瘠之地>西部荒野"), "round-1 stops with coordinates start Barrens then Westfall") -- GF-008-D: Stonetalon has sourced coordinates now
     eq(route.steps[5].zone, "石爪山脈", "third stop is Stonetalon")
 end)
 
@@ -725,7 +725,7 @@ test("sleepingbag: window page builds and refreshes", function()
     local ns = wow.login(ADDON_DIR)
     SlashCmdList.GREENFANGTOOLKIT("sleepingbag")
     eq(ns.Framework.current(), "sleepingbag", "opened")
-    eq(_G.GreenFangToolkit_MainWindow.TitleText:GetText(), "綠皮冒險工具箱｜睡袋路線", "title")
+    eq(_G.GreenFangToolkit_MainWindow.TitleText:GetText(), "綠皮冒險工具箱｜冒險指南", "title")
     ns.SleepingBag.toggleMode()
     eq(ns.SleepingBag.state().mode, "normal", "toggle")
 end)
@@ -1254,7 +1254,7 @@ test("roster window: another guild shows a message, no roster, controls disabled
     eq(wow.state.rosterInfoCalls or 0, 0, "still no GetGuildRosterInfo call")
     eq(ns.Roster.current(), nil, "no snapshot")
     local UI = rosterPage(ns)
-    eq(UI.unavailableText(), "這個角色不在綠皮與獠牙冒險事務所，無法使用公會名冊。", "message")
+    eq(UI.unavailableText(), "這個角色不在綠皮與獠牙冒險事務所，無法使用職工名冊。", "message")
     -- GF-UI-B: an icon and 「非本會」 in the middle, no sentence.
     eq(UI.emptyKey, "other", "other guild shown")
     ok(pageHas("非本會"), "short name on the page")
@@ -1263,7 +1263,7 @@ test("roster window: another guild shows a message, no roster, controls disabled
     local on, off = controlsEnabled(UI)
     eq(on, 0, "none enabled"); eq(off, 3, "all disabled")
     ns.UI.startExport("json")
-    ok(printedContains("無法使用公會名冊"), "export refuses")
+    ok(printedContains("無法使用職工名冊"), "export refuses")
     ok(ns.Framework.get("sleepingbag"), "sleeping bag still available")
     ns.Framework.open("sleepingbag")
     eq(ns.Framework.isModuleShown("sleepingbag"), true, "sleeping bag opens")
@@ -2366,9 +2366,10 @@ test("D11 tombstones: only R<id> (profession given up); X~* and X~Z are ignored 
     local t = wow.state.now - 600
     shareFrom(ns, PEER, (vMsg(ns, A_THIRD, "Z", t, { zone = "幽暗城" })))
     shareFrom(ns, PEER, (vMsg(ns, A_THIRD, "R164", t, { 2660, 2661 })))
-    eq(shareFrom(ns, PEER, "S1~X~" .. A_THIRD .. "~Z~" .. ns.Share.b36(t + 10)), "same", "X~Z ignored")
+    -- GF-FIX-A (D-019 replaces D-015 here): a location may be withdrawn (the switch).
+    eq(shareFrom(ns, PEER, "S1~X~" .. A_THIRD .. "~Z~" .. ns.Share.b36(t + 10)), "tomb", "X~Z withdraws the location (D-019)")
     eq(shareFrom(ns, PEER, "S1~X~" .. A_THIRD .. "~*~" .. ns.Share.b36(t + 10)), "same", "X~* ignored")
-    ok(ns.Share.get(A_THIRD, "Z"), "location kept")
+    eq(ns.Share.get(A_THIRD, "Z"), nil, "location withdrawn (D-019)")
     eq(shareFrom(ns, PEER, "S1~X~" .. A_THIRD .. "~R164~" .. ns.Share.b36(t + 10)), "tomb", "profession given up")
     eq(ns.Share.get(A_THIRD, "R164"), nil, "recipes gone")
     eq(shareFrom(ns, PEER, (vMsg(ns, A_THIRD, "R164", t + 5, { 2660 }))), "tomb", "older recipes refused")
@@ -2405,7 +2406,7 @@ end)
 test("D11 no switches: always shares, location included, never sends X~* or X~Z", function()
     local ns = shareLogin()
     eq(ns.Sync.setEnabled, nil, "no sync switch")
-    eq(ns.Sync.setShareLocation, nil, "no location switch")
+    ok(ns.Sync.setShareLocation, "D-019 (GF-FIX-A): the one switch left is the location's")
     eq(ns.Share.watchSettings, nil, "no withdrawal watcher")
     ok(ns.Share.get(A_SELF, "Z"), "own location shared")
     wow.advance(60)
@@ -2677,7 +2678,7 @@ test("D10 diag window: sections, sharing stats, export moved here, /gftk sync st
     ok(has(all, "GF Sync 只是補充來源"), "site note")
     ok(has(all, "記錄 ") and has(all, "這次登入：送出"), "sharing statistics")
     ok(has(all, "掃描時間："), "roster scan")
-    ok(has(all, "工具箱 0.16.6"), "version")
+    ok(has(all, "工具箱 0.16.7"), "version")
     wow.click(ns.Diag.exportJSONButton)
     ok(_G.GreenFangToolkit_ExportWindow and _G.GreenFangToolkit_ExportWindow:IsShown(), "export from the window")
     GreenFangToolkitDB.settings.minimapAngle = 10
@@ -4709,7 +4710,25 @@ assert(loadfile(ROOT .. "/tests/addon/sleepingbag_map_tests.lua"))()({ test = te
 -- GF-008-C: a map for every step, the raid target star (tests/addon/gf008c_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gf008c_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-FIX-C: roster scan keeps an unchanged snapshot, Roster.version, recipe index, searches (tests/addon/gffixc_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gffixc_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
+-- GF-UI-K: interface tidy-up: personnel file, 我的刊登, window titles, quest pickers (tests/addon/uik_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/uik_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+
+-- GF-008-D: framed glowing pins by colour, the short Horde guide, the faction field (tests/addon/gf008d_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf008d_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+
+-- GF-FIX-A: core caches, message guards, location switch (tests/addon/gffixa_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gffixa_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+
+-- GF-FIX-E: 0.16.6 review batch E: prices cap, mail delivery, pasted web orders, notes (tests/addon/gffixe_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gffixe_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0

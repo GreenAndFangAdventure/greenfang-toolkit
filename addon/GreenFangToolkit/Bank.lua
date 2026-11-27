@@ -45,7 +45,7 @@ Bank.STATE_NAME = {
     ok = "有效", none = "尚無名單", expired = "非目前會長的名單，不採信", unknown = "權限未知",
     forged = "名單作者不符", old = "舊版名單", invalid = "名單格式錯誤",
 }
-Bank.ROLE_NAME = { leader = "會長", custodian = "保管人", member = "成員", unknown = "權限未知" }
+Bank.ROLE_NAME = { leader = "會長", custodian = "保管人", member = "職工", unknown = "權限未知" }
 
 local stats = { published = 0, refused = 0, healed = 0, rejectedOld = 0, rejectedForged = 0 }
 Bank.stats = stats

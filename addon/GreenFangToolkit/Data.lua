@@ -255,19 +255,35 @@ end
 -- Every call is guarded: a missing function or secret value becomes nil.
 local function optional(v) v = ns.str(v); if v == "" then return nil end; return v end
 
+-- GF-FIX-A (review 高-1): name, class and race of one GUID never change
+-- during a session, so they are read once per GUID (only once all of them
+-- could be read). Everything that can change (level, guild, rank, faction,
+-- realm, full name) is still read on every call. Callers may change the
+-- returned table (Sync.player does), so it is always a new one.
+local fixed = nil -- { guid, name, class, classToken, race, raceID }
+
 function Data.player()
     local p = {}
-    local guid = ns.str((ns.call(UnitGUID, "player")))
-    p.guid = guid ~= "" and guid or nil
-    p.name = ns.str((ns.call(UnitName, "player")))
+    local guid = ns.selfGUID()
+    p.guid = guid
+    local f = fixed
+    if guid and f and f.guid == guid then
+        p.name, p.class, p.classToken, p.race, p.raceID = f.name, f.class, f.classToken, f.race, f.raceID
+    else
+        p.name = ns.str((ns.call(UnitName, "player")))
+        local className, classToken = ns.call(UnitClass, "player")
+        p.class, p.classToken = ns.str(className), ns.str(classToken)
+        local raceName, _, raceID = ns.call(UnitRace, "player")
+        p.race, p.raceID = ns.str(raceName), ns.num(raceID)
+        if guid and p.name ~= "" and p.class ~= "" and p.classToken ~= "" and p.race ~= "" and p.raceID then
+            fixed = { guid = guid, name = p.name, class = p.class, classToken = p.classToken,
+                race = p.race, raceID = p.raceID }
+        end
+    end
     p.fullName = Data.fullName(p.guid) -- GF-001-D24: nil until the roster is known
     p.realm = ns.realm() -- GF-001-D23: never "" when the realm can be known
     p.faction = ns.str((ns.call(UnitFactionGroup, "player")))
     p.level = ns.num((ns.call(UnitLevel, "player")))
-    local className, classToken = ns.call(UnitClass, "player")
-    p.class, p.classToken = ns.str(className), ns.str(classToken)
-    local raceName, _, raceID = ns.call(UnitRace, "player")
-    p.race, p.raceID = ns.str(raceName), ns.num(raceID)
     if ns.isInGuild() then
         local guildName, rankName = ns.call(GetGuildInfo, "player")
         p.guild, p.guildRank = optional(guildName), optional(rankName)

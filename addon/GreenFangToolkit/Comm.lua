@@ -88,12 +88,13 @@ function Comm.decodeBody(body)
                         rank = tonumber(rank), max = tonumber(max) }
                 end
             end
-        elseif k == "Z" then d.zone = unesc(v)
-        elseif k == "S" then d.subZone = unesc(v)
+        -- GF-FIX-A (review 中-3): no | escapes, control characters or huge names.
+        elseif k == "Z" then d.zone = ns.cleanText(unesc(v), 64)
+        elseif k == "S" then d.subZone = ns.cleanText(unesc(v), 64)
         end
     end
     if type(d.capturedAt) ~= "number" then return nil, "no-time" end
-    if d.classToken and not d.classToken:match("^[A-Z]+$") then d.classToken = nil end
+    if d.classToken and (#d.classToken > 16 or not d.classToken:match("^[A-Z]+$")) then d.classToken = nil end
     if d.zone and d.zone ~= "" then
         d.location = { zone = d.zone, subZone = (d.subZone ~= "" and d.subZone) or nil }
     end
@@ -168,7 +169,8 @@ function Comm.ownData()
     return {
         level = p.level, classToken = p.classToken ~= "" and p.classToken or nil,
         capturedAt = ns.now(), professions = profs,
-        location = ns.Data.location(),
+        -- D-019 (GF-FIX-A): not when the player turned location sharing off.
+        location = ns.Sync.shareLocation() and ns.Data.location() or nil,
     }
 end
 

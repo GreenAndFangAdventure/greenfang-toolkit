@@ -312,7 +312,7 @@ return function(T)
         eq(ns.Theme.hoverable(c.appoint), false, "never lights")
         eq(c.stock.kind, "unknown", "stock state"); eq(c.stock.text:GetText(), "尚未開放", "尚未開放")
         eq(c.scopeState.text:GetText(), "你不是保管人", "no scope for a member")
-        ok(c.role:GetText():find("成員", 1, true), "role")
+        ok(c.role:GetText():find("職工", 1, true), "role (GF-UI-K: 成員 = 職工)")
     end))
 
     test("GF-012 page: the master's buttons work; a custodian sees the scope boxes", done(function()
