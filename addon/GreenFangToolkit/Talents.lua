@@ -362,8 +362,9 @@ end
 
 Talents.WHY = { api = "沒有天賦介面", config = "沒有啟用的配置", tree = "沒有天賦樹", nodes = "讀不到節點" }
 
+-- GF-FIX-C (review low-13): the cached read (dirty on every talent event), not a fresh one each second.
 function Talents.summaryLine()
-    local d, why = Talents.read()
+    local d, why = Talents.own()
     if not d then return "本角色天賦：" .. (Talents.WHY[why] or str(why)) end
     local nums = {}
     for k, g in ipairs(d.groups) do nums[k] = tostring(g.spent) .. (g.name and ("(" .. g.name .. ")") or "") end

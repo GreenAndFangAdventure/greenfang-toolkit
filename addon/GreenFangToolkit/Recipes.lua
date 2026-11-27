@@ -144,6 +144,8 @@ local function isSubset(small, big)
     return true
 end
 
+local reagentPass = {} -- [skill] = the list cacheOwn last went over (this session)
+
 -- Read the open window now. Returns a result string (tests, diagnostics):
 -- "stored", "same", "filtered", "not-own", "unknown", "empty", "combat", "no-api".
 function Recipes.scan()
@@ -178,9 +180,15 @@ function Recipes.scan()
         ids = {}
         for id in pairs(set) do ids[#ids + 1] = id end
     end
-    local r = Share.ownRecord(g, Share.encodeValue(g, ids))
+    local value = Share.encodeValue(g, ids)
+    local r = Share.ownRecord(g, value)
     -- GF-006-B (R-8.5): remember the reagent lists of our own recipes.
-    if ns.Prices then ns.Prices.cacheOwn(ids) end
+    -- GF-FIX-C (review low-16): once per list and session; a scan that
+    -- found the same list does not start another pass over it.
+    if ns.Prices and reagentPass[skill] ~= value then
+        reagentPass[skill] = value
+        ns.Prices.cacheOwn(ids)
+    end
     return r
 end
 
@@ -193,11 +201,38 @@ function Recipes.skippedFiltered()
     return list
 end
 
+-- GF-FIX-C: run fn now, unless it ran less than gap seconds ago; calls in
+-- that gap make one more run at its end (with the state of then). The first
+-- of a burst is never delayed and the last is at most gap late.
+local held = {} -- [key] = false (held) / true (held, run again at the end)
+function Recipes.soon(key, gap, fn)
+    if held[key] ~= nil then held[key] = true; return false end
+    held[key] = false
+    ns.after(gap, function() -- first: an error in fn must not hold the key for good
+        local again = held[key]
+        held[key] = nil
+        if again then Recipes.soon(key, gap, fn) end
+    end)
+    fn()
+    return true
+end
+
+-- GF-FIX-C (review mid-27): TRADE_SKILL_SHOW / LIST_UPDATE / DATA_SOURCE_CHANGED
+-- come in bursts (opening, crafting, typing in the window). The first one
+-- reads at once, as before (the data shows right away); the ones within
+-- SCAN_GAP after it make one more read at the end of the gap, not one each.
+Recipes.SCAN_GAP = 0.3
+Recipes.scanReads = 0 -- full reads started by window events (diagnostics, tests)
 local readTimers = {}
+local function scanNow()
+    if not Recipes.isOwnWindow() then return end
+    Recipes.scanReads = Recipes.scanReads + 1
+    Recipes.scan()
+end
 function Recipes.scanSoon()
     if not Recipes.isOwnWindow() then return end
     local skill = Recipes.openSkillLine() or 0
-    Recipes.scan()
+    Recipes.soon("scan", Recipes.SCAN_GAP, scanNow)
     for _, delay in ipairs(Recipes.READ_AGAIN) do
         local key = skill .. ":" .. delay
         if not readTimers[key] then
@@ -304,7 +339,11 @@ end
 -- new one is built.
 Recipes.STEP = 8000
 local indexCache = {}
-local building -- { version, snap, ordered, pos, out, selfGuid }
+local building -- { version, roster, snap, ordered, pos, out, selfGuid }
+-- GF-FIX-C (review high-3): the index is keyed on Share.version and
+-- Roster.version (the roster's content), not on the snapshot object: a
+-- roster scan that found nothing new keeps it, any real change rebuilds it.
+Recipes.builds = 0 -- index builds started (diagnostics, tests)
 
 local function startBuild(snap)
     local ordered = {}
@@ -313,7 +352,8 @@ local function startBuild(snap)
         if (x.m.online == true) ~= (y.m.online == true) then return x.m.online == true end
         return x.key < y.key
     end)
-    return { version = Share.version, snap = snap, ordered = ordered, pos = 1, out = {},
+    Recipes.builds = Recipes.builds + 1
+    return { version = Share.version, roster = ns.Roster.version, snap = snap, ordered = ordered, pos = 1, out = {},
         selfGuid = ns.Data.player().guid, check = Recipes.canTellSkill() }
 end
 
@@ -348,18 +388,18 @@ local function work(b, budget)
     return true
 end
 
-local function isFresh(snap)
-    return indexCache.out and indexCache.version == Share.version and indexCache.snap == snap
+local function isFresh()
+    return indexCache.out and indexCache.version == Share.version and indexCache.roster == ns.Roster.version
 end
 
 -- The whole index now (tests and callers that need it at once).
 function Recipes.index()
     local snap = ns.Roster.current()
     if not snap then return {} end
-    if isFresh(snap) then return indexCache.out end
+    if isFresh() then return indexCache.out end
     local b = startBuild(snap)
     work(b, nil)
-    indexCache = { version = b.version, snap = snap, out = b.out, at = ns.now(), steps = 1 }
+    indexCache = { version = b.version, roster = b.roster, out = b.out, at = ns.now(), steps = 1 }
     return b.out
 end
 
@@ -379,14 +419,14 @@ local function stepOnce()
     b.steps = (b.steps or 0) + 1
     if not work(b, Recipes.STEP) then return false end
     building = nil
-    indexCache = { version = b.version, snap = b.snap, out = b.out, at = ns.now(), steps = b.steps }
+    indexCache = { version = b.version, roster = b.roster, out = b.out, at = ns.now(), steps = b.steps }
     return true
 end
 
 function Recipes.indexSoon(onDone)
     local snap = ns.Roster.current()
     if not snap then return {} end
-    if isFresh(snap) then return indexCache.out end
+    if isFresh() then return indexCache.out end
     if chainRunning then return indexCache.out end
     if indexCache.out and (indexCache.steps or 1) > 1 and ns.now() - (indexCache.at or 0) < Recipes.REBUILD_GAP then
         if onDone then ns.coalesce("recipes-rebuild", Recipes.REBUILD_GAP, onDone) end
@@ -413,6 +453,14 @@ function Recipes.isBuilding() return building ~= nil end
 -- (only recipes I know) or "others" (only other members).
 -- GF-002-E: active = only crafters taking orders (R-4.2); fee = "free" / "set"
 -- / "max:<copper>" on the fee the row shows (Recipes.feeMatches).
+-- GF-FIX-C (review mid-28): a recipe name is lower-cased once, and a row
+-- the search leaves out is dropped before its crafters are sorted.
+local searchKeys = {}
+local function searchKey(name)
+    local k = searchKeys[name]
+    if not k then k = ns.keyName(name); searchKeys[name] = k end
+    return k
+end
 function Recipes.rows(index, skill, query, onlyGuid, opts)
     local p = index[skill]
     local rows = {}
@@ -421,20 +469,20 @@ function Recipes.rows(index, skill, query, onlyGuid, opts)
     if opts.who == "none" then return rows end
     local q = ns.keyName(query)
     for id, who in pairs(p.recipes) do
-        local list, mine = {}, false
-        for _, m in ipairs(who) do
-            if m.self then mine = true end
-            local keep = (not onlyGuid or m.guid == onlyGuid)
-                and (not opts.online or m.online)
-                and (opts.who ~= "others" or not m.self)
-                and (not opts.active or (ns.Orders and ns.Orders.isActive(m.guid, skill)))
-            if keep then list[#list + 1] = m end
-        end
-        if #list > 0 and (opts.who ~= "mine" or mine) then
-            -- GF-006-B (R-4.2): active crafters first (active+online, active, online, others).
-            if ns.Orders and #list > 1 then ns.Orders.sortCrafters(list, skill) end
-            local name = Recipes.name(id)
-            if q == "" or ns.keyName(name):find(q, 1, true) then
+        local name = Recipes.name(id)
+        if q == "" or searchKey(name):find(q, 1, true) then
+            local list, mine = {}, false
+            for _, m in ipairs(who) do
+                if m.self then mine = true end
+                local keep = (not onlyGuid or m.guid == onlyGuid)
+                    and (not opts.online or m.online)
+                    and (opts.who ~= "others" or not m.self)
+                    and (not opts.active or (ns.Orders and ns.Orders.isActive(m.guid, skill)))
+                if keep then list[#list + 1] = m end
+            end
+            if #list > 0 and (opts.who ~= "mine" or mine) then
+                -- GF-006-B (R-4.2): active crafters first (active+online, active, online, others).
+                if ns.Orders and #list > 1 then ns.Orders.sortCrafters(list, skill) end
                 local row = { id = id, name = name, crafters = list, mine = mine, skill = skill } -- online first
                 if not opts.fee or Recipes.feeMatches(Recipes.rowFee(row), opts.fee) then rows[#rows + 1] = row end
             end
@@ -979,6 +1027,8 @@ function Recipes.refresh()
     end
 end
 
+Recipes.SEARCH_DELAY = 0.15
+
 -- Open the page, optionally on one member (GUID) and one profession (then
 -- only that one is ticked).
 function Recipes.show(guid, skill)
@@ -1012,7 +1062,11 @@ local function build(p)
     search:SetPoint("TOPLEFT", p, "TOPLEFT", C[1] + DX, FILTER_Y)
     search:SetAutoFocus(false)
     search:SetMaxLetters(60)
-    search:SetScript("OnTextChanged", function(self) current.query = str(self:GetText()); Recipes.refresh() end)
+    -- GF-FIX-C (review mid-28): the first key redraws at once; keys within SEARCH_DELAY make one more redraw.
+    search:SetScript("OnTextChanged", function(self)
+        current.query = str(self:GetText())
+        Recipes.soon("search", Recipes.SEARCH_DELAY, function() if panel then Recipes.refresh() end end)
+    end)
     search:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     Recipes.searchBox = search
     label(p, "專業", C[2])

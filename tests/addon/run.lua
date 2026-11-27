@@ -4710,6 +4710,9 @@ assert(loadfile(ROOT .. "/tests/addon/sleepingbag_map_tests.lua"))()({ test = te
 -- GF-008-C: a map for every step, the raid target star (tests/addon/gf008c_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gf008c_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-FIX-C: roster scan keeps an unchanged snapshot, Roster.version, recipe index, searches (tests/addon/gffixc_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gffixc_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 -- GF-FIX-A: core caches, message guards, location switch (tests/addon/gffixa_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gffixa_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
