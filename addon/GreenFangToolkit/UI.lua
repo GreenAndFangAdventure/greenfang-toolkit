@@ -1425,6 +1425,7 @@ function UI.drawActionBar()
     end
 end
 UI.BAR_MAX = 3
+UI.BAR_NAME_W = 216 -- GF-UI-M: 12 characters at 18 px
 
 -- 公會資訊: the message of the day and the guild info, with 編輯 where allowed.
 -- GF-UI-C (owner: the info was cut off): the info sits in a scroll frame and
@@ -1650,7 +1651,11 @@ end
 --   the list (36 px rows)
 --   the chosen member's buttons (44 px bar)
 --   bottom row: [邀請] [公會] [遊戲公會] [診斷] on the right
-UI.TOOLBAR_Y, UI.HEADER_Y, UI.HEADER_H, UI.LIST_TOP, UI.LIST_BOTTOM = -36, -108, 28, -138, 100
+-- GF-UI-M (owner: the list's last line was cut in half by the bottom row):
+-- the list is 12 whole rows (680 - 138 - 110 = 432 = 12 x 36); the wheel
+-- moves half a list (6 rows), so a scrolled list shows whole rows too.
+UI.TOOLBAR_Y, UI.HEADER_Y, UI.HEADER_H, UI.LIST_TOP, UI.LIST_BOTTOM = -36, -108, 28, -138, 110
+UI.LIST_ROWS = 12
 UI.CENSUS_Y = -72
 UI.TOOLBAR_GAP = 8
 UI.EMPTY_ICON = 48
@@ -1812,7 +1817,12 @@ local function build(p)
     ns.Theme.barPanel(bar) -- GF-UI-D: a faint panel with a line on top
     bar.name = ns.freeText(bar:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
     bar.name:SetPoint("LEFT", bar, "LEFT", 10, 0)
-    bar.nameWidth = 170
+    -- GF-UI-M (owner: a long name ran under 密語): the name has its own
+    -- width (12 Chinese characters fit; longer ends in 「…」) and the buttons
+    -- start after it.
+    bar.nameWidth = UI.BAR_NAME_W + 24
+    bar.name:SetWidth(UI.BAR_NAME_W)
+    bar.name:SetJustifyH("LEFT")
     bar.buttons = {}
     UI.actionBar = bar
     rowScroll:SetScrollChild(rowContent)

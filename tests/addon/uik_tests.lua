@@ -88,9 +88,11 @@ return function(T)
         eq(title(), "綠皮冒險工具箱｜職工檔案", "title")
     end)
 
-    test("GF-UI-K A5 the race head: orc for a man, 天裔精靈 for a woman, else the class icon", function()
+    -- GF-UI-M (owner 2026-11-27): the race head by sex moved from the page's
+    -- portrait to the left bar's 職工檔案 icon; worked out once a session.
+    test("GF-UI-K A5 / GF-UI-M the race head on the 職工檔案 entry: orc for a man, 天裔精靈 for a woman, else the file icon", function()
         local ns = login()
-        local I, Ch = ns.Icons, ns.Character
+        local I, F = ns.Icons, ns.Framework
         local have = {}
         local oldCT, oldSex, oldCI = rawget(_G, "C_Texture"), rawget(_G, "UnitSex"), rawget(_G, "C_CreatureInfo")
         local sex = 2
@@ -101,29 +103,48 @@ return function(T)
                 if id == 96 then return { raceName = "塑風者天裔精靈", clientFileString = "TestSkyElf" } end
                 return nil
             end }
+            local function entry()
+                I.resetNavPortrait()
+                F.select("character")
+                for _, x in ipairs(F.navButtons()) do if x:IsShown() and x.entryKey == "profile" then return x end end
+            end
             SlashCmdList.GREENFANGTOOLKIT("character")
-            local tex = Ch.portraitTexture
-            tex.SetAtlas = function(self, n) self._atlas = n; return true end
-            -- No atlas in the client: the class icon stays.
-            Ch.refresh()
-            eq(Ch.portrait, "class", "nothing to show: class icon")
+            -- No atlas in the client: the orc file icon stays.
+            local b = entry()
+            ok(b, "the entry")
+            eq(b.iconAtlas, nil, "no atlas"); eq(b.iconPath, F.ENTRY_ICON.profile[1], "the file icon")
             -- A man: the orc head first.
             have["raceicon128-orc-male"], have["raceicon128-goblin-male"] = true, true
-            Ch.refresh()
-            eq(Ch.portrait, "atlas", "atlas"); eq(tex._atlas, "raceicon128-orc-male", "the orc head")
+            b = entry()
+            eq(b.iconAtlas, "raceicon128-orc-male", "the orc head")
+            -- Once a session: a second draw does not ask again.
+            local checks = I.navPortraitChecks
+            F.select("character")
+            eq(I.navPortraitChecks, checks, "worked out once")
             -- A woman: the 天裔精靈 head, its file name from the client (raceID 96).
             sex = 3
-            Ch.refresh()
-            eq(Ch.portrait, "class", "the elf atlas is missing: class icon")
+            b = entry()
+            eq(b.iconAtlas, nil, "the elf atlas is missing: the file icon")
             have["raceicon128-testskyelf-female"] = true
-            Ch.refresh()
-            eq(tex._atlas, "raceicon128-testskyelf-female", "the 天裔精靈 head")
+            b = entry()
+            eq(b.iconAtlas, "raceicon128-testskyelf-female", "the 天裔精靈 head")
             eq(I.portraitAtlases(3)[1], "raceicon128-testskyelf-female", "built from clientFileString")
-            eq(#I.portraitAtlases(nil), 0, "unknown sex: nothing (class icon)")
+            eq(#I.portraitAtlases(nil), 0, "unknown sex: nothing")
+            -- Unknown sex: nothing worked out yet (asked again later).
+            sex = nil
+            I.resetNavPortrait()
+            eq(I.navPortraitAtlas(), nil, "unknown sex: no atlas yet")
+            -- The page's own portrait never uses the race head (no SetPortraitTexture here: class icon).
+            sex = 2
+            ns.Character.refresh()
+            eq(ns.Character.portrait, "class", "the page: class icon without the own portrait")
             -- /gftk probe lists them.
+            sex = 3
+            I.resetNavPortrait()
             local pr = ns.Probe.portraits()
             eq(pr.sex, "3", "sex"); eq(pr.race96, "testskyelf", "race file"); eq(pr.race95, "nil", "95 unknown here")
             eq(pr["raceicon128-orc-male"], "yes", "orc yes"); eq(pr["raceicon-orc-male"], "no", "small orc no")
+            eq(pr.nav, "raceicon128-testskyelf-female", "the entry's atlas")
         end)
         C_Texture, UnitSex, C_CreatureInfo = oldCT, oldSex, oldCI
         if not okRun then error(err, 0) end

@@ -310,9 +310,45 @@ return function(T)
         eq(c.appoint.disabled, true, "指定 off")
         eq(c.rows[1].revoke.disabled, true, "撤銷 off")
         eq(ns.Theme.hoverable(c.appoint), false, "never lights")
-        eq(c.stock.kind, "unknown", "stock state"); eq(c.stock.text:GetText(), "尚未開放", "尚未開放")
+        eq(c.stock.kind, "unknown", "stock state")
+        eq(c.stock.text:GetText(), "庫存：第二階段才有", "GF-UI-M: phase 2, not a check the master has to do")
         eq(c.scopeState.text:GetText(), "你不是保管人", "no scope for a member")
         ok(c.role:GetText():find("職工", 1, true), "role (GF-UI-K: 成員 = 職工)")
+    end))
+
+    -- GF-UI-M (owner): more than 8 people: 「還有 N 位」 and the wheel; the same 8 rows.
+    test("GF-UI-M bank list: 12 people scroll with the wheel in the same 8 rows; 「還有 N 位」; the new 庫存 text", done(function()
+        local ns = login()
+        local t = T0()
+        local entries = {}
+        for i = 1, 12 do
+            entries[i] = { string.format("0000-%08X", 0x100 + i), "b", i <= 10, t - i }
+        end
+        from(ns, PEER_B, vMsg(ns, B, t, list(ns, B, t, entries)))
+        ns.Framework.open("bank")
+        local UI = ns.BankUI
+        local c = UI.controls
+        eq(#c.rows, UI.ROWS, "8 rows")
+        eq(c.total, 12, "12 on the list")
+        local function shown() local n = 0; for _, r in ipairs(c.rows) do if r:IsShown() then n = n + 1 end end return n end
+        eq(shown(), 8, "8 shown")
+        eq(c.more:GetText(), "還有 4 位，用滑鼠滾輪往下看", "the more line")
+        local first = c.rows[1].entry
+        -- The wheel on a row: one down.
+        c.rows[1]:GetScript("OnMouseWheel")(c.rows[1], -1)
+        eq(c.offset, 1, "one down")
+        ok(c.rows[1].entry ~= first, "the next person on top")
+        eq(c.more:GetText(), "還有 3 位，用滑鼠滾輪往下看", "three more")
+        for _ = 1, 10 do UI.scroll(-1) end
+        eq(c.offset, 4, "stops at the last person")
+        eq(c.more:GetText(), "", "the last one in view: no line")
+        eq(c.rows[8].state:GetText(), "已撤銷", "the revoked ones at the end")
+        ok(not UI.scroll(-1), "no further")
+        UI.scroll(20)
+        eq(c.offset, 0, "back to the top")
+        eq(#c.rows, UI.ROWS, "no new rows")
+        eq(c.stock.text:GetText(), UI.STOCK_TITLE, "庫存 title")
+        eq(c.stock.detail:GetText(), "目前只能管理保管人名單；庫存、申領、核准還在開發中", "the sentence")
     end))
 
     test("GF-012 page: the master's buttons work; a custodian sees the scope boxes", done(function()
