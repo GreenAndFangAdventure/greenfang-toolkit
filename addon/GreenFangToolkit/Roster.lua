@@ -45,10 +45,15 @@ local function clubInfoFor(guid, name, byGUID, byExact, byShort)
     return nil
 end
 
+-- GF-FIX-H: a damaged snapshot (not a table, members not a table) is no data.
 function Roster.snapshotFor(realm, guild)
     local db = ns.db
     if not db then return nil end
-    return db.roster.snapshots[ns.guildKey(realm, guild)]
+    local r = db.roster
+    local snaps = type(r) == "table" and r.snapshots
+    local s = type(snaps) == "table" and snaps[ns.guildKey(realm, guild)]
+    if type(s) ~= "table" or type(s.members) ~= "table" then return nil end
+    return s
 end
 
 -- The roster window serves ns.Config.guild only (GF-001-D5): a character in

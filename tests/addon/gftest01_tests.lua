@@ -1040,34 +1040,58 @@ return function(T)
         { "ledger", "orders", GK, "rec", A, "W" }, { "share", "seenIDs" }, { "share", "guilds", GK },
         { "share", "guilds", GK, "rec" }, { "share", "guilds", GK, "rec", A },
     }
-    -- Known defects (left for the PM to decide; no feature code changed here).
-    -- run.lua has no "known failure" form, so these are skipped and listed;
-    -- GF_KNOWN=1 runs them (each fails today, with the error noted here).
-    local KNOWN = {
-        [table.concat({ "orders", "history", ME }, ".")] =
-            "K1 Orders.toHistory: o.history[key] or {} keeps a string; ipairs fails (Orders.lua:789) when an order closes",
-        [table.concat({ "roster", "snapshots", GK, "members" }, ".")] =
-            "K2 Roster olderMembers: existing.members or {} keeps a string; ipairs fails (Roster.lua:95) at login",
-        [table.concat({ "ledger", "adventure", GK, "rec", A }, ".")] =
-            "K3 Ledger digest: rec[a] a string; pairs fails (Ledger.lua:233) at login",
-        [table.concat({ "ledger", "orders", GK, "rec", A, "W" }, ".")] =
-            "K4 Ledger digest: rec[a][g] a string; rec.h is nil, concat fails (Ledger.lua:233) at login",
-        [table.concat({ "share", "guilds", GK, "rec", A }, ".")] =
-            "K5 Sync.ownRecipes: Share.records(a) a string; pairs fails (Sync.lua:378) at login",
+    -- GF-FIX-H: the five cases GF-TEST-01 found (K1-K5) and the same kind of
+    -- damage one level deeper in the same tables. The broken entry is dropped
+    -- (or replaced by an empty table); everything else stays.
+    for _, extra in ipairs({
+        { "ledger", "orders", GK, "rec", A, "O", "t" }, { "ledger", "adventure", GK, "rec", A, "T" },
+        { "share", "guilds", GK, "rec", A, "B" }, { "share", "guilds", GK, "rec", A, "P", "t" },
+        { "share", "guilds", GK, "tomb", A }, { "share", "guilds", GK, "tomb" },
+        { "share", "guilds", GK, "queued", A }, { "share", "guilds", GK, "idsSent", A },
+        { "share", "guilds", GK, "gone", A },
+        { "orders", "history", ME, 1 }, { "orders", "unsure", ORDER_OPEN },
+    }) do BAD[#BAD + 1] = extra end
+    -- What must still be there (or be gone) after each case, by path.
+    local AFTER = {
+        -- K1: the closed order still reaches the history.
+        [table.concat({ "orders", "history", ME }, ".")] = function(now)
+            tbl(now.orders.history[ME], "history list replaced by a table")
+            eq(now.orders.history[ME][1] and now.orders.history[ME][1].id, "gftest01-close", "closed order in history")
+        end,
+        [table.concat({ "orders", "history", ME, 1 }, ".")] = function(now)
+            eq(now.orders.history[ME][1] and now.orders.history[ME][1].id, "gftest01-close", "closed order in history")
+            for _, x in ipairs(now.orders.history[ME]) do tbl(x, "history entry") end
+        end,
+        -- K2: the scan writes a whole snapshot again.
+        [table.concat({ "roster", "snapshots", GK, "members" }, ".")] = function(now)
+            tbl(now.roster.snapshots[GK].members, "members replaced by a table")
+        end,
+        -- K3: the author's adventure records are dropped, the order records stay.
+        [table.concat({ "ledger", "adventure", GK, "rec", A }, ".")] = function(now)
+            tbl(now.ledger.orders[GK].rec[A].W, "other data kept: order records")
+        end,
+        -- K4: the one record is dropped, the author's other record stays.
+        [table.concat({ "ledger", "orders", GK, "rec", A, "W" }, ".")] = function(now)
+            eq(now.ledger.orders[GK].rec[A].O and now.ledger.orders[GK].rec[A].O.h, "msar", "other record kept")
+            tbl(now.ledger.adventure[GK].rec[A].T, "other data kept: adventure records")
+        end,
+        [table.concat({ "ledger", "orders", GK, "rec", A, "O", "t" }, ".")] = function(now)
+            eq(now.ledger.orders[GK].rec[A].W and now.ledger.orders[GK].rec[A].W.h, "8ekdu", "other record kept")
+        end,
+        -- K5: the author's shared records are dropped, the rest of the store stays.
+        [table.concat({ "share", "guilds", GK, "rec", A }, ".")] = function(now)
+            tbl(now.share.guilds[GK].rec, "share rec still a table")
+            tbl(now.ledger.orders[GK].rec[A].W, "other data kept: order records")
+        end,
+        [table.concat({ "share", "guilds", GK, "rec", A, "B" }, ".")] = function(now)
+            local r = now.share.guilds[GK].rec[A]
+            eq(r and r.Z and r.Z.h, "21on6", "other shared record kept")
+        end,
     }
-    local runKnown = os and os.getenv and os.getenv("GF_KNOWN") == "1"
-    local realPrint = T.realPrint or print
     for _, path in ipairs(BAD) do
         local name = table.concat(path, ".")
         local title = "GF-TEST-01 edge: 0.15.1 save with " .. name .. " a string"
-        local register = test
-        if KNOWN[name] and not runKnown then
-            register = function(n)
-                if GF_ONLY and GF_ONLY ~= "" and not n:find(GF_ONLY, 1, true) then return end
-                realPrint("skip " .. n .. "\n     known defect " .. KNOWN[name] .. " (GF_KNOWN=1 runs it)")
-            end
-        end
-        register(title, function()
+        test(title, function()
             local db = copy(OLD["0.15.1"])
             local parent = db
             for i = 1, #path - 1 do parent = parent[path[i]] end
@@ -1085,6 +1109,7 @@ return function(T)
                 for _, x in ipairs(now.orders.history[ME]) do if x.id == "h-old1" then found = true end end
                 ok(found, "other data kept: history")
             end
+            if AFTER[name] then AFTER[name](now) end
         end)
     end
 end
