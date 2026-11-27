@@ -4743,6 +4743,10 @@ assert(loadfile(ROOT .. "/tests/addon/gffixb_tests.lua"))()({ test = test, eq = 
 -- GF-FIX-F: 0.16.6 review batch F: item events, finder reload, radar, 臨時黑箱; the supply switches (tests/addon/gffixf_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gffixf_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+
+-- GF-009-15: 調貨所 「開｜關」 switch cells; 自動集料 sources 行囊／材料袋／銀行／信箱（未收） (tests/addon/gf00915_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf00915_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0
