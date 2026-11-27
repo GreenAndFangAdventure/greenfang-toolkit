@@ -72,6 +72,11 @@ R.MATCH_TEXT = {
     need = function(name, total, new) return string.format("「%s」：%d 位職工可能有（新增 %d 位）", name, total, new) end,
     offer = function(name, total, new) return string.format("「%s」：%d 位職工正在徵求，你可能有多（新增 %d 位）", name, total, new) end,
 }
+-- GF-UI-N: the other texts in one place, so the dev preview shows the same words.
+function R.moreText(kind, extra)
+    return string.format(kind == "need" and "另有 %d 項你缺的物品有新配對" or "另有 %d 項你可能有多的物品有人徵求", extra)
+end
+function R.radarText(name, have, wanted) return string.format("背包有「%s」x%d，%d 位職工正在徵求", name, have, wanted) end
 
 -- GF-FIX-F (review 低-22): one check reads Supply.entries() once and gives
 -- it to both parts (all = that list; nil reads it here).
@@ -106,7 +111,7 @@ function R.checkMatches(all)
         end
         if extra > 0 then
             N.push({ module = "supply", key = kind .. ":more",
-                text = string.format(kind == "need" and "另有 %d 項你缺的物品有新配對" or "另有 %d 項你可能有多的物品有人徵求", extra),
+                text = R.moreText(kind, extra),
                 target = { page = "supply", tab = kind } })
         end
     end
@@ -188,7 +193,7 @@ function R.checkBags(all)
             if pushed < R.PER_RUN then
                 pushed = pushed + 1
                 N.push({ module = "radar", key = id,
-                    text = string.format("背包有「%s」x%d，%d 位職工正在徵求", itemText(id), h.have, h.wanted),
+                    text = R.radarText(itemText(id), h.have, h.wanted),
                     target = { page = "supply", tab = "guild", id = id }, actions = R.ACTIONS })
             end
         end

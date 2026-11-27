@@ -33,6 +33,23 @@ for k, v in pairs({ order_guild = "委託", order_remind = "委託", adv_update 
     UI.MODULE_SHORT[k] = v -- GF-014-05
 end
 
+-- GF-UI-N (owner 0.16.12: 「未讀與已讀也應該要清楚辨識」): an unread row has the
+-- game's small yellow light before its tag, a warm fill and gold words; a read
+-- row has no light, no fill and dim words. Game files only, first one found.
+UI.UNREAD_ICONS = { "Interface\\COMMON\\Indicator-Yellow", "Interface\\FriendsFrame\\StatusIcon-Online",
+    "Interface\\GossipFrame\\AvailableQuestIcon" }
+UI.UNREAD_ICON = 14
+UI.READ_ALPHA = 0.55 -- the read words: the muted colour at this alpha
+-- How a row looks: { mark, fill, text = { r, g, b, a }, tag = { r, g, b, a } }.
+function UI.rowLook(unread)
+    local C = Th.C
+    if unread then
+        return { mark = true, fill = true, text = { C.gold[1], C.gold[2], C.gold[3], 1 }, tag = { C.text[1], C.text[2], C.text[3], 1 } }
+    end
+    return { mark = false, fill = false, text = { C.muted[1], C.muted[2], C.muted[3], UI.READ_ALPHA },
+        tag = { C.muted[1], C.muted[2], C.muted[3], UI.READ_ALPHA } }
+end
+
 local button, list
 local state = { offset = 0, items = {}, settings = false }
 
@@ -142,8 +159,17 @@ local function row(i)
     r:SetSize(UI.W - 24, UI.ROW_H - 4)
     r:SetPoint("TOPLEFT", list, "TOPLEFT", 12, UI.TOP - (i - 1) * UI.ROW_H)
     r.gfHover = Th.fill(r, Th.C.hover, "HIGHLIGHT")
+    r.unreadFill = Th.fill(r, Th.C.selFill, "BACKGROUND") -- GF-UI-N
+    r.unreadFill:Hide()
+    r.mark = r:CreateTexture(nil, "OVERLAY")
+    r.mark:SetSize(UI.UNREAD_ICON, UI.UNREAD_ICON)
+    r.mark:SetPoint("TOPLEFT", r, "TOPLEFT", 0, -7)
+    for _, path in ipairs(UI.UNREAD_ICONS) do
+        if ns.Icons.set(r.mark, path) then r.mark.gfPath = path; break end
+    end
+    r.mark:Hide()
     r.tag = label(r, "", ns.FIELD_FONT)
-    r.tag:SetPoint("TOPLEFT", r, "TOPLEFT", 4, -4)
+    r.tag:SetPoint("TOPLEFT", r, "TOPLEFT", 16, -4)
     r.text = label(r, "", ns.LABEL_FONT)
     r.text:SetPoint("TOPLEFT", r, "TOPLEFT", 52, -4)
     r.text:SetWidth(UI.W - 24 - 52 - 96)
@@ -311,7 +337,13 @@ function UI.draw()
             r.entry = e
             r.tag:SetText(UI.MODULE_SHORT[e.module] or "通知")
             r.text:SetText(e.text)
-            r.text:SetTextColor(unpack(e.unread and Th.C.gold or Th.C.text))
+            local look = UI.rowLook(e.unread == true)
+            r.unread = e.unread == true
+            r.text:SetTextColor(unpack(look.text))
+            r.tag:SetTextColor(unpack(look.tag))
+            r.when:SetTextColor(unpack(look.tag))
+            if look.mark and r.mark.gfPath then r.mark:Show() else r.mark:Hide() end
+            if look.fill then r.unreadFill:Show() else r.unreadFill:Hide() end
             r.when:SetText(UI.ago(e.t))
             local acts = e.actions or {}
             for k, a in ipairs(r.actions) do

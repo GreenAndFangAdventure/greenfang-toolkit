@@ -195,6 +195,75 @@ function UI.timeText(v)
     return tex(v.timeMode == "f" and "future" or "today") .. " " .. UI.dayWord(v.start) .. " " .. UI.spanText(v.start, v.finish)
 end
 
+-- GF-UI-N (owner 0.16.12: 「多個時段應該都要可以看出來才對」): a row of a ticket with
+-- several slots names every one, short: 「今天 20:00、21:30、明天 19:00」 (the day only
+-- when it changes, start times only). Too long for the column: the first ones and
+-- 「等 N 個」 (N = all of them); the tooltip lists each in full. The 定案 one is gold
+-- with the 定案 scroll, and comes first when it would otherwise be left out.
+UI.FINAL_COLOR = "|cffffd100"
+-- The day word short: 今天 / 明天 / 11/29 (the tooltip has the full date).
+function UI.shortDay(t)
+    local off = UI.dayOffset(t)
+    if off == 0 or off == 1 then return UI.dayWord(t) end
+    local d = UI.date("%m/%d", t - UI.skew())
+    return d and (d:gsub("^0", ""):gsub("/0", "/")) or UI.dayWord(t)
+end
+function UI.slotShort(sl, prevDay)
+    if sl.now then return "現在", "now" end
+    local day = UI.shortDay(sl.s)
+    if day == prevDay then return UI.clock(sl.s), day end
+    return day .. " " .. UI.clock(sl.s), day
+end
+-- width: the column (px); measure(text): its width (the row's own FontString in
+-- the game; the estimate ns.labelWidth when none is given).
+function UI.rowTimeText(v, width, measure)
+    local list = v.slots or {}
+    if #list <= 1 then return UI.timeText(v) end
+    width = width or (UI.COL.seats - UI.COL.time - 8)
+    measure = measure or ns.labelWidth
+    local n = #list
+    local function build(order, k)
+        local parts, prev = {}, nil
+        for i = 1, k do
+            local sl = order[i]
+            local t
+            t, prev = UI.slotShort(sl, prev)
+            if v.final and sl.id == v.final then t = UI.FINAL_COLOR .. t .. "|r" .. tex("final", 16) end
+            parts[#parts + 1] = t
+        end
+        local text = tex(order[1].now and "now" or "today") .. " " .. table.concat(parts, "、")
+        if k < n then text = text .. " 等 " .. n .. " 個" end
+        return text
+    end
+    local text = build(list, n)
+    if measure(text) <= width then return text end
+    for k = n - 1, 1, -1 do
+        local order = list
+        if v.final then
+            local at
+            for i, sl in ipairs(list) do if sl.id == v.final then at = i end end
+            if at and at > k then
+                order = { list[at] }
+                for i, sl in ipairs(list) do if i ~= at then order[#order + 1] = sl end end
+            end
+        end
+        text = build(order, k)
+        if k == 1 or measure(text) <= width then return text end
+    end
+    return text
+end
+-- The tooltip's 時段 lines (several slots only): each in full, the 定案 one marked.
+function UI.slotTipLines(v)
+    local out = {}
+    if #(v.slots or {}) <= 1 then return out end
+    out[1] = "時段 " .. #v.slots .. " 個"
+    for _, sl in ipairs(v.slots) do
+        local fin = v.final and sl.id == v.final
+        out[#out + 1] = (fin and UI.FINAL_COLOR or "") .. UI.slotText(sl, 16) .. (fin and ("|r  " .. tex("final", 16) .. " 定案") or "")
+    end
+    return out
+end
+
 -- GF-002-C item 2: one entry per seat, in role order: { role, filled }.
 -- GF-FIX-D (review 高-5, a second guard after the decode's limits): the seats are
 -- counted first; more than MAX_SLOTS (the row shows numbers then) builds no list.
@@ -366,6 +435,7 @@ function UI.ticketTooltip(v)
     local tags = UI.tagNames(v.tags)
     if tags ~= "" then lines[#lines + 1] = tags end
     if v.note and v.note ~= "" then lines[#lines + 1] = v.note end
+    for _, l in ipairs(UI.slotTipLines(v)) do lines[#lines + 1] = l end -- GF-UI-N
     return lines
 end
 
@@ -543,7 +613,8 @@ UI.BUTTON = {
     finalize = { icon = "final", tip = "定案" }, slots = { icon = "today", tip = "時段" }, -- GF-002-H
     back = { icon = "back", tip = "退回" }, -- GF-002-I (R-17.7)
 }
-UI.ICON.edit = "Interface\\Icons\\INV_Feather_05"
+-- GF-UI-N: 編輯 is GameIcons' "edit" (a pencil and a note), the one 編輯 / 修改 mark of the toolkit.
+UI.GAME.edit = "edit"
 
 -- Press a ticket button. Returns a result (tests).
 function UI.press(v, button, owner)
@@ -673,8 +744,11 @@ end
 
 -- Row columns. Line 1: art, name, time, seats, leader. Line 2: details, the state
 -- badge (GF-002-I, R-17.11: x = 640 on every row), buttons (GF-UI-A §2.4: from 740).
-UI.COL = { dest = 22, name = 76, time = 290, seats = 530, cls = 756, who = 782, whoW = 160,
-    detail = 76, detailW = 552, badge = 640, buttons = 740, delete = 956 }
+-- GF-UI-N (owner 0.16.12: 「角色文字沒有對齊」): the leader's class icon and line 2's
+-- first button icon start on one line (cls = buttons) and are one size (ROW_ICON),
+-- so the leader's name and the first button's name start on one line too (who).
+UI.COL = { dest = 22, name = 76, time = 290, seats = 530, cls = 756, who = 756 + 28 + 4, whoW = 160,
+    detail = 76, detailW = 552, badge = 640, buttons = 756, delete = 956 }
 UI.BUTTON_GAP = 8
 UI.DEST_ICON = 44
 
@@ -694,6 +768,13 @@ local function newRow(i)
     end
     row.name = text(C.name, C.time - C.name - 8, UI.LINE1, ns.FIELD_FONT)
     row.time = text(C.time, C.seats - C.time - 8, UI.LINE1)
+    -- GF-UI-N: how wide a time text is in this row's font (UI.rowTimeText).
+    row.measureTime = function(s)
+        row.time:SetText(s)
+        local fs = row.time
+        local w = ns.num((fs.GetUnboundedStringWidth and fs:GetUnboundedStringWidth()) or fs:GetStringWidth()) or 0
+        return w > 0 and w or ns.labelWidth(s)
+    end
     row.roles = text(C.seats, C.cls - C.seats - 8, UI.LINE1)
     row.detail = text(C.detail, C.detailW, UI.LINE2)
     -- GF-002-C item 2: one icon per seat, bright when taken, grey when open.
@@ -705,7 +786,7 @@ local function newRow(i)
         s:Hide()
         row.slots[k] = s
     end
-    row.cls = row:CreateTexture(nil, "ARTWORK"); row.cls:SetSize(22, 22); row.cls:SetPoint("LEFT", row, "LEFT", C.cls, UI.LINE1)
+    row.cls = row:CreateTexture(nil, "ARTWORK"); row.cls:SetSize(ns.ROW_ICON, ns.ROW_ICON); row.cls:SetPoint("LEFT", row, "LEFT", C.cls, UI.LINE1)
     row.off = row:CreateTexture(nil, "OVERLAY"); row.off:SetSize(16, 16); row.off:SetPoint("BOTTOMRIGHT", row.cls, "BOTTOMRIGHT", 4, -4)
     row.who = text(C.who, C.whoW, UI.LINE1)
     -- GF-002-I (R-17.11): the state badge; the mouse over it shows the ✓✗ checklist.
@@ -720,10 +801,14 @@ local function newRow(i)
         row.buttons[k] = b
     end
     -- GF-002-J (owner 0.14.0): 刪除 on my own tickets, at the far right of line 1 (confirmed first).
+    -- GF-UI-N (owner 0.16.12): my worker ticket's 移除 sits in the same place (row.deleteFn).
     row.delete = iconButton(row, ns.ROW_ICON, "no", "刪除", nil, "刪除")
     row.delete:SetPoint("LEFT", row, "LEFT", UI.COL.delete, UI.LINE1)
     row.delete.action = "delete"
-    row.delete:SetScript("OnClick", function() if row.view then UI.askDelete(row.view) end end)
+    row.delete:SetScript("OnClick", function()
+        if row.deleteFn then return row.deleteFn() end
+        if row.view then UI.askDelete(row.view) end
+    end)
     row.delete:Hide()
     row.head = row:CreateFontString(nil, "ARTWORK", ns.Theme.FONT.header or ns.FIELD_FONT); row.head:SetPoint("LEFT", row, "LEFT", 6, 0)
     -- GF-016: the row 我的業務 opened (UI.focus). GF-UI-G: the chosen look (the olive
@@ -905,6 +990,9 @@ function UI.textStyle(b, on)
         b.gfWidth = ns.ROW_ICON
         b.gfTextText:Hide(); b.gfTextFill:Hide(); b.gfTextEdges.show(false)
         b.fieldNamed = nil
+        -- GF-UI-N (owner 0.16.12): a row that showed 密語 / 申請 (a text button) and is
+        -- reused for a ticket kept its icon hidden: 編輯 came out as a bare word.
+        b.tex:Show()
     end
     return b
 end
@@ -970,7 +1058,7 @@ local function fillWorker(row, w, author)
     local ds = dungeonIds(w)
     if ds[1] then ns.GameIcons.set(row.dest, ns.GameIcons.dungeonKey(ds[1])) else ns.GameIcons.set(row.dest, "quest") end
     row.name:SetText(UI.workerDest(w))
-    row.time:SetText(UI.slotsText(w.slots))
+    row.time:SetText(#(w.slots or {}) > 1 and UI.rowTimeText({ slots = w.slots }, nil, row.measureTime) or UI.slotsText(w.slots)) -- GF-UI-N
     row.roles:SetText(UI.rolesName(w.main, w.alt))
     row.detail:SetText(UI.workerDetail(w))
     fillWho(row, author)
@@ -1193,13 +1281,21 @@ local function plainDest(v)
     return (UI.destText(v):gsub("|T.-|t", ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("^%s+", ""))
 end
 
+-- GF-UI-N: the far-right line-1 button of a row: 刪除 (a ticket, fn nil: confirmed
+-- first) or 移除 (my worker ticket).
+function UI.setDelete(row, name, action, fn)
+    row.delete.tip, row.delete.action, row.deleteFn = name, action, fn
+    ns.OrdersUI.setLabel(row.delete, name)
+    row.delete:Show()
+end
+
 local function fillRow(row, data, i)
     -- GF-UI-A §1.8: one zebra for every page (Core's ns.stripe, GF-UI-B).
     -- GF-UI-G: the warm row pair of the theme (#272822 / #2E2D25).
     ns.Theme.stripe(row.bg, i)
     local parts = { row.att, row.dest, row.name, row.time, row.roles, row.cls, row.who, row.detail }
     row.view, row.mine, row.lfg, row.worker, row.why, row.workerTip = nil, nil, nil, nil, nil, nil
-    row.delete:Hide()
+    row.delete:Hide(); row.deleteFn = nil
     for _, s in ipairs(row.slots) do s:Hide() end
     row.badge:Hide()
     row.isHeader = data.header ~= nil
@@ -1229,14 +1325,14 @@ local function fillRow(row, data, i)
         if w.closed then
             setButtons(row, {
                 { icon = "reopen", tip = "重開", action = "reopen-worker", fn = function() UI.openWorker("reopen") end },
-                { icon = "no", tip = "移除", action = "unregister", fn = function() A().removeWorker(); UI.refresh() end },
             })
         else
             setButtons(row, {
                 { icon = "edit", tip = "編輯", action = "edit", fn = function() UI.openWorker() end },
-                { icon = "no", tip = "移除", action = "unregister", fn = function() A().removeWorker(); UI.refresh() end },
             })
         end
+        -- GF-UI-N: 移除 where a ticket's 刪除 is (line 1, far right), not among line 2's buttons.
+        UI.setDelete(row, "移除", "unregister", function() A().removeWorker(); UI.refresh() end)
         return
     end
     if data.lfg then
@@ -1289,7 +1385,7 @@ local function fillRow(row, data, i)
     row.view = v
     UI.setDest(row.dest, v)
     row.name:SetText(UI.destText(v))
-    row.time:SetText(UI.timeText(v))
+    row.time:SetText(UI.rowTimeText(v, nil, row.measureTime))
     local why = UI.why(v)
     row.why = why
     row.badge.set(why, UI.WHY_OPTS)
@@ -1323,7 +1419,7 @@ local function fillRow(row, data, i)
     end
     setButtons(row, list)
     -- GF-002-J: 刪除 on my own tickets (confirmed first).
-    if v.leader == S().selfAuthor() then row.delete:Show() end -- its OnClick is set once (newRow)
+    if v.leader == S().selfAuthor() then UI.setDelete(row, "刪除", "delete", nil) end -- its OnClick is set once (newRow)
 end
 
 -- GF-002-J (owner 0.14.0): 刪除 one of my tickets, after a confirmation.
@@ -2708,7 +2804,20 @@ end
 
 UI.QUEST_PICKER_NAME = "GreenFangToolkit_QuestPicker"
 UI.QP_ROW, UI.QP_HEAD, UI.QP_COL_W, UI.QP_MAX_Y = 30, 32, 420, 480
-UI.QP_ZONE_WHOLE_X = UI.QP_COL_W - 50 -- GF-UI-K: 全區 at a zone row's right end (after the count)
+-- GF-UI-K: 全區 at a zone row's right end (after the count).
+-- GF-UI-N (owner 0.16.12: the left column's 「全區」 ran over the right column's zone
+-- names): the check and its name end QP_GAP before the next column; the zone name,
+-- the elite mark and the count move left to make room (a long name ends in 「…」).
+UI.QP_GAP, UI.QP_WHOLE_LABEL = 16, 40 -- 40: 「全區」 at 16 px with its margin
+UI.QP_ZONE_WHOLE_X = UI.QP_COL_W - UI.QP_GAP - UI.QP_WHOLE_LABEL - 4 - 24
+UI.QP_COUNT_W = 36
+-- A zone row's columns: { name width, elite x, count x } with and without 全區.
+function UI.qpZoneCols(whole)
+    if not whole then return UI.QP_COL_W - 150, UI.QP_COL_W - 106, UI.QP_COL_W - 80 end
+    local countX = UI.QP_ZONE_WHOLE_X - 8 - UI.QP_COUNT_W
+    local eliteX = countX - 22
+    return eliteX - 4 - 34, eliteX, countX
+end
 local qpicker
 function UI.questList()
     local log = A().questLog() or {}
@@ -2902,6 +3011,10 @@ function UI.questPicker(owner, opts)
                         r.zone = e.z.zone
                         local dg = UI.questDungeon({ zone = e.z.zone })
                         if dg then ns.GameIcons.set(r.icon, ns.GameIcons.dungeonKey(dg)) else ns.GameIcons.set(r.icon, e.z.here and "now" or "quest") end
+                        local nameW, eliteX, countX = UI.qpZoneCols(o.whole ~= nil)
+                        r.name:SetWidth(nameW)
+                        r.elite:ClearAllPoints(); r.elite:SetPoint("LEFT", r, "LEFT", eliteX, 0)
+                        r.count:ClearAllPoints(); r.count:SetPoint("LEFT", r, "LEFT", countX, 0)
                         r.name:SetText(e.z.zone)
                         r.count:SetText(tostring(e.z.count))
                         if e.z.groups > 0 then ns.GameIcons.set(r.elite, "elite") else r.elite:Hide() end
@@ -2922,6 +3035,10 @@ function UI.questPicker(owner, opts)
                         nh = nh + 1
                         local h = head(nh)
                         h:SetText(e.gr.zone)
+                        -- GF-UI-N: the zone name stops before 全區 (or the column's end); longer ends in 「…」.
+                        h:SetWidth(o.whole and (UI.QP_ZONE_WHOLE_X - 8) or (UI.QP_COL_W - UI.QP_GAP - 8))
+                        if h.SetWordWrap then h:SetWordWrap(false) end
+                        h:SetJustifyH("LEFT")
                         h:ClearAllPoints(); h:SetPoint("TOPLEFT", qpicker, "TOPLEFT", x, yy - 6); h:Show()
                         if o.whole and e.gr.zone ~= "其他" then
                             nw = nw + 1
@@ -2930,7 +3047,7 @@ function UI.questPicker(owner, opts)
                             local on = o.whole.isOn(e.gr.zone)
                             b.selected = on
                             ns.GameIcons.set(b.tex, on and "check_on" or "check_off")
-                            b:ClearAllPoints(); b:SetPoint("TOPLEFT", qpicker, "TOPLEFT", x + UI.QP_COL_W - 100, yy - 2); b:Show()
+                            b:ClearAllPoints(); b:SetPoint("TOPLEFT", qpicker, "TOPLEFT", x + UI.QP_ZONE_WHOLE_X, yy - 2); b:Show()
                         end
                     else
                         nr = nr + 1

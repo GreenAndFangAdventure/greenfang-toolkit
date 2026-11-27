@@ -51,6 +51,8 @@ RL.TEXT = {
 }
 RL.NOTIFY_MODULE = "recipe"
 RL.END_ACTION = { key = "end", text = "結束徵求" }
+-- GF-UI-N: the notice's words (the dev preview shows the same).
+function RL.learnedText(name) return "已學會「" .. tostring(name) .. "」，要不要結束這筆圖紙徵求？" end
 
 local stats = { mapBuilds = 0, links = 0, finds = 0, prompts = 0 }
 RL.stats = stats
@@ -417,7 +419,7 @@ function RL.checkLearned()
             local set = t and learnedSet(t.skill)
             if set and set[t.recipe] then
                 local r = N.push({ module = RL.NOTIFY_MODULE, key = "learned:" .. l.id,
-                    text = "已學會「" .. t.name .. "」，要不要結束這筆圖紙徵求？",
+                    text = RL.learnedText(t.name),
                     target = { page = "supply", id = l.itemID, tab = "mine" },
                     actions = { RL.END_ACTION } })
                 if r ~= "bad" and r ~= "off" and r ~= "burst" then

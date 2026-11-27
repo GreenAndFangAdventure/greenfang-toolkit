@@ -338,7 +338,7 @@ local function talents()
     c.serializationVersion = tostring(plain((select(2, Probe.try("C_Traits.GetLoadoutSerializationVersion")))))
     c.linkTypeTalentBuild = tostring(plain(Probe.resolve("LinkTypes.TalentBuild")))
     c.hasValidInspectData = Probe.try("C_Traits.HasValidInspectData")
-    -- GF-011: what the roster reads (points per group from node groupIDs),
+    -- GF-011: what the roster reads (points per tab, GF-011-C: Talents.assignTabs),
     -- and the chat functions the 「天賦連結」 action uses.
     if ns.Talents then
         local okT, line = pcall(ns.Talents.summaryLine)
