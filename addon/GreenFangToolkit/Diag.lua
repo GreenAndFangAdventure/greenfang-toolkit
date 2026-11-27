@@ -207,6 +207,7 @@ function Diag.refresh()
     end
     window.state:SetText(ns.Sync.shortStatus())
     if Diag.testCheck then Diag.testCheck.set(ns.Orders and ns.Orders.testOn() or false) end
+    if Diag.locationCheck then Diag.locationCheck.set(ns.Sync.shareLocation()) end -- GF-FIX-A (D-019)
     Diag.layout()
 end
 
@@ -279,6 +280,15 @@ local function create()
         if ns.OrdersUI and ns.OrdersUI.refresh then ns.OrdersUI.refresh() end
         if ns.Recipes and ns.Framework.isModuleShown("recipes") then ns.Recipes.refresh() end
     end)
+    -- GF-FIX-A (D-019): share my location, on unless the player turns it off.
+    -- Off withdraws the shared one (Sync.setShareLocation). Top right, on the
+    -- status line (the bottom row is full).
+    local lx = Diag.WIDTH - 40 - 28 - ns.labelWidth("分享位置")
+    Diag.locationCheck = ns.checkBox(f, "分享位置", lx, -30, function(on)
+        ns.Sync.setShareLocation(on)
+        Diag.refresh()
+    end)
+    Diag.locationCheck.set(ns.Sync.shareLocation())
     f:SetScript("OnShow", Diag.refresh)
     f:Hide()
     window = f

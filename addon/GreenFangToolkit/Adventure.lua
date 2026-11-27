@@ -84,6 +84,14 @@ function Adv.encodeEntry(e)
     return table.concat(out, ",")
 end
 
+-- GF-FIX-A (review 高-5, 中-13): numbers from someone else's entry are
+-- checked here, so a broken or hostile entry can never size a loop or reach
+-- date(): any number past NUM_MAX (2100-01-01, every time field is a server
+-- time or a length) and any head count outside COUNT_MAX makes the whole
+-- entry invalid (the record is refused, nothing is clamped).
+Adv.NUM_MAX = 4102444800
+Adv.COUNT_MAX = { rt = 40, rh = 40, rd = 40, sz = 40 }
+Adv.SLOT_MAX_D = 7 * 86400     -- longest slot length (seconds) taken from an entry
 function Adv.decodeEntry(s)
     local e = {}
     for field in str(s):gmatch("[^,]+") do
@@ -91,7 +99,9 @@ function Adv.decodeEntry(s)
         if not k then return nil end
         if NUM[k] then
             local n = unb36(v)
-            if not n then return nil end
+            if not n or n > Adv.NUM_MAX then return nil end
+            local cap = Adv.COUNT_MAX[k]
+            if cap and n > cap then return nil end
             e[k] = n
         else
             e[k] = unesc(v)
@@ -139,7 +149,8 @@ function Adv.decodeSlots(s)
         else
             local a, b = part:match("^([0-9a-z]+)%-([0-9a-z]+)$")
             a, b = a and unb36(a), b and unb36(b)
-            if a and b and b > a then out[#out + 1] = { s = a, e = b } end
+            -- GF-FIX-A (review 中-13): never past Adv.NUM_MAX.
+            if a and b and b > a and b <= Adv.NUM_MAX then out[#out + 1] = { s = a, e = b } end
         end
     end
     return out
@@ -172,10 +183,14 @@ function Adv.decodeTimes(s)
     for part in str(s):gmatch("[^_]+") do
         local id, n, a, d, add = part:match("^([1-5])(n?)%-([0-9a-z]+)%-([0-9a-z]*)%-([0-9a-z]*)$")
         id = tonumber(id)
-        if id and not seen[id] then
+        -- GF-FIX-A (review 中-13): a slot whose start, length or edit time is
+        -- past Adv.NUM_MAX (or a length over SLOT_MAX_D) is dropped.
+        local sv, dv, av = unb36(a), d ~= "" and unb36(d) or nil, add ~= "" and unb36(add) or nil
+        local sane = sv and sv <= Adv.NUM_MAX and (not dv or dv <= Adv.SLOT_MAX_D)
+            and (not av or av <= Adv.NUM_MAX)
+        if id and sane and not seen[id] then
             seen[id] = true
-            out[#out + 1] = { id = id, now = n == "n" or nil, s = unb36(a), d = d ~= "" and unb36(d) or nil,
-                a = add ~= "" and unb36(add) or nil }
+            out[#out + 1] = { id = id, now = n == "n" or nil, s = sv, d = dv, a = av }
         end
     end
     return sortSlots(out)

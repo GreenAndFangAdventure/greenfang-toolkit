@@ -123,11 +123,45 @@ end
 
 -- Call a game function that may not exist on this client. Returns its results,
 -- or nothing when the function is missing or raises an error.
+-- GF-FIX-A (review 高-1): no table per call. The results pass straight through
+-- a vararg (a hot path calls this tens of thousands of times in one frame).
+local function passResults(okCall, ...)
+    if not okCall then return end
+    return ...
+end
 function ns.call(fn, ...)
     if type(fn) ~= "function" then return end
-    local results = { pcall(fn, ...) }
-    if not results[1] then return end
-    return unpack(results, 2, table.maxn(results))
+    return passResults(pcall(fn, ...))
+end
+
+-- GF-FIX-A: the logged-in character's GUID, or nil (one game call, no table).
+-- Always read live, so it can never be stale; other modules may use it
+-- instead of ns.Data.player().guid.
+function ns.selfGUID()
+    local g = ns.str((ns.call(UnitGUID, "player")))
+    if g == "" then return nil end
+    return g
+end
+
+-- GF-FIX-A (review 中-3): text from another player, made safe to show and
+-- store: no "|" escape sequences (|T textures, |H links, |c colours), no
+-- control characters, at most maxBytes bytes (never cutting a UTF-8 character).
+function ns.cleanText(v, maxBytes)
+    local s = ns.str(v)
+    if s == "" then return s end
+    -- Explicit byte ranges: %c can match UTF-8 continuation bytes on some C runtimes.
+    s = s:gsub("|", ""):gsub("[%z\1-\31\127]", "")
+    maxBytes = maxBytes or 64
+    if #s > maxBytes then
+        local j = maxBytes
+        while j > 0 do
+            local b = s:byte(j + 1)
+            if not b or b < 0x80 or b >= 0xC0 then break end
+            j = j - 1
+        end
+        s = s:sub(1, j)
+    end
+    return s
 end
 
 -- GF-009-13 fix (owner's /gftk probe, Forever 1.60.1.71139): there is no
