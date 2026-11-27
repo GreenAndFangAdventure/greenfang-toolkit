@@ -305,9 +305,10 @@ function Diag.askClearOrders()
     end)
 end
 
+-- GF-FIX-C (review low-17): OnShow refreshes; an open window is refreshed once here.
 function Diag.open()
-    create():Show()
-    Diag.refresh()
+    local w = create()
+    if w:IsShown() then Diag.refresh() else w:Show() end
     return window
 end
 

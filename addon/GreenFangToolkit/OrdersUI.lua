@@ -396,6 +396,9 @@ local function newRow(i)
         b.cd:SetAllPoints(b)
         if b.cd.SetReverse then pcall(b.cd.SetReverse, b.cd, false) end
         b.cd:Hide()
+        -- GF-FIX-C (review mid-9): one handler per button, made here; it reads the
+        -- button's action when clicked (no new closure on every fill or scroll).
+        b.pressClick = function(self) if self.action and self.action ~= "craft" then press(row, self.action) end end
         row.buttons[k] = b
     end
     row.head = row:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT)
@@ -403,7 +406,8 @@ local function newRow(i)
     -- GF-016: the row 我的業務 opened (UI.focus), lit with the quest log's highlight.
     row.focusMark = row:CreateTexture(nil, "BORDER")
     row.focusMark:SetAllPoints()
-    Icons.set(row.focusMark, "Interface\QuestFrame\UI-QuestTitleHighlight")
+    -- GF-FIX-C (review mid-25): two backslashes (one was eaten by Lua: the mark never showed).
+    Icons.set(row.focusMark, "Interface\\QuestFrame\\UI-QuestTitleHighlight")
     if row.focusMark.SetBlendMode then row.focusMark:SetBlendMode("ADD") end
     row.focusMark:Hide()
     rowWidgets[i] = row
@@ -517,7 +521,7 @@ local function fillRow(row, data, i)
             UI.setSwirl(b, pendingPress[key] and (type(pendingPress[key]) == "number" and pendingPress[key] or clock()) or nil)
             setLabel(b, b.tip)
             if spec.hammer then setIcon(b.badge, "hammer") else b.badge:Hide() end
-            b:SetScript("OnClick", function() press(row, name) end)
+            if b.onClick ~= b.pressClick then b:SetScript("OnClick", b.pressClick); b.onClick = b.pressClick end
             b.action = name
             b:Show()
         else
@@ -536,6 +540,11 @@ end
 function UI.showsCraft(v, me)
     return v.state == "making" and v.skill ~= nil and (v.crafter == me or v.test == true)
 end
+local function craftClick(self)
+    local v = self.craftView
+    if not v then return end
+    self.lastCraft = ns.Recipes.openCraft(v.skill, v.recipe)
+end
 function UI.fillCraftButton(b, v)
     local R = ns.Recipes
     local can, why = R.canCraft(v.skill)
@@ -546,22 +555,25 @@ function UI.fillCraftButton(b, v)
     setLabel(b, R.CRAFT_LABEL)
     if b.label and b.label.SetFontObject then b.label:SetFontObject(can and ns.LABEL_FONT or ns.DISABLED_FONT) end
     b.badge:Hide()
-    b:SetScript("OnClick", function()
-        local ok = R.openCraft(v.skill, v.recipe)
-        b.lastCraft = ok
-    end)
+    b.craftView = v
+    if b.onClick ~= craftClick then b:SetScript("OnClick", craftClick); b.onClick = craftClick end
     if b.SetEnabled then b:SetEnabled(can) end
     b.action = "craft"
     b:Show()
 end
 
-function UI.layoutRows()
+-- GF-FIX-C (review mid-9): scrolling within the same rows redraws nothing
+-- (rows sit at fixed places on the scroll child); refresh() and focus redraw all.
+local laid = {}
+function UI.layoutRows(onlyIfMoved)
     if not scroll then return end
     local offset = ns.num((scroll:GetVerticalScroll())) or 0
     local h = ns.num((scroll:GetHeight())) or 0
     if h <= 0 then h = 420 end
     local count = math.ceil(h / ROW_HEIGHT) + 1
     local first = math.max(1, math.floor(offset / ROW_HEIGHT) + 1)
+    if onlyIfMoved and laid.first == first and laid.count == count and laid.rows == shownRows then return false end
+    laid.first, laid.count, laid.rows = first, count, shownRows
     for k = 1, math.max(count, #rowWidgets) do
         local i = first + k - 1
         local data = k <= count and shownRows[i] or nil
@@ -692,10 +704,13 @@ UI.profButtons = function() return profButtons end
 UI.PROF_X = 60
 
 function UI.refresh()
-    UI.updateBadge()
-    if not panel then return end
+    if not panel then UI.updateBadge(); return end
     refreshProfBar()
     shownRows = UI.pageRows()
+    -- GF-FIX-C (review low-26): the badge counts the rows just made (one rowsFor, not two).
+    local n = 0
+    for _, r in ipairs(shownRows) do if r.attention then n = n + 1 end end
+    UI.updateBadge(n)
     content:SetHeight(math.max(1, #shownRows * ROW_HEIGHT))
     UI.layoutRows()
     UI.emptyLine:SetText(#shownRows == 0 and "沒有訂單" or "") -- GF-002-D
@@ -723,7 +738,7 @@ local function build(p)
     content = CreateFrame("Frame", nil, scroll)
     content:SetSize(UI.ROW_WIDTH, 1)
     scroll:SetScrollChild(content)
-    scroll:HookScript("OnVerticalScroll", function() UI.layoutRows() end)
+    scroll:HookScript("OnVerticalScroll", function() UI.layoutRows(true) end)
     UI.historyButton = iconButton(p, ns.ICON, "history", "歷史", function() UI.showHistory() end, "歷史")
     UI.historyButton:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -250, 10)
     -- GF-006-C (R-9.4): paste a web order's import code.
@@ -1289,6 +1304,7 @@ end
 
 UI.PICKER_NAME = "GreenFangToolkit_RecipePicker"
 UI.PICKER_ROWS = 10
+UI.PICKER_DELAY = 0.15
 
 function UI.pickerRows(query)
     local index = ns.Recipes and ns.Recipes.index()
@@ -1338,7 +1354,12 @@ function UI.openPicker()
         box:SetPoint("TOPLEFT", f, "TOPLEFT", X + 6, -40)
         box:SetAutoFocus(true)
         box:SetMaxLetters(60)
-        box:SetScript("OnTextChanged", function(self) f.query = str(self:GetText()); UI.drawPicker() end)
+        -- GF-FIX-C (review high-3): the first key redraws at once; keys within
+        -- PICKER_DELAY make one more redraw at its end, with the latest text.
+        box:SetScript("OnTextChanged", function(self)
+            f.query = str(self:GetText())
+            ns.Recipes.soon("orders-picker", UI.PICKER_DELAY, function() if f:IsShown() then UI.drawPicker() end end)
+        end)
         box:SetScript("OnEscapePressed", function(self) self:ClearFocus(); f:Hide() end)
         box:SetScript("OnEnterPressed", function() local r = f.list and f.list[1]; if r then UI.pickRecipe(r) end end)
         f.search = box
@@ -1520,7 +1541,7 @@ function UI.scanButton() return scanButton end
 -- Minimap number (R-6.8)
 ---------------------------------------------------------------------------
 
-function UI.updateBadge()
+function UI.updateBadge(count)
     local b = ns.Framework.minimapButton
     if not b then return end
     if not b.ordersBadge then
@@ -1534,7 +1555,7 @@ function UI.updateBadge()
             if path then pcall(fs.SetFont, fs, path, size, "OUTLINE") end
         end
     end
-    local n = ns.guildState() == "target" and O().attentionCount() or 0
+    local n = ns.guildState() ~= "target" and 0 or count or O().attentionCount()
     b.ordersBadge:SetText(n > 0 and tostring(n) or "")
     UI.badgeCount = n
 end
