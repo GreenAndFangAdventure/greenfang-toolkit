@@ -2692,11 +2692,22 @@ test("D10 simple pages: no pending counts, scan details or GF Sync text on the r
     ns.Framework.open("settings")
     ns.Framework.open("recipes")
     ns.Framework.open("character")
-    for _, t in ipairs(wow.allTexts()) do
-        ok(not t:find("待上傳", 1, true), "pending count on a page: " .. t)
-        ok(not t:find("GF Sync", 1, true), "GF Sync text on a page: " .. t)
-        ok(not t:find("伺服器：", 1, true), "realm detail on a page: " .. t)
+    -- GF-UI-L (owner 2026-11-27: 主視窗看得出 GF Sync 狀態; claude-pm): the one
+    -- exception to D-014 point 6 is Framework.infoButton() (its text and tooltip);
+    -- every other widget on every page still has no GF Sync text.
+    local info = ns.Framework.infoButton()
+    ok(info and info:GetText():find("GF Sync", 1, true), "the exception is that one widget")
+    local others = 0
+    for _, o in ipairs(wow.allObjects()) do
+        local t = o._text
+        if o ~= info and type(t) == "string" and t ~= "" then
+            others = others + 1
+            ok(not t:find("待上傳", 1, true), "pending count on a page: " .. t)
+            ok(not t:find("GF Sync", 1, true), "GF Sync text on a page: " .. t)
+            ok(not t:find("伺服器：", 1, true), "realm detail on a page: " .. t)
+        end
     end
+    ok(others > 0, "the other widgets were checked")
 end)
 
 ---------------------------------------------------------------------------
