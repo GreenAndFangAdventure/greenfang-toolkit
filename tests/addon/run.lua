@@ -4796,6 +4796,10 @@ assert(loadfile(ROOT .. "/tests/addon/gfdev02_tests.lua"))()({ test = test, eq =
 -- GF-UI-M: 調貨看板's notes in full, the roster's bottom bar, the own portrait (tests/addon/gfuim_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gfuim_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-UI-N: adventure rows (編輯 icon, one column line, every slot), the quest picker, the 自動集料 card,
+-- unread / read notices, the dev notice preview in the real words (tests/addon/gfuin_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gfuin_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0

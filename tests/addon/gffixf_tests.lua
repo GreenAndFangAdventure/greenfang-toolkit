@@ -435,7 +435,7 @@ return function(T)
         ok(f and f:IsShown(), "the card opens next to the switch")
         eq(f.title._text, "自動集料說明", "title")
         local all = table.concat((function() local t = {} for i, fs in ipairs(f.lines) do t[i] = fs._text end return t end)(), "\n")
-        for _, word in ipairs({ "它會做什麼", "資料從哪來", "分享給公會什麼", "不會做什麼", "不公開整個背包", "不自動交易", "關掉後", "實驗功能", "預設關" }) do
+        for _, word in ipairs({ "會做什麼", "資料從哪來", "分享什麼", "不會做什麼", "不公開背包", "交易", "關掉", "實驗功能", "預設關" }) do
             ok(all:find(word, 1, true), "says: " .. word)
         end
         -- Every item of every usable rule, in the rule's order, nothing else.
@@ -447,7 +447,7 @@ return function(T)
         for _, row in ipairs(f.itemRows) do if row:IsShown() then got[#got + 1] = row.itemID end end
         eq(table.concat(got, ","), table.concat(want, ","), "the rows are the rule's items")
         eq(#got, 15, "荊棘谷書頁: 15 pages")
-        ok(f.itemRows[1].icon ~= nil and f.itemRows[1].count._text == Rules.list[1].chapters[1].items[1].label, "icon row with the page label")
+        ok(f.itemRows[1].icon ~= nil and f.itemRows[1].name._text == Rules.list[1].chapters[1].items[1].label, "icon row named by its page (GF-UI-N)")
         -- A rule added to the data shows up without touching the page.
         Rules.list[#Rules.list + 1] = { collectionID = "test_rule", num = 9, rulesVersion = 1, state = "experimental", title = "測試收集",
             perItemRequired = 1, chapters = { { questID = 1, title = "第一章", pages = { 1 } } },

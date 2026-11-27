@@ -610,17 +610,20 @@ function W.itemRow(parent, w, h)
         if row.icon.SetDesaturated then row.icon:SetDesaturated(row.placeholder) end
         row.iconPath = path
         row.loading = not info.loaded
-        row.name:SetText(info.loaded and info.name or (info.failed and W.TEXT.itemMissing) or W.TEXT.itemLoading)
-        local col = info.loaded and W.COLOR.white or W.COLOR.muted
+        -- GF-UI-N: opts.name (row.set) is shown instead of the item's own name.
+        row.name:SetText(row.fixedName or (info.loaded and info.name) or (info.failed and W.TEXT.itemMissing) or W.TEXT.itemLoading)
+        local col = (info.loaded or row.fixedName) and W.COLOR.white or W.COLOR.muted
         row.name:SetTextColor(col[1], col[2], col[3])
         if info.loaded or info.failed then waiting[row] = nil else waiting[row] = info.id end
         row.layout()
     end
 
     -- itemID, count (a number or a short text such as 「缺 1」), opts:
-    -- { sub = second line, countColor = W.COLOR key, stripe = list index }.
+    -- { sub = second line, countColor = W.COLOR key, stripe = list index,
+    --   name = a text shown instead of the item's name (GF-UI-N) }.
     function row.set(itemID, count, opts)
         opts = opts or {}
+        row.fixedName = (opts.name and opts.name ~= "") and opts.name or nil
         row.itemID = tonumber(itemID)
         if not row.itemID then waiting[row] = nil; row.info = nil; row:Hide(); return row end
         if count ~= nil and count ~= "" then

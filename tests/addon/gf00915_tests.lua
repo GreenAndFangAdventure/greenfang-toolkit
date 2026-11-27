@@ -393,11 +393,12 @@ return function(T)
         for _, fs in ipairs(f.lines) do all[#all + 1] = fs._text end
         all = table.concat(all, "\n")
         ok(not all:find("不讀銀行", 1, true), "no 不讀銀行")
-        for _, w in ipairs({ "材料袋", "銀行", "還沒收下的附件", "還沒看過", "不會分享", "只算身上＝只算行囊和材料袋",
-            "上次打開時看到的", "分享的餘料" }) do
+        -- GF-UI-N (owner: 「說明頁過度複雜」): five short lines; 全部／只算身上 is the switch's own tooltip.
+        for _, w in ipairs({ "材料袋", "銀行", "信箱", "不分享東西放在哪裡", "上次打開時看到的" }) do
             ok(all:find(w, 1, true), "says: " .. w)
         end
         eq(f.sub._text, UI.CARD_SUB.auto, "the joke stays on the card")
+        ok(UI.SHARE_TIP:find("只算身上＝行囊和材料袋", 1, true), "全部／只算身上 explained on the switch")
         ok(not UI.SWITCH_TIP.auto:find("不讀銀行", 1, true), "tooltip too")
     end))
 
