@@ -216,17 +216,33 @@ end
 ---------------------------------------------------------------------------
 
 -- activityType / destinationID of a ticket view. Zones are place names, not people.
+-- GF-016-T (T7): a member's view comes from the leader's forwarded text, so it is
+-- checked here as upload-api §8.1 has it: a dungeon code ^[a-z0-9]{1,12}$ (else
+-- "other"); quest ids whole numbers 1-9,999,999, at most 5 (the rest dropped; none
+-- left: "other"); a zone through Adv.cleanZone (40 characters).
+Events.QUEST_MAX_ID, Events.MAX_QUESTS = 9999999, 5
 function Events.destination(v)
     if v.dungeon then
-        local cat = ns.AdventureData and ns.AdventureData.category(v.dungeon) or "dungeon"
-        return cat == "raid" and "raid" or "dungeon", v.dungeon
+        local d = type(v.dungeon) == "string" and v.dungeon or ""
+        if #d < 1 or #d > 12 or d:find("[^a-z0-9]") then return "other", nil end
+        local cat = ns.AdventureData and ns.AdventureData.category(d) or "dungeon"
+        return cat == "raid" and "raid" or "dungeon", d
     end
     if v.quests and #v.quests > 0 then
-        local ids = {}
-        for _, q in ipairs(v.quests) do ids[#ids + 1] = tostring(q) end
+        local ids, seen = {}, {}
+        for _, q in ipairs(v.quests) do
+            local s = tostring(q)
+            local n = s:match("^%d+$") and tonumber(s)
+            if n and n >= 1 and n <= Events.QUEST_MAX_ID and not seen[n] and #ids < Events.MAX_QUESTS then
+                seen[n] = true
+                ids[#ids + 1] = tostring(n)
+            end
+        end
+        if #ids == 0 then return "other", nil end
         return "quest", "q:" .. table.concat(ids, ".")
     end
-    if v.zone then return "zone", "z:" .. v.zone end
+    local z = v.zone and ns.Adventure and ns.Adventure.cleanZone(v.zone) or nil
+    if z then return "zone", "z:" .. z end
     return "other", nil
 end
 
@@ -493,7 +509,14 @@ function Events.onReopen(oldId, newId, t)
                 and (not target or (ev.observedAt or 0) > (target.observedAt or 0)) then target = ev end
         end
     end
-    if target and not target.reopenOf then target.reopenOf = oldId end
+    -- GF-016-T (T4, upload-api §8): reopenOf changes the event, so it is a new revision
+    -- (the site has no same-revision exception for it): a correction, sent again.
+    if target and not target.reopenOf then
+        target.reopenOf = oldId
+        target.change, target.revision, target.revisedAt = "correction", target.revision + 1, t
+        if target.status == "revoked" then target.change = "revocation" end
+        enqueue(s, target, t)
+    end
 end
 
 ---------------------------------------------------------------------------
