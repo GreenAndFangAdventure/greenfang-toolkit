@@ -401,7 +401,15 @@ end
 -- changed. The AddOn cannot see programs: the one sign of GF Sync it can see
 -- is GreenFangToolkit_Inbox (WebOrders.gfSyncSignal), which GF Sync writes
 -- only with web orders on (off by default), so 沒偵測到 never means 沒安裝.
+--
+-- GF-UI-L-2 (owner, 2026-11-27): GF Sync leaves no sign in the game folder
+-- in normal use, so nearly everyone would see 沒偵測到. 0.16.10 shows the
+-- version alone: with SHOW_SYNC_STATUS false the main window never reads the
+-- signal (not on open, not on hover) and has no GF Sync text. 同步與診斷
+-- still shows its 「GF Sync 偵測」 line. Set it true (when a reliable signal
+-- exists, e.g. the site's guild summary file) to get GF-UI-L back.
 ---------------------------------------------------------------------------
+F.SHOW_SYNC_STATUS = false
 F.INFO_GAP = 16      -- at least this much between the last sub-tab and the text
 F.INFO_RIGHT = 10    -- from the row's right end (where the line under it ends)
 F.infoReads = 0      -- signal reads (tests: only on open / hover / 同步與診斷)
@@ -463,14 +471,19 @@ function F.gfSyncDiagText()
 end
 
 -- The text that fits between the last sub-tab and the row's right end: the
--- whole line, else without the bracket, else the version alone.
+-- version, or nothing. With SHOW_SYNC_STATUS: the whole line, else without
+-- the bracket, else the version alone.
 local function placeInfo()
     local b = window and window.info
-    if not (b and b.sig) then return nil end
+    if not b then return nil end
+    local sync = F.SHOW_SYNC_STATUS
+    if sync and not b.sig then return nil end
     local room = F.PANEL_WIDTH - F.INFO_RIGHT - (window.subTabsRight or 0) - F.INFO_GAP
     local v = F.versionText()
     local text = ""
-    for _, t in ipairs({ v .. "｜" .. F.gfSyncText(b.sig), v .. "｜" .. F.gfSyncText(b.sig, true), v }) do
+    local tries = { v }
+    if sync then tries = { v .. "｜" .. F.gfSyncText(b.sig), v .. "｜" .. F.gfSyncText(b.sig, true), v } end
+    for _, t in ipairs(tries) do
         if ns.labelWidth(t) <= room then text = t; break end
     end
     if text ~= b.gfText then
@@ -487,9 +500,11 @@ local function showInfoTip(self)
     F.refreshInfo()
     GameTooltip:SetOwner(self, "ANCHOR_BOTTOMLEFT")
     GameTooltip:AddLine("綠皮冒險工具箱 " .. F.versionText())
-    GameTooltip:AddLine(F.gfSyncText(self.sig))
-    local c = ns.Theme.C.sub
-    for _, line in ipairs(F.gfSyncTip(self.sig)) do GameTooltip:AddLine(line, c[1], c[2], c[3], true) end
+    if F.SHOW_SYNC_STATUS then
+        GameTooltip:AddLine(F.gfSyncText(self.sig))
+        local c = ns.Theme.C.sub
+        for _, line in ipairs(F.gfSyncTip(self.sig)) do GameTooltip:AddLine(line, c[1], c[2], c[3], true) end
+    end
     GameTooltip:AddLine(F.GFSYNC_CLICK)
     GameTooltip:Show()
 end
@@ -516,11 +531,12 @@ local function infoButton()
     return b
 end
 
--- Read the signal again and redraw if it changed (window open, hover).
+-- Redraw if it changed (window open, hover); reads the signal only with
+-- SHOW_SYNC_STATUS.
 function F.refreshInfo()
     if not window then return nil end
     local b = infoButton()
-    b.sig = F.gfSyncSignal()
+    b.sig = F.SHOW_SYNC_STATUS and F.gfSyncSignal() or nil
     return placeInfo()
 end
 function F.infoButton() return window and window.info or nil end
@@ -623,7 +639,7 @@ end
 function F.open(id)
     local def = F.select(id)
     window:Show()
-    F.refreshInfo() -- GF-UI-L: the GF Sync signal, once per opening
+    F.refreshInfo() -- GF-UI-L: the version (+ the GF Sync signal if SHOW_SYNC_STATUS), once per opening
     return def
 end
 

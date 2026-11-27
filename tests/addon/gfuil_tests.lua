@@ -1,5 +1,8 @@
 -- GF-UI-L: the version and the GF Sync signal at the right end of the main
 -- window's sub-tab row. Offline only; made-up names only.
+-- GF-UI-L-2 (owner 2026-11-27): by default (Framework.SHOW_SYNC_STATUS false)
+-- the main window shows the version alone and never reads the signal; the
+-- 「GF Sync：…」 tests below turn the switch on (sync()) to keep that path tested.
 
 return function(T)
     local test, eq, ok, wow, ADDON_DIR = T.test, T.eq, T.ok, T.wow, T.ADDON_DIR
@@ -14,7 +17,7 @@ return function(T)
     -- A made-up Inbox string with H.at = at (only the header matters here).
     local function inbox(at) return "GFIN1~abc~sig~H;realm=x;guild=y;at=" .. at .. ";n=0" end
 
-    local function withInbox(value, exists, fn)
+    local function withInbox(value, exists, fn, sync)
         return function()
             local oldG, oldC, oldInfo = _G.GreenFangToolkit_Inbox, C_AddOns, rawget(_G, "GetAddOnInfo")
             local okRun, err = pcall(function()
@@ -24,12 +27,16 @@ return function(T)
                 if exists ~= nil then
                     C_AddOns.DoesAddOnExist = function(name) return name == "GreenFangToolkit_Inbox" and exists end
                 end
+                if sync then ns.Framework.SHOW_SYNC_STATUS = true end
                 fn(ns)
             end)
             _G.GreenFangToolkit_Inbox, C_AddOns, _G.GetAddOnInfo = oldG, oldC, oldInfo
             if not okRun then error(err, 0) end
         end
     end
+
+    -- The same, with Framework.SHOW_SYNC_STATUS on (the GF-UI-L behaviour).
+    local function withSync(value, exists, fn) return withInbox(value, exists, fn, true) end
 
     local function mainWindow(ns)
         for _, f in ipairs(ns.Theme.fitFrames) do if f.gfFitMain then return f end end
@@ -50,15 +57,14 @@ return function(T)
             F.open(e.pages[1].id)
             local b = F.infoButton()
             ok(b and b:IsShown(), e.key .. ": shown")
-            ok(b:GetText():find("v" .. ns.VERSION, 1, true) == 1, e.key .. ": starts with the version: " .. b:GetText())
+            eq(b:GetText(), "v" .. ns.VERSION, e.key .. ": the version alone")
         end
         local p = F.infoButton()._points[1]
         eq(p[1], "TOPRIGHT", "anchored at the row's right end")
         eq(p[4], -F.INFO_RIGHT, "where the line under the row ends")
     end)
 
-    test("GF-UI-L version: never overlaps the sub-tabs; shortens, then hides, when they need the room", function()
-        local ns = login()
+    local function noOverlap(ns)
         local F = ns.Framework
         for _, e in ipairs(F.entries()) do
             F.open(e.pages[1].id)
@@ -70,6 +76,27 @@ return function(T)
             local left = F.PANEL_WIDTH - F.INFO_RIGHT - ns.labelWidth(info:GetText())
             ok(left - right >= F.INFO_GAP, e.key .. ": a gap of 16 px (" .. left .. " vs " .. right .. ")")
         end
+    end
+
+    test("GF-UI-L-2 version: never overlaps the sub-tabs; hides when they need the room", function()
+        local ns = login()
+        local F = ns.Framework
+        noOverlap(ns)
+        local info = F.infoButton()
+        local win = mainWindow(ns)
+        local v = F.versionText()
+        local room = F.PANEL_WIDTH - F.INFO_RIGHT - F.INFO_GAP - ns.labelWidth(v)
+        win.subTabsRight = room
+        eq(F.placeInfo(), v, "just fits")
+        ok(info:IsShown(), "shown")
+        win.subTabsRight = room + 1
+        eq(F.placeInfo(), "", "no room")
+        ok(not info:IsShown(), "no room at all: hidden")
+    end)
+
+    test("GF-UI-L sync on: never overlaps the sub-tabs; shortens, then hides, when they need the room", withSync(nil, false, function(ns)
+        local F = ns.Framework
+        noOverlap(ns)
         -- Many tabs: the bracket goes first, then everything but the version, then all.
         local info = F.infoButton()
         info.sig = { state = "seen", why = "inbox", at = os.time() }
@@ -87,7 +114,37 @@ return function(T)
             eq(F.placeInfo(), c[2], "room after the tabs at " .. c[1])
         end
         ok(not info:IsShown(), "no room at all: hidden")
-    end)
+    end))
+
+    test("GF-UI-L-2 default: no GF Sync text or read on open / hover, even with an Inbox list", withInbox(inbox(1), true, function(ns)
+        local F = ns.Framework
+        eq(F.SHOW_SYNC_STATUS, false, "off by default")
+        local reads = F.infoReads
+        for _, e in ipairs(F.entries()) do
+            F.open(e.pages[1].id)
+            local b = F.infoButton()
+            ok(not b:GetText():find("GF Sync", 1, true), e.key .. ": " .. b:GetText())
+        end
+        local b = F.infoButton()
+        b:GetScript("OnEnter")(b)
+        local tip = tipText()
+        ok(not tip:find("GF Sync", 1, true), tip)
+        ok(not tip:find("依據", 1, true), "no 依據 line")
+        ok(tip:find("綠皮冒險工具箱 v" .. ns.VERSION, 1, true), "the version on the first line")
+        ok(tip:find(F.GFSYNC_CLICK, 1, true), "says the click")
+        eq(F.infoReads, reads, "the signal is never read for the main window")
+        eq(b.sig, nil, "no signal kept")
+        ok(b._scripts.OnUpdate == nil, "no OnUpdate")
+        eq(next(b._events), nil, "no events")
+        -- The click still opens 同步與診斷, which keeps its GF Sync line.
+        b:GetScript("OnClick")(b)
+        ok(ns.Diag.isShown(), "opened")
+        local found
+        for i, h in ipairs(ns.Diag.heads()) do
+            if h:GetText() == "GF Sync 偵測" then found = ns.Diag.lines()[i]:GetText() end
+        end
+        ok(found and found:find("GF Sync：已偵測到", 1, true), tostring(found))
+    end))
 
     test("GF-UI-L 4:3: the text is inside the main window, so Theme.fit scales it with the tabs", function()
         local ns = login()
@@ -108,7 +165,7 @@ return function(T)
         Th.refit()
     end)
 
-    test("GF-UI-L GF Sync: no AddOn list on this client = 無法判斷, never 沒偵測到", withInbox(nil, nil, function(ns)
+    test("GF-UI-L sync on: no AddOn list on this client = 無法判斷, never 沒偵測到", withSync(nil, nil, function(ns)
         local F = ns.Framework
         local sig = ns.WebOrders.gfSyncSignal()
         eq(sig.state, "unknown", "state")
@@ -122,7 +179,7 @@ return function(T)
         ok(tip:find(F.GFSYNC_CLICK, 1, true), "says the click")
     end))
 
-    test("GF-UI-L GF Sync: no Inbox AddOn = 沒偵測到, and the tooltip says why that is not 沒安裝", withInbox(nil, false, function(ns)
+    test("GF-UI-L sync on: no Inbox AddOn = 沒偵測到, and the tooltip says why that is not 沒安裝", withSync(nil, false, function(ns)
         local F = ns.Framework
         F.open("roster")
         eq(F.infoButton():GetText(), F.versionText() .. "｜GF Sync：沒偵測到", "text")
@@ -143,7 +200,7 @@ return function(T)
         eq(W.gfSyncSignal().state, "unknown", "an error = cannot tell")
     end))
 
-    test("GF-UI-L GF Sync: the Inbox folder without a list = 已偵測到（尚無清單）, not running", withInbox(nil, true, function(ns)
+    test("GF-UI-L sync on: the Inbox folder without a list = 已偵測到（尚無清單）, not running", withSync(nil, true, function(ns)
         local F = ns.Framework
         F.open("roster")
         eq(F.infoButton():GetText(), F.versionText() .. "｜GF Sync：已偵測到（尚無清單）", "text")
@@ -151,7 +208,7 @@ return function(T)
         ok(tipText():find(F.GFSYNC_SEEN_NOTE, 1, true), "not proof that it runs now")
     end))
 
-    test("GF-UI-L GF Sync: an Inbox string = 已偵測到 with the list time (月-日 時:分, local)", withInbox(nil, true, function(ns)
+    test("GF-UI-L sync on: an Inbox string = 已偵測到 with the list time (月-日 時:分, local)", withSync(nil, true, function(ns)
         local F, W = ns.Framework, ns.WebOrders
         local at = ns.Share.serverNow() - 3600
         _G.GreenFangToolkit_Inbox = inbox(at)
@@ -169,7 +226,7 @@ return function(T)
         end
     end))
 
-    test("GF-UI-L click opens 同步與診斷, which has the same line", withInbox(nil, false, function(ns)
+    test("GF-UI-L sync on: click opens 同步與診斷, which has the same line", withSync(nil, false, function(ns)
         local F = ns.Framework
         F.open("roster")
         ok(not ns.Diag.isShown(), "closed")
@@ -182,7 +239,7 @@ return function(T)
         ok(found and found:find("GF Sync：沒偵測到", 1, true) and found:find("沒偵測到不代表沒安裝", 1, true), tostring(found))
     end))
 
-    test("GF-UI-L performance: read on open / hover only; no OnUpdate, no event; unchanged = no SetText", withInbox(nil, false, function(ns)
+    test("GF-UI-L sync on: performance: read on open / hover only; no OnUpdate, no event; unchanged = no SetText", withSync(nil, false, function(ns)
         local F = ns.Framework
         F.open("roster")
         local b = F.infoButton()
@@ -205,7 +262,7 @@ return function(T)
         b.SetText = orig
     end))
 
-    test("GF-UI-L privacy: the line and the tooltip have no GUID, account or path", withInbox(nil, false, function(ns)
+    test("GF-UI-L sync on: privacy: the line and the tooltip have no GUID, account or path", withSync(nil, false, function(ns)
         local F = ns.Framework
         F.open("roster")
         F.infoButton():GetScript("OnEnter")(F.infoButton())
