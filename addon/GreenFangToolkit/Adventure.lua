@@ -265,6 +265,16 @@ function Adv.slotsFromLegacy(tm, s, e, cr)
     if s then return { { id = 1, s = s, d = (e and e > s) and (e - s) or nil } } end
     return {}
 end
+-- GF-FIX-D (review 低-24): the day of a server time on the player's clock
+-- (as the page shows it), not the UTC day (Taiwan: before 08:00 was the day before).
+function Adv.localDay(t)
+    local tn = ns.now()
+    local skew = (ns.num((ns.call(GetServerTime))) or tn) - tn
+    local okD, d = pcall(date, "*t", t - skew)
+    if okD and type(d) == "table" and d.year and d.yday then return d.year * 1000 + d.yday end
+    return math.floor(t / 86400)
+end
+
 -- The single time 0.12.x reads (tm / s / e) from the main slot.
 function Adv.legacyTime(slots, fx, t)
     local main
@@ -272,7 +282,7 @@ function Adv.legacyTime(slots, fx, t)
     main = main or slots[1]
     if not main then return "n", nil, nil end
     if main.now then return "n", nil, main.d and (main.s + main.d) or nil end
-    local tm = math.floor(main.s / 86400) == math.floor((t or now()) / 86400) and "t" or "f"
+    local tm = Adv.localDay(main.s) == Adv.localDay(t or now()) and "t" or "f"
     return tm, main.s, main.s + (main.d or 3600)
 end
 
@@ -328,7 +338,10 @@ function Adv.encodeQuestNames(qs, log)
 end
 function Adv.decodeQuestNames(s)
     local out = {}
-    for id, name in str(s):gmatch("(%d+):([^;]*)") do out[tonumber(id)] = name end
+    for id, name in str(s):gmatch("(%d+):([^;]*)") do
+        name = Adv.shownText(name) -- GF-FIX-D (review 中-3)
+        if name ~= "" then out[tonumber(id)] = name end
+    end
     return out
 end
 
@@ -348,7 +361,10 @@ function Adv.encodeZones(list)
 end
 function Adv.decodeZones(s)
     local out = {}
-    for z in str(s):gmatch("[^;]+") do out[#out + 1] = z end
+    for z in str(s):gmatch("[^;]+") do
+        z = Adv.shownText(z) -- GF-FIX-D (review 中-3)
+        if z ~= "" then out[#out + 1] = z end
+    end
     return out
 end
 -- The zones of these quests in my log (R-17.21: what a worker ticket's quests are about).
@@ -370,6 +386,14 @@ function Adv.encodeGroupQuests(qs, log)
         if info and Adv.isGroupQuest(id, info) then out[#out + 1] = tostring(id) end
     end
     return #out > 0 and table.concat(out, ".") or nil
+end
+
+-- GF-FIX-D (review 中-3): text another member wrote (a note, quest and zone
+-- names), before it is kept in a view or shown: no "|" sequences (|T textures,
+-- |H links, |c colours), no control characters, at most NOTE_MAX characters
+-- (the field contract: R-10.2). My own writing is unchanged (cleanNote).
+function Adv.shownText(s)
+    return Adv.cleanNote(ns.cleanText(s, Adv.NOTE_MAX * 4))
 end
 
 -- R-10.2: one short line: no control characters or line breaks, at most 40 characters.
@@ -477,11 +501,11 @@ function Adv.view(t, leader, actions, opts)
     if not fx and t.st == "g" and single then fx = single end -- 組隊 on a one-slot ticket fixes it
     local v = { id = t.id, leader = leader, src = t.src or "g", created = t.cr or 0, dungeon = t.ds ~= "" and t.ds or nil,
         quests = splitDots(t.qs), questLevels = Adv.decodeQuestLevels(t.ql), tags = t.tg or 0,
-        note = t.nt, mode = t.md or "a", state = "open", members = {}, waitlist = {}, pending = {}, invited = {},
+        note = (t.nt and t.nt ~= "") and Adv.shownText(t.nt) or t.nt, mode = t.md or "a", state = "open", members = {}, waitlist = {}, pending = {}, invited = {},
         kicked = {}, level = t.lv, leaderRole = t.lr, edited = t.ed, slots = slots, slotById = byId, workerGone = {},
         questNames = Adv.decodeQuestNames(t.qn),
         -- GF-002-J (R-17.20, R-17.22): the zone of a quest ticket; its group / elite quests.
-        zone = (t.zn and t.zn ~= "") and t.zn or nil, groupQuests = {},
+        zone = (t.zn and t.zn ~= "" and Adv.shownText(t.zn) ~= "") and Adv.shownText(t.zn) or nil, groupQuests = {},
         -- GF-002-G: roles / size as the leader set them (the editor starts from these).
         roles = t.ds ~= "" and { t = t.rt or 1, h = t.rh or 1, d = t.rd or 3 } or nil, size = t.sz }
     for _, q in ipairs(splitDots(t.qe)) do v.groupQuests[tonumber(q) or q] = true end
@@ -794,12 +818,28 @@ function Adv.all()
     return views
 end
 function Adv.get(id) return Adv.all()[id] end
-function Adv.refresh() cache.version = -1 end
+-- GF-FIX-D (review 中-10, 低-26): workers() and rowsFor() are worked out once per
+-- change and shared (the badge, the page, markSeen, WorkerMatch). A result is
+-- kept only while nothing it reads changed: the ledger (led.version), the roster
+-- (online, levels: Roster.version), what this computer keeps (seen, reopen,
+-- deleted: Adv.touch()), my quest log and level, and the server second. Any
+-- change makes the very next call work it out again: nothing waits.
+local rowsCache, workersCache = {}, {}
+local localRev = 0
+Adv.rowsStats = { computed = 0, workers = 0 }
+function Adv.touch() localRev = localRev + 1 end
+function Adv.refresh() cache.version = -1; localRev = localRev + 1 end
+local function rosterVersion() return ns.Roster and ns.Roster.version or 0 end
 
 -- Worker tickets: { [author] = { entry, slots, dungeons set, quests set } }.
 function Adv.workers()
-    local out = {}
     local t = now()
+    local wc = workersCache
+    if wc.out and wc.version == led.version and wc.roster == rosterVersion() and wc.rev == localRev and wc.at == t then
+        return wc.out
+    end
+    Adv.rowsStats.workers = Adv.rowsStats.workers + 1
+    local out = {}
     for _, a in ipairs(led:authors()) do
         local e = listOf(a, "W")[1]
         if e and e.st ~= "x" and (e.ex or 0) > t then
@@ -816,6 +856,7 @@ function Adv.workers()
                 expires = e.ex, zoneList = zl, zones = zones, wholeZones = whole }
         end
     end
+    wc.out, wc.version, wc.roster, wc.rev, wc.at = out, led.version, rosterVersion(), localRev, t
     return out
 end
 
@@ -1342,7 +1383,12 @@ end
 
 -- R-5.2: quests that left my log (done, abandoned) are removed from my worker ticket.
 -- GF-002-I (R-17.18, spec §17.6): so are quests whose objectives are complete (ready to turn in).
-function Adv.syncQuests(logSet)
+-- GF-FIX-D (review 中-12): an unknown log (not loaded yet: empty, nothing seen in
+-- it this session, no quest removed or turned in) removes nothing and sends nothing.
+-- known = questLog()'s third value; without it, an empty set must be known loaded.
+function Adv.syncQuests(logSet, known)
+    if type(logSet) ~= "table" then return false end
+    if known == false or (known == nil and next(logSet) == nil and not Adv.questLogKnown()) then return false end
     local w = Adv.myWorker()
     if not w or w.allQuests or w.closed then return false end
     local kept, changed = {}, false
@@ -1618,7 +1664,7 @@ function Adv.reopen(id)
     if newId then events("onReopen", id, newId) end -- GF-013
     return newId, why
 end
-function Adv.dismissReopen(id) Adv.local_().reopen[id] = nil end
+function Adv.dismissReopen(id) Adv.local_().reopen[id] = nil; Adv.touch() end
 
 -- Every minute: finish my timed tickets whose time is over, prune old ones (R-4.8, R-4.9, R-9.4).
 function Adv.maintain()
@@ -1681,8 +1727,10 @@ function Adv.maintain()
     local seen = Adv.local_().seen
     for key in pairs(seen) do
         local id = key:match("^(.-)|")
-        if id and id ~= "w" and not views[id] and not id:match("^m") then seen[key] = nil end
+        -- GF-FIX-D (review 中-11): "m<ticket id>|<worker>" (a matching worker) goes with its ticket too.
+        if id and id ~= "w" and not views[id] and not (id:match("^m") and views[id:sub(2)]) then seen[key] = nil end
     end
+    Adv.touch() -- GF-FIX-D: seen / deleted / reopen may have changed
     -- GF-013: the background event record looks at every ticket I lead or joined
     -- (成團 / 過期 / 未成行 happen by themselves, not by a click).
     events("observeAll", Adv.all(), t)
@@ -1770,8 +1818,67 @@ function Adv.reminder(v, t)
     return nil
 end
 
+-- GF-FIX-D (review 高-4): the quest log is read once per change of the log, not
+-- on every call. The game says when it changes (QUEST_LOG_UPDATE, QUEST_ACCEPTED,
+-- QUEST_REMOVED, QUEST_TURNED_IN, UNIT_QUEST_LOG_CHANGED, PLAYER_LEVEL_UP for the
+-- levels of scaling quests): the next call reads it again, so a change shows at
+-- once. Each call still asks for the number of entries, and a different number
+-- (or a different quest API) reads it again too. If the four quest events cannot
+-- be registered, nothing is kept: every call reads the log.
+-- 中-12: the log counts as loaded (known) once a read found a quest, or a quest
+-- was removed or turned in; before that an empty log is "unknown", not "empty".
+local qlog = { dirty = true, watched = false, loaded = false }
+Adv.questLogStats = { reads = 0 }
+do
+    local okF, f = pcall(CreateFrame, "Frame")
+    if okF and f then
+        local all = true
+        for _, e in ipairs({ "QUEST_LOG_UPDATE", "QUEST_ACCEPTED", "QUEST_REMOVED", "QUEST_TURNED_IN" }) do
+            if not pcall(f.RegisterEvent, f, e) then all = false end
+        end
+        for _, e in ipairs({ "UNIT_QUEST_LOG_CHANGED", "PLAYER_LEVEL_UP" }) do pcall(f.RegisterEvent, f, e) end
+        f:SetScript("OnEvent", function(_, event, unit)
+            if event == "UNIT_QUEST_LOG_CHANGED" and unit ~= nil and unit ~= "player" then return end
+            qlog.dirty = true
+            if event == "QUEST_REMOVED" or event == "QUEST_TURNED_IN" then qlog.loaded = true end
+        end)
+        qlog.watched = all
+        Adv.questLogFrame = f
+    end
+end
+-- Read the log again on the next call (tests; anything that knows it changed).
+function Adv.questLogChanged() qlog.dirty = true end
+-- Is my quest log known to be loaded (中-12)?
+function Adv.questLogKnown() return qlog.loaded end
+
 -- My quest log as a set of quest IDs (R-4.1, R-5.1). nil when the client cannot tell.
+-- Returns set, found (a quest in it), known (中-12: the log is loaded; an empty set
+-- that is not known means "not filled yet"). The set is shared: read it, never change it.
 function Adv.questLog()
+    local api, getInfo, n
+    if type(C_QuestLog) == "table" and type(C_QuestLog.GetNumQuestLogEntries) == "function" and type(C_QuestLog.GetInfo) == "function" then
+        api, getInfo = C_QuestLog, C_QuestLog.GetInfo
+        n = ns.num((ns.call(C_QuestLog.GetNumQuestLogEntries))) or 0
+    elseif type(GetNumQuestLogEntries) == "function" and type(GetQuestLogTitle) == "function" then
+        api = "classic"
+        n = ns.num((ns.call(GetNumQuestLogEntries))) or 0
+    else
+        qlog.set = nil
+        return nil
+    end
+    if qlog.watched and not qlog.dirty and qlog.set and qlog.api == api and qlog.getInfo == getInfo and qlog.n == n then
+        return qlog.set, qlog.found, qlog.found or qlog.loaded
+    end
+    local set, found = Adv.readQuestLog()
+    if not set then qlog.set = nil; return nil end
+    if found then qlog.loaded = true end
+    qlog.set, qlog.found, qlog.api, qlog.getInfo, qlog.n, qlog.dirty = set, found, api, getInfo, n, false
+    return set, found, found or qlog.loaded
+end
+
+-- The whole log, read now (Adv.questLog keeps the result).
+function Adv.readQuestLog()
+    Adv.questLogStats.reads = Adv.questLogStats.reads + 1
     local set = {}
     local found = false
     local zone -- GF-002-H (R-16.27): the quest log's zone header above each quest
@@ -1837,10 +1944,25 @@ function Adv.rowsFor()
     local my = me()
     if not my then return {}, {}, 0 end
     local t = now()
+    local log = Adv.questLog()
+    local level = Adv.myLevel()
+    local rc = rowsCache
+    if rc.tickets and rc.version == led.version and rc.roster == rosterVersion() and rc.rev == localRev
+        and rc.at == t and rc.me == my and rc.log == log and rc.level == level then
+        return rc.tickets, rc.matched, rc.count
+    end
+    local tickets, matched, count = Adv.computeRows(my, t, log)
+    rc.tickets, rc.matched, rc.count = tickets, matched, count
+    rc.version, rc.roster, rc.rev, rc.at, rc.me, rc.log, rc.level = led.version, rosterVersion(), localRev, t, my, log, level
+    return tickets, matched, count
+end
+
+-- The rows, worked out now (Adv.rowsFor keeps the result).
+function Adv.computeRows(my, t, log)
+    Adv.rowsStats.computed = Adv.rowsStats.computed + 1
     local seen = Adv.local_().seen
     local workers = Adv.workers()
     local myWorker = workers[my]
-    local log = Adv.questLog()
     local tickets, count = {}, 0
     local deleted = Adv.local_().deleted
     for _, v in pairs(Adv.all()) do
@@ -1913,6 +2035,7 @@ function Adv.markSeen()
     local tickets, matched = Adv.rowsFor()
     for _, r in ipairs(tickets) do if r.attention and not r.attention.decide then seen[r.attention.key] = true end end
     for _, r in ipairs(matched) do if r.attention then seen[r.attention.key] = true end end
+    localRev = localRev + 1
 end
 
 -- R-11.3: the most wanted destination and the role it lacks.
@@ -2349,7 +2472,7 @@ function Adv.uploadFor(a)
         for _, sl in ipairs(Adv.workerSlots(w)) do
             if sl.now then times[#times + 1] = { id = sl.id, mode = "now", from = sl.s, length = sl.d }
             else
-                local today = math.floor(sl.s / 86400) == math.floor(t / 86400)
+                local today = Adv.localDay(sl.s) == Adv.localDay(t)
                 times[#times + 1] = { id = sl.id, mode = today and "today" or "future", from = sl.s,
                     to = sl.s + (sl.d or Adv.SLACK), length = sl.d }
             end
@@ -2442,6 +2565,21 @@ function Adv.inviteList(v)
 end
 
 local inviteQueue = {}
+-- GF-FIX-D (review 低-24): a refused invitation (a protected call) gives no error
+-- to pcall; the client sends ADDON_ACTION_BLOCKED / ADDON_ACTION_FORBIDDEN instead.
+-- Either one during 組隊's loop (or false back from the call) stops it: the rest wait
+-- for one click each (下一位). Registered with pcall; without them it is as before.
+local inviteBlocked = false
+do
+    local okF, f = pcall(CreateFrame, "Frame")
+    if okF and f then
+        for _, e in ipairs({ "ADDON_ACTION_BLOCKED", "ADDON_ACTION_FORBIDDEN" }) do pcall(f.RegisterEvent, f, e) end
+        f:SetScript("OnEvent", function(_, _, addon)
+            if addon == nil or addon == "GreenFangToolkit" then inviteBlocked = true end
+        end)
+        Adv.blockedFrame = f
+    end
+end
 -- From a button click. Tries to invite everyone; when the client refuses
 -- (protected, not verified on 16001), the rest wait for one click each.
 function Adv.form(id)
@@ -2460,8 +2598,9 @@ function Adv.form(id)
     local n = 0
     inviteQueue = {}
     for i, name in ipairs(names) do
-        local ok = pcall(invite, name)
-        if ok then n = n + 1 else
+        inviteBlocked = false
+        local ok, res = pcall(invite, name)
+        if ok and res ~= false and not inviteBlocked then n = n + 1 else
             for j = i, #names do inviteQueue[#inviteQueue + 1] = names[j] end
             break
         end
@@ -2479,6 +2618,8 @@ function Adv.pendingInvites() return inviteQueue end
 
 function Adv.resetSession()
     cache = { version = -1 }
+    rowsCache, workersCache = {}, {}
+    localRev = localRev + 1
     for k in pairs(offlineSince) do offlineSince[k] = nil end
     inviteQueue = {}
     here = nil

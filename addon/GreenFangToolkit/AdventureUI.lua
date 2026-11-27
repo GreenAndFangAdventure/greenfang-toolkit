@@ -62,10 +62,14 @@ local function rawMarkup(path, size)
     end
     return "|T" .. path .. ":" .. tostring(size) .. "|t"
 end
+UI.MAX_SLOTS = 10 -- seat icons on a row (more: the numbers per role, R-17.16)
 local function tex(key, size)
     local g = UI.GAME[key]
     if g then return ns.GameIcons.markup(g, size or 18) end -- GF-002-I: inline icons at least 16 px
-    return rawMarkup(UI.ICON[key] or key, size or 18)
+    -- GF-FIX-D (review 美術): a file the client does not have draws nothing, not a green box.
+    local path = UI.ICON[key] or key
+    if not ns.GameIcons.has(path) then return "" end
+    return rawMarkup(path, size or 18)
 end
 UI.tex = tex
 UI.BUTTON_ICON = ns.BUTTON_H - 10 -- GF-002-J: icons inside a text button: at most its height - 8
@@ -88,23 +92,45 @@ UI.setIcon = setIcon
 ---------------------------------------------------------------------------
 
 -- Seconds the server clock is ahead of the local one.
-function UI.skew() return (ns.num((ns.call(GetServerTime))) or ns.now()) - ns.now() end
+-- GF-FIX-D (review 低-23): asked once per second of the local clock (both clocks
+-- count whole seconds, so the difference cannot change in between).
+local skewAt, skewValue
+function UI.skew()
+    local t = ns.now()
+    if skewAt ~= t or skewValue == nil then
+        skewValue = (ns.num((ns.call(GetServerTime))) or t) - t
+        skewAt = t
+    end
+    return skewValue
+end
+
+-- GF-FIX-D (review 中-13): date() gives nil (or an error) for a time it cannot
+-- show (Windows: past the year 3000). Never an error here: nil instead.
+function UI.date(fmt, t)
+    if type(t) ~= "number" then return nil end
+    local okD, r = pcall(date, fmt, t)
+    if okD then return r end
+    return nil
+end
+-- A date table, for my own times (pickers, the calendar): today's when t cannot be shown.
+local function dateTable(t) return UI.date("*t", t) or date("*t") end
 
 -- Local "HH:MM" of a server time (R-4.2: stored as server time, shown local).
 function UI.clock(t)
     if not t then return "" end
-    return date("%H:%M", t - UI.skew())
+    return UI.date("%H:%M", t - UI.skew()) or ""
 end
 -- GF-002-F (owner: 「未來日期要包含年」): "2026/11/25".
 function UI.day(t)
     if not t then return "" end
-    return date("%Y/%m/%d", t - UI.skew())
+    return UI.date("%Y/%m/%d", t - UI.skew()) or ""
 end
 UI.WEEKDAY = { "日", "一", "二", "三", "四", "五", "六" }
 -- "2026/11/25（三）"
 function UI.dayText(t)
     if not t then return "" end
-    local d = date("*t", t - UI.skew())
+    local d = UI.date("*t", t - UI.skew())
+    if type(d) ~= "table" or not UI.WEEKDAY[d.wday] then return UI.day(t) end
     return UI.day(t) .. "（" .. UI.WEEKDAY[d.wday] .. "）"
 end
 
@@ -112,7 +138,8 @@ end
 function UI.dayStart(dayOff, t)
     local skew = UI.skew()
     local localT = (t or S().serverNow()) - skew
-    local d = date("*t", localT)
+    local d = UI.date("*t", localT)
+    if type(d) ~= "table" then return localT - localT % 86400 + (dayOff or 0) * 86400 + skew end
     local midnight = localT - (d.hour * 3600 + d.min * 60 + d.sec)
     return midnight + (dayOff or 0) * 86400 + skew
 end
@@ -169,21 +196,27 @@ function UI.timeText(v)
 end
 
 -- GF-002-C item 2: one entry per seat, in role order: { role, filled }.
+-- GF-FIX-D (review 高-5, a second guard after the decode's limits): the seats are
+-- counted first; more than MAX_SLOTS (the row shows numbers then) builds no list.
+-- Returns the list (empty when over) and the number of seats.
 function UI.slotList(v)
     local out = {}
+    local total = 0
+    if v.capacity.any then total = ns.num(v.capacity.any) or 0
+    else for _, r in ipairs(A().ROLES) do total = total + (ns.num(v.capacity[r]) or 0) end end
+    if total > UI.MAX_SLOTS then return out, total end
     if v.capacity.any then
         local filled = v.capacity.any - (v.seats.any or 0)
         for i = 1, v.capacity.any do out[#out + 1] = { role = "any", filled = i <= filled } end
-        return out
+        return out, total
     end
     for _, r in ipairs(A().ROLES) do
         local cap = v.capacity[r] or 0
         local filled = cap - (v.seats[r] or 0)
         for i = 1, cap do out[#out + 1] = { role = r, filled = i <= filled } end
     end
-    return out
+    return out, total
 end
-UI.MAX_SLOTS = 10
 
 -- Role gaps as icons: a filled seat bright, an empty one grey (R-8.3).
 function UI.roleText(v)
@@ -604,7 +637,7 @@ function UI.leaderMenu(v)
         end
         return items
     end
-    items[#items + 1] = { text = "|T" .. UI.ICON.edit .. ":18|t 編輯", fn = function() UI.openTicket(v) end }
+    items[#items + 1] = { text = tex("edit") .. " 編輯", fn = function() UI.openTicket(v) end } -- GF-FIX-D: through tex()
     if v.state == "formed" or (v.state == "final" and #(v.slots or {}) > 1) then
         items[#items + 1] = { text = tex("back") .. " 退回", fn = function() UI.press(v, "back") end }
     end
@@ -690,6 +723,7 @@ local function newRow(i)
     row.delete = iconButton(row, ns.ROW_ICON, "no", "刪除", nil, "刪除")
     row.delete:SetPoint("LEFT", row, "LEFT", UI.COL.delete, UI.LINE1)
     row.delete.action = "delete"
+    row.delete:SetScript("OnClick", function() if row.view then UI.askDelete(row.view) end end)
     row.delete:Hide()
     row.head = row:CreateFontString(nil, "ARTWORK", ns.Theme.FONT.header or ns.FIELD_FONT); row.head:SetPoint("LEFT", row, "LEFT", 6, 0)
     -- GF-016: the row 我的業務 opened (UI.focus). GF-UI-G: the chosen look (the olive
@@ -838,7 +872,9 @@ function UI.whyAction(key)
     return tex(spec.icon, 16) .. " " .. spec.tip
 end
 UI.WHY_OPTS = { format = function(it) return UI.whyFormat(it) end, action = function(k) return UI.whyAction(k) end }
-function UI.why(v) return A().whyState(v) end
+-- GF-FIX-D (review 中-9): one read of my party per page draw (layoutRows), not per row.
+local passOpts
+function UI.why(v) return A().whyState(v, passOpts) end
 -- The checklist lines (tests and the 完成 button): Widgets.checklistLines with this page's formats.
 function UI.whyLines(why) return ns.Widgets.checklistLines(why, UI.WHY_OPTS) end
 
@@ -873,6 +909,19 @@ function UI.textStyle(b, on)
     return b
 end
 
+-- GF-FIX-D (review 中-9): a row button's scripts are set once; what it does is
+-- on the button (a ticket button: the ticket and the action; others: a function).
+local function buttonEnter(self)
+    if self.why then ns.Widgets.checklistTooltip(self, self.why, UI.WHY_OPTS); return end
+    if not self.tip then return end
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:AddLine(self.tip)
+    GameTooltip:Show()
+end
+local function buttonClick(self, ...)
+    if self.gfView then return UI.press(self.gfView, self.action, self) end
+    if self.gfFn then return self.gfFn(self, ...) end
+end
 local function setButtons(row, list)
     for k, b in ipairs(row.buttons) do
         local spec = list[k]
@@ -885,16 +934,14 @@ local function setButtons(row, list)
             if spec.glow then b.sel:Show(); b.shine:Show() else b.sel:Hide(); b.shine:Hide() end
             -- GF-UI-A §1.7: 完成 shows the same ✓✗ checklist as the badge.
             b.why = spec.why
-            b:SetScript("OnEnter", function(self)
-                if self.why then ns.Widgets.checklistTooltip(self, self.why, UI.WHY_OPTS); return end
-                if not self.tip then return end
-                GameTooltip:SetOwner(self, "ANCHOR_TOP")
-                GameTooltip:AddLine(self.tip)
-                GameTooltip:Show()
-            end)
-            b:SetScript("OnClick", spec.fn)
+            b.gfView, b.gfFn = spec.view, spec.fn
+            if not b.gfRowScripts then
+                b:SetScript("OnEnter", buttonEnter)
+                b:SetScript("OnClick", buttonClick)
+                b.gfRowScripts = true
+            end
             b:Show()
-        else b:Hide(); b.action = nil; b.why = nil end
+        else b:Hide(); b.action = nil; b.why = nil; b.gfView = nil; b.gfFn = nil end
     end
     UI.flowButtons(row)
 end
@@ -912,6 +959,12 @@ local function grey(row, on)
     end
 end
 
+local workerTipMeta = { __index = function(t, k)
+    if k ~= "lines" then return nil end
+    local lines = UI.workerTooltipLines(t.w, t.author)
+    rawset(t, "lines", lines)
+    return lines
+end }
 -- A worker ticket's row (mine, matching one of my tickets, or anyone's): R-17.17.
 local function fillWorker(row, w, author)
     local ds = dungeonIds(w)
@@ -923,7 +976,8 @@ local function fillWorker(row, w, author)
     fillWho(row, author)
     row.badge.set(A().whyWorker(w), UI.WHY_OPTS)
     grey(row, w.closed == true)
-    row.workerTip = { w = w, author = author, lines = UI.workerTooltipLines(w, author) }
+    -- GF-FIX-D (review 中-9): the tooltip lines are worked out when first read (the mouse over the row).
+    row.workerTip = setmetatable({ w = w, author = author }, workerTipMeta)
 end
 
 ---------------------------------------------------------------------------
@@ -1242,8 +1296,8 @@ local function fillRow(row, data, i)
     -- GF-002-I (R-17.5): ended rows are grey (過期 / 未成行 / 取消); 成行 keeps its colors.
     grey(row, v.closed and v.state ~= "done")
     row.roles:SetText("")
-    local seats = UI.slotList(v)
-    if v.closed or #seats > UI.MAX_SLOTS then
+    local seats, seatCount = UI.slotList(v)
+    if v.closed or seatCount > UI.MAX_SLOTS then
         -- Closed: the state is the badge's (R-17.11). R-17.16: 10 / 20 / 40 people get
         -- the numbers per role instead of an icon per seat.
         row.roles:SetText(UI.roleText(v))
@@ -1264,15 +1318,12 @@ local function fillRow(row, data, i)
     local list = {}
     for _, name in ipairs(UI.buttonsFor(v)) do
         local spec = UI.BUTTON[name]
-        list[#list + 1] = { icon = spec.icon, tip = spec.tip, action = name, fn = function(self) UI.press(v, name, self) end,
+        list[#list + 1] = { icon = spec.icon, tip = spec.tip, action = name, view = v,
             glow = name == "done" and A().inDestination(v), why = name == "done" and why or nil }
     end
     setButtons(row, list)
     -- GF-002-J: 刪除 on my own tickets (confirmed first).
-    if v.leader == S().selfAuthor() then
-        row.delete:SetScript("OnClick", function() UI.askDelete(v) end)
-        row.delete:Show()
-    end
+    if v.leader == S().selfAuthor() then row.delete:Show() end -- its OnClick is set once (newRow)
 end
 
 -- GF-002-J (owner 0.14.0): 刪除 one of my tickets, after a confirmation.
@@ -1297,13 +1348,25 @@ function UI.flowButtons(row)
     ns.OrdersUI.flow(row, shown, UI.ROW_BUTTON_X, UI.LINE2, UI.BUTTON_GAP, "LEFT")
 end
 
-function UI.layoutRows()
+-- GF-FIX-D (review 中-9): scrolling inside the same rows (the same first row,
+-- the same list, the same focus) changes nothing: no row is filled again.
+-- UI.refresh passes force: the data may be new.
+local laid = {}
+function UI.layoutStats() return laid end
+function UI.layoutRows(force)
     if not scroll then return end
     local offset = ns.num((scroll:GetVerticalScroll())) or 0
     local h = ns.num((scroll:GetHeight())) or 0
     if h <= 0 then h = 420 end
     local count = math.ceil(h / ROW_HEIGHT) + 1
     local first = math.max(1, math.floor(offset / ROW_HEIGHT) + 1)
+    if not force and laid.rows == shownRows and laid.first == first and laid.count == count and laid.focus == UI.focusId then
+        return
+    end
+    laid.rows, laid.first, laid.count, laid.focus = shownRows, first, count, UI.focusId
+    laid.fills = (laid.fills or 0) + 1
+    local okP, party = pcall(A().partyAuthors)
+    passOpts = okP and { party = party } or nil
     for k = 1, math.max(count, #rowWidgets) do
         local i = first + k - 1
         local data = k <= count and shownRows[i] or nil
@@ -1320,6 +1383,7 @@ function UI.layoutRows()
             else row:Hide(); row.view = nil; row.mine = nil; row.lfg = nil end
         end
     end
+    passOpts = nil
 end
 function UI.rowFrames() return rowWidgets end
 function UI.scrollFrame() return scroll end
@@ -1393,7 +1457,7 @@ function UI.refresh()
     if not panel then return end
     shownRows = UI.pageRows()
     content:SetHeight(math.max(1, #shownRows * ROW_HEIGHT))
-    UI.layoutRows()
+    UI.layoutRows(true)
     UI.emptyLine:SetText(#shownRows == 0 and "沒有冒險單" or "") -- GF-002-D
     -- GF-002-J: the tabs, the filter text, 清除 only on 已結束.
     for _, b in ipairs({ UI.activeTab, UI.endedTab }) do
@@ -1629,7 +1693,7 @@ function UI.timePicker(owner, opts)
     -- Which days: today and tomorrow, or the one other day.
     local days
     if opts.dayOff and opts.dayOff >= 2 then days = { opts.dayOff } else days = { 0, 1 } end
-    local nowLocal = date("*t", S().serverNow() - UI.skew())
+    local nowLocal = dateTable(S().serverNow() - UI.skew())
     local y = -40
     if opts.allowNow ~= false then picker.now:Show(); y = y - 40 else picker.now:Hide() end
     for i = 1, 3 do picker.dayLabels[i]:Hide(); for h = 0, 23 do picker.hours[i][h]:Hide() end end
@@ -1684,7 +1748,7 @@ function UI.timePicker(owner, opts)
     local stepX = 14
     if opts.allowOther ~= false then
         local shown = (opts.dayOff and opts.dayOff >= 2) and opts.dayOff or 0
-        local d = date("*t", UI.dayStart(shown) + 43200 - UI.skew())
+        local d = dateTable(UI.dayStart(shown) + 43200 - UI.skew())
         picker.dayText:SetText(string.format("%d/%d（%s）", d.month, d.day, UI.WEEKDAY[d.wday]))
         picker.dayField:ClearAllPoints(); picker.dayField:SetPoint("TOPLEFT", picker, "TOPLEFT", 14, y - 6)
         picker.dayUp:ClearAllPoints(); picker.dayUp:SetPoint("TOPLEFT", picker, "TOPLEFT", 70, y + 1)
@@ -1709,7 +1773,7 @@ function UI.timePicker(owner, opts)
     -- The current choice.
     local sel = { start = opts.start, minute = 0, dur = opts.dur }
     if opts.start then
-        local d = date("*t", opts.start - UI.skew())
+        local d = dateTable(opts.start - UI.skew())
         sel.day, sel.hour, sel.minute = UI.dayOffset(opts.start), d.hour, d.min - d.min % 15
     end
     picker.sel = sel
@@ -1853,7 +1917,7 @@ UI.SLOT_DEFAULT_MIN = 20 * 60 -- 20:00 when a slot gets its first set time on an
 
 -- "11/26"
 local function monthDay(t)
-    local d = date("*t", t - UI.skew())
+    local d = dateTable(t - UI.skew())
     return d.month .. "/" .. d.day, d
 end
 -- The days a slot can start on: today (only while a quarter is still ahead),
@@ -3325,11 +3389,17 @@ UI.CAL_MINE = { 1, 0.82, 0.2 }
 UI.CAL_SIGNED = { 0.35, 1, 0.45 }
 
 -- The items of one day (dayOff from today): { view, slot, mine, signed, final }.
-function UI.calendarItems(dayOff)
-    local my = S().selfAuthor()
-    local out = {}
+-- GF-FIX-D (review 低-23): every day's items in one pass (the calendar asks for
+-- 8 days a draw), kept while the tickets (Adv.all), the second and I are the same.
+local calBuckets = {}
+function UI.calendarBuckets()
+    local views, t, my = A().all(), S().serverNow(), S().selfAuthor()
+    if calBuckets.days and calBuckets.views == views and calBuckets.at == t and calBuckets.me == my then
+        return calBuckets.days
+    end
+    local days = {}
     local list = {}
-    for _, v in pairs(A().all()) do list[#list + 1] = v end
+    for _, v in pairs(views) do list[#list + 1] = v end
     table.sort(list, function(x, y) return x.id < y.id end)
     for _, v in ipairs(list) do
         if not v.closed then
@@ -3338,23 +3408,32 @@ function UI.calendarItems(dayOff)
             for _, l in ipairs({ v.members, v.waitlist, v.pending }) do
                 for _, x in ipairs(l) do if x.a == my then mineRow = x end end
             end
+            local done = {}
             for _, sl in ipairs(slots) do
                 local off = sl.now and 0 or UI.dayOffset(sl.s)
-                if off == dayOff then
+                if not done[off] then -- one entry per ticket a day
+                    done[off] = true
                     local signed = false
                     if mineRow then
                         if not mineRow.slots then signed = true
                         else for _, id in ipairs(mineRow.slots) do if id == sl.id then signed = true end end end
                     end
-                    out[#out + 1] = { view = v, slot = sl, mine = v.leader == my, signed = signed, final = v.final == sl.id,
-                        at = sl.now and 0 or sl.s }
-                    break -- one entry per ticket a day
+                    days[off] = days[off] or {}
+                    table.insert(days[off], { view = v, slot = sl, mine = v.leader == my, signed = signed, final = v.final == sl.id,
+                        at = sl.now and 0 or sl.s })
                 end
             end
         end
     end
-    table.sort(out, function(x, y) if x.at ~= y.at then return x.at < y.at end return x.view.id < y.view.id end)
-    return out
+    for _, out in pairs(days) do
+        table.sort(out, function(x, y) if x.at ~= y.at then return x.at < y.at end return x.view.id < y.view.id end)
+    end
+    calBuckets.days, calBuckets.views, calBuckets.at, calBuckets.me = days, views, t, my
+    return days
+end
+-- One day's items (read them, never change the list).
+function UI.calendarItems(dayOff)
+    return UI.calendarBuckets()[dayOff] or {}
 end
 
 local function frameIcon(cell, k)
@@ -3404,7 +3483,7 @@ function UI.drawCalendar()
         cell.dayOff = off
         local inRange = off <= 14
         local t = UI.dayStart(off) + 43200
-        local d = date("*t", t - UI.skew())
+        local d = dateTable(t - UI.skew())
         cell.head:SetText(UI.WEEKDAY[d.wday] .. " " .. d.day)
         if off == 0 then cell.head:SetTextColor(1, 0.82, 0) else cell.head:SetTextColor(1, 1, 1) end
         local items = inRange and UI.calendarItems(off) or {}
@@ -3633,9 +3712,15 @@ end)
 
 A().onChanged = function()
     ns.coalesce("adventure-page", 1, function()
-        UI.updateBadge()
-        if ns.Framework.isModuleShown("adventure") then UI.refresh() end
+        -- GF-FIX-D (review 中-10): refresh already draws the badge.
+        if ns.Framework.isModuleShown("adventure") then UI.refresh() else UI.updateBadge() end
     end)
+end
+-- GF-FIX-D (review 中-15): the group finder's results came: the page shows them now.
+if ns.NativeLFG then
+    ns.NativeLFG.onChanged = function()
+        if ns.Framework.isModuleShown("adventure") then UI.refresh() end
+    end
 end
 
 ---------------------------------------------------------------------------
