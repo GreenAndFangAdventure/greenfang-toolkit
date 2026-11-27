@@ -447,6 +447,8 @@ function Recipes.indexSoon(onDone)
     return indexCache.out
 end
 function Recipes.isBuilding() return building ~= nil end
+-- GF-009-10: the last finished index, never built here (nil before the first).
+function Recipes.lastIndex() return indexCache.out end
 
 -- Rows for one profession: { { id, name, crafters } }, filtered and sorted by name.
 -- opts (GF-001-D19): online = only crafters who are online; who = "mine"
@@ -749,6 +751,9 @@ function Recipes.click(row, button)
     if button == "RightButton" then
         -- GF-006-B (R-5.1): 「下單」 and 「我的工錢」 first, then the whispers.
         local items = ns.OrdersUI and ns.OrdersUI.recipeMenuItems(data) or {}
+        -- GF-009-10: 「尋找圖紙」 when the row shows its button.
+        local RL = ns.RecipeLink
+        if RL and RL.canFind(data) then items[#items + 1] = { text = RL.LABEL, fn = function() RL.find(data) end } end
         for _, it in ipairs(Recipes.whisperItems(data)) do items[#items + 1] = it end
         return ns.showMenu(row, items) and "menu" or "none"
     end
@@ -792,6 +797,28 @@ local function newRow(i)
     row.order = ns.OrdersUI.textButton(row, "我的工錢", function(self) Recipes.pressOrder(self:GetParent() or self.row) end, 104)
     row.order.row = row
     row.order:SetPoint("LEFT", row, "LEFT", Recipes.COL_BUTTON, 0)
+    -- GF-009-10: 「尋找圖紙」 (a recipe-item icon after 下單), only when it applies.
+    row.pattern = CreateFrame("Button", nil, row)
+    row.pattern:SetSize(Recipes.PATTERN_SIZE, Recipes.PATTERN_SIZE)
+    row.pattern:SetPoint("LEFT", row, "LEFT", Recipes.COL_PATTERN, 0)
+    row.pattern.icon = row.pattern:CreateTexture(nil, "ARTWORK")
+    row.pattern.icon:SetAllPoints()
+    ns.Icons.set(row.pattern.icon, ns.RecipeLink and ns.RecipeLink.ICON or "Interface\\Icons\\INV_Scroll_03")
+    if row.pattern.SetHighlightTexture then
+        row.pattern:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    end
+    row.pattern:SetScript("OnClick", function(self)
+        local data = self:GetParent() and self:GetParent().data or row.data
+        if data and ns.RecipeLink then ns.RecipeLink.find(data) end
+    end)
+    row.pattern:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(ns.RecipeLink.LABEL, 1, 0.82, 0)
+        GameTooltip:AddLine(ns.RecipeLink.TEXT.tip, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    row.pattern:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    row.pattern:Hide()
     row:EnableMouse(true)
     if row.RegisterForClicks then row:RegisterForClicks("LeftButtonUp", "RightButtonUp") end
     row:SetScript("OnEnter", function(self)
@@ -809,6 +836,10 @@ local function newRow(i)
             local c = m.online and { 0.4, 1, 0.4 } or { 0.8, 0.8, 0.8 }
             GameTooltip:AddLine(ns.shortName(m.name), c[1], c[2], c[3])
         end
+        if self.pattern and self.pattern:IsShown() then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("右鍵或圖紙鈕：" .. ns.RecipeLink.LABEL, 1, 0.82, 0)
+        end
         GameTooltip:Show()
     end)
     row:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -817,6 +848,7 @@ local function newRow(i)
     return row
 end
 Recipes.COL_WHO, Recipes.COL_FEE, Recipes.COL_BUTTON = 350, 720, 900
+Recipes.COL_PATTERN, Recipes.PATTERN_SIZE = 1006, 22 -- GF-009-10: after 下單 (900 + 104), inside ROW_WIDTH
 
 -- The row button: 下單 when someone else can make it, else 我的工錢 for my own recipe.
 -- GF-UI-B: in the order test mode (同步與診斷 → 測試) my own recipe can be ordered too.
@@ -924,6 +956,8 @@ function Recipes.layoutRows()
     if h <= 0 then h = 400 end
     local count = math.ceil(h / ROW_HEIGHT) + 1
     local first = math.max(1, math.floor(offset / ROW_HEIGHT) + 1)
+    local RL = ns.RecipeLink
+    local ctx = RL and RL.context() -- GF-009-10: one read of my professions per pass
     for k = 1, math.max(count, #rowWidgets) do
         local i = first + k - 1
         local data = k <= count and shownRows[i] or nil
@@ -950,6 +984,9 @@ function Recipes.layoutRows()
                 else
                     row.order:Hide(); row.order.action = nil
                 end
+                local pattern = RL and RL.canFind(data, ctx) or nil
+                row.pattern.itemID = pattern
+                if pattern then row.pattern:Show() else row.pattern:Hide() end
                 row:Show()
             else
                 row:Hide(); row.data = nil
