@@ -108,6 +108,8 @@ local function orderOf(f, ctx)
             if not (mid and cnt) then return nil, "bad-field" end
             n = n + 1
             if n > Web.MAX_MATS then return nil, "bad-field" end
+            -- GF-FIX-E (review L-27): the same material twice = a broken order.
+            if mats[mid] then return nil, "bad-field" end
             mats[mid] = cnt
         end
     end
@@ -212,6 +214,10 @@ end
 
 -- Import a string from "inbox" or "paste". Returns the parse result plus
 -- imported (M records stored or confirmed) and same.
+-- GF-FIX-E (review M-24): the sum is no signature and the game cannot check
+-- sig, so a pasted code only brings in the orders of the one pasting it
+-- (customer = me); other customers' orders are skipped as "not-self". The
+-- Inbox AddOn (written by GF Sync from the website) is not limited.
 function Web.import(s, from)
     if ns.guildState() ~= "target" then
         local r = { ok = false, code = "other-guild", skipped = {}, total = 0 }
@@ -222,6 +228,17 @@ function Web.import(s, from)
     res.imported, res.same = 0, 0
     if res.ok then
         local led = ns.Orders.ledger
+        local mine = from == "paste" and S().selfAuthor() or nil
+        local kept = {}
+        for _, c in ipairs(res.customers) do
+            if from == "paste" and (not mine or c.a ~= mine) then
+                res.skipped["not-self"] = (res.skipped["not-self"] or 0) + #c.orders
+                res.total = res.total - #c.orders
+            else
+                kept[#kept + 1] = c
+            end
+        end
+        res.customers = kept
         for _, c in ipairs(res.customers) do
             local v = ns.Orders.encodeList(c.orders)
             local r = led:offer(c.a, "M", c.t, S().hash(v), v)

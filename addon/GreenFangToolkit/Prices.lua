@@ -192,17 +192,50 @@ function Prices.priority()
     return set
 end
 
+local function newestDay(s) return unb36(str(s):match("^([0-9a-z]+)%.")) or 0 end
+
+-- GF-FIX-E (review M-20): eviction candidates, oldest first, built once per
+-- realm + type and used until they run out (never a full scan per new item).
+-- An entry whose item was refreshed or removed since is skipped.
+local evictList = {}
+local function candidates(rk)
+    local c = evictList[rk]
+    if c and c.pos <= #c then return c end
+    c = { pos = 1 }
+    for id, s in pairs(Prices.items(rk)) do c[#c + 1] = { id = id, d = newestDay(s) } end
+    table.sort(c, function(x, y) if x.d ~= y.d then return x.d < y.d end return x.id < y.id end)
+    evictList[rk] = c
+    return c
+end
+Prices.evictBuilds = 0 -- tests: how often the candidate list was built
+
 -- Full: forget the item not seen for longest (never one an open order uses).
 local function evictOne(rk, keep)
     local items = Prices.items(rk)
-    local pick, pickDay
-    for id, s in pairs(items) do
-        if not keep[id] then
-            local d = unb36(str(s):match("^([0-9a-z]+)%.")) or 0
-            if not pickDay or d < pickDay then pick, pickDay = id, d end
+    for pass = 1, 2 do
+        local before = evictList[rk]
+        local c = candidates(rk)
+        if c ~= before then Prices.evictBuilds = Prices.evictBuilds + 1 end
+        local j = c.pos
+        while j <= #c do
+            local e = c[j]
+            local s = not e.gone and items[e.id]
+            if not s or newestDay(s) ~= e.d then
+                e.gone = true
+                if j == c.pos then c.pos = j + 1 end
+            elseif not keep[e.id] then
+                items[e.id] = nil
+                itemCount[rk] = (itemCount[rk] or 1) - 1
+                e.gone = true
+                if j == c.pos then c.pos = j + 1 end
+                return true
+            end
+            j = j + 1
         end
+        -- Only kept items left in this list: one fresh build may find newer ones.
+        if c ~= before or pass == 2 then break end
+        evictList[rk] = nil
     end
-    if pick then items[pick] = nil; itemCount[rk] = (itemCount[rk] or 1) - 1; return true end
     return false
 end
 
@@ -258,6 +291,7 @@ function Prices.prune(today)
         end
         for _, id in ipairs(drop) do items[id] = nil end
         itemCount[rk] = nil
+        evictList[rk] = nil
     end
 end
 
@@ -318,8 +352,18 @@ local function validGroup(g)
     return day ~= nil and day <= today and day > today - Prices.SHARE_DAYS
 end
 
-local function validValue(_, g, v)
+-- GF-FIX-E (review H-6, M-21): records this client dropped to stay within its
+-- limits, refused[a|g] = hash, this session only (nothing saved). The same
+-- record from another member is then not stored and dropped again; a newer
+-- record of that author and group has another hash and is taken at once.
+local refused, capSeen = {}, {}
+local function refuse(a, g, h) if a and g and h then refused[a .. "|" .. g] = h end end
+Prices.refusedCount = function() local n = 0; for _ in pairs(refused) do n = n + 1 end; return n end
+
+local function validValue(a, g, v)
     if #v > 16000 then return false end
+    local h = refused[str(a) .. "|" .. str(g)]
+    if h and S().hash(v) == h then return false end
     local realm, kind = Prices.decodeShare(v)
     if not realm then return false end
     return g:match("^([0-9a-z]+):") == Prices.rkCode(Prices.realmKey(realm, kind))
@@ -340,13 +384,17 @@ Prices.ledger = ns.Ledger.new({
         ns.coalesce("price-cap", 5, function() Prices.enforceCapAll() end)
     end,
     evict = function(l, s)
+        -- GF-FIX-E: never our own records; the dropped one is refused (see refused).
         local pickA, pickG, pickT
+        local mine = Prices.token()
         for a, groups in pairs(s.rec) do
-            for g, rec in pairs(groups) do
-                if not pickT or rec.t < pickT then pickA, pickG, pickT = a, g, rec.t end
+            if a ~= mine then
+                for g, rec in pairs(groups) do
+                    if not pickT or rec.t < pickT then pickA, pickG, pickT = a, g, rec.t end
+                end
             end
         end
-        if pickA then l:drop(pickA, pickG); return true end
+        if pickA then refuse(pickA, pickG, s.rec[pickA][pickG].h); l:drop(pickA, pickG); return true end
         return false
     end,
 })
@@ -467,36 +515,118 @@ function Prices.itemCount(rk)
     return n
 end
 
+-- The item IDs of one stored record, without prices (stored records were
+-- checked when they arrived).
+local function idsOf(v)
+    local body = str(v):match("^[^/]*/%a+/(.*)$")
+    local ids = {}
+    if body then
+        for id in body:gmatch("([0-9a-z]+)%.[0-9a-z]+%.[0-9a-z]+") do ids[#ids + 1] = unb36(id) end
+    end
+    return ids
+end
+
+-- Drop many records with one ledger change (one version step, one cache reset).
+local function dropMany(list)
+    if #list == 0 then return 0 end
+    if type(led.dropMany) == "function" then return led:dropMany(list) or #list end
+    local s = led:store(true)
+    if not s then return 0 end
+    local n = 0
+    for _, x in ipairs(list) do
+        local groups = s.rec[x.a]
+        if groups and groups[x.g] then
+            groups[x.g] = nil
+            if next(groups) == nil then s.rec[x.a] = nil end
+            if type(led.digests) == "table" then led.digests[x.a] = nil end
+            n = n + 1
+        end
+    end
+    if n > 0 then
+        led.totalsCache = nil
+        led.version = (led.version or 0) + 1
+        sharedCache.version = -1
+    end
+    return n
+end
+
 -- Over 8,000: drop shared records, oldest first, until it fits.
+-- GF-FIX-E (review H-6): every record is read once (item IDs only); the
+-- records to drop are worked out with per-item counts, then dropped together.
+Prices.capReads = 0 -- tests: records read by the last enforceCap
 function Prices.enforceCap(rk)
     local code = Prices.rkCode(rk)
+    local mine = Prices.token()
+    local own = Prices.items(rk)
     local recs = {}
     local s = led:store(true)
     for a, groups in pairs(s and s.rec or {}) do
-        for g, rec in pairs(groups) do
-            if a ~= Prices.token() and g:match("^([0-9a-z]+):") == code then recs[#recs + 1] = { a = a, g = g, t = rec.t } end
+        if a ~= mine then
+            for g, rec in pairs(groups) do
+                if g:match("^([0-9a-z]+):") == code then recs[#recs + 1] = { a = a, g = g, t = rec.t, h = rec.h, v = rec.v } end
+            end
         end
     end
-    table.sort(recs, function(x, y) if x.t ~= y.t then return x.t < y.t end return x.a .. x.g < y.a .. y.g end)
-    local i = 0
-    while Prices.itemCount(rk) > Prices.MAX_ITEMS and i < #recs do
-        i = i + 1
-        led:drop(recs[i].a, recs[i].g)
+    Prices.capReads = 0
+    if #recs == 0 then return 0 end
+    -- Items per record and how many records hold each item.
+    local held, total = {}, countItems(rk)
+    for _, r in ipairs(recs) do
+        r.ids = idsOf(r.v)
+        r.v = nil
+        Prices.capReads = Prices.capReads + 1
+        for _, id in ipairs(r.ids) do
+            local n = held[id]
+            if not n then
+                held[id] = 1
+                if not own[id] then total = total + 1 end
+            else
+                held[id] = n + 1
+            end
+        end
         Prices.tick()
     end
-    return i
+    if total <= Prices.MAX_ITEMS then return 0 end
+    table.sort(recs, function(x, y) if x.t ~= y.t then return x.t < y.t end return x.a .. x.g < y.a .. y.g end)
+    local drop = {}
+    for _, r in ipairs(recs) do
+        if total <= Prices.MAX_ITEMS then break end
+        for _, id in ipairs(r.ids) do
+            held[id] = held[id] - 1
+            if held[id] == 0 and not own[id] then total = total - 1 end
+        end
+        drop[#drop + 1] = { a = r.a, g = r.g }
+        refuse(r.a, r.g, r.h)
+        Prices.tick()
+    end
+    dropMany(drop)
+    return #drop
 end
 
+-- GF-FIX-E (review M-19): only the "<realm>/<type>/" prefix of each record is
+-- read (once per group code), and nothing is done when the ledger has not
+-- changed since the last check.
+local lastCapVersion
 function Prices.enforceCapAll()
+    if lastCapVersion == led.version then return 0 end
+    lastCapVersion = led.version
     local keys = {}
     local s = led:store(true)
     for _, groups in pairs(s and s.rec or {}) do
-        for _, rec in pairs(groups) do
-            local realm, kind = Prices.decodeShare(rec.v)
-            if realm then keys[Prices.realmKey(realm, kind)] = true end
+        for g, rec in pairs(groups) do
+            local code = g:match("^([0-9a-z]+):")
+            if code and capSeen[code] == nil then
+                local realm, kind = str(rec.v):match("^([^/]*)/(%a+)/")
+                if realm and (kind == "alliance" or kind == "horde" or kind == "neutral") then
+                    capSeen[code] = Prices.realmKey(ns.Ledger.unesc(realm), kind)
+                end
+            end
+            if code and capSeen[code] then keys[capSeen[code]] = true end
         end
     end
-    for rk in pairs(keys) do Prices.background(function() Prices.enforceCap(rk) end) end
+    local n = 0
+    for rk in pairs(keys) do n = n + 1; Prices.background(function() Prices.enforceCap(rk) end) end
+    return n
 end
 
 ---------------------------------------------------------------------------
@@ -784,11 +914,45 @@ Prices.scan = { state = "idle" }
 
 function Prices.scanState() return Prices.scan end
 
+-- GF-FIX-E (review M-20): the items of one scan that fit. Items we already
+-- have are always updated; new items fit into the free places plus the places
+-- of older items (not used by an open order, not in this scan). When more are
+-- new than that, the ones an open order uses come first, then the most offered,
+-- then the smaller ID; the rest are left out, so a scan never pushes out what
+-- it has just stored.
+function Prices.fitScan(rk, agg, keep)
+    local items = Prices.items(rk)
+    local known, fresh, left = {}, {}, 0
+    for id in pairs(agg) do
+        if items[id] then known[#known + 1] = id else fresh[#fresh + 1] = id end
+    end
+    local room = Prices.MAX_ITEMS - countItems(rk)
+    if #fresh > room then
+        local today = Prices.today()
+        for id, s in pairs(items) do
+            if not keep[id] and not agg[id] and newestDay(s) < today then room = room + 1 end
+        end
+    end
+    if #fresh > room then
+        table.sort(fresh, function(x, y)
+            local kx, ky = keep[x] and 0 or 1, keep[y] and 0 or 1
+            if kx ~= ky then return kx < ky end
+            local qx, qy = agg[x].q or 0, agg[y].q or 0
+            if qx ~= qy then return qx > qy end
+            return x < y
+        end)
+        left = #fresh - math.max(room, 0)
+        for k = #fresh, math.max(room, 0) + 1, -1 do fresh[k] = nil end
+    end
+    for _, id in ipairs(fresh) do known[#known + 1] = id end
+    return known, left
+end
+
 -- Collect results into agg[id] = { m, q }, then store them.
 local function commit(rk, agg, how)
-    local ids = {}
-    for id in pairs(agg) do ids[#ids + 1] = id end
     local keep = Prices.priority()
+    local ids, left = Prices.fitScan(rk, agg, keep)
+    Prices.scan.leftOut = left -- not saved: shown by diagnostics only
     local i, today = 1, Prices.today()
     worker = {
         step = function()
@@ -1040,6 +1204,7 @@ end
 
 function Prices.resetSession()
     worker, lookups, itemCount, sharedCache = nil, {}, {}, { version = -1 }
+    evictList, refused, capSeen, lastCapVersion = {}, {}, {}, nil
     jobs, jobsScheduled = {}, false
     Prices.scan = { state = "idle" }
     Prices.ah = { open = false }

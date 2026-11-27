@@ -4718,6 +4718,9 @@ assert(loadfile(ROOT .. "/tests/addon/gffixc_tests.lua"))()({ test = test, eq = 
 assert(loadfile(ROOT .. "/tests/addon/gffixa_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
+-- GF-FIX-E: 0.16.6 review batch E: prices cap, mail delivery, pasted web orders, notes (tests/addon/gffixe_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gffixe_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0

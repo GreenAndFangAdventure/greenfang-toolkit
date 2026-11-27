@@ -626,7 +626,9 @@ function Orders.customer(id, action, arg)
     elseif action == "paid" then e.pd = "1"
     elseif action == "lock" then e.lk, e.lt = arg, t
     else return false, "action" end
-    saveList("W", list)
+    -- GF-FIX-E (review L-25): like crafter(): a list that did not fit was not saved.
+    local r = saveList("W", list)
+    if not saved(r) then return false, r == "full" and "full" or r end
     return true
 end
 
@@ -1096,9 +1098,11 @@ end
 -- Reagent lists over GFTKO (R-8.5): R~recipe asks, S~recipe~output~yield~list answers.
 ---------------------------------------------------------------------------
 
+-- GF-FIX-E (review L-25): nobody answered within ASK_AGAIN seconds -> may ask again.
+Orders.ASK_AGAIN = 300
 local asked, answering = {}, {}
 function Orders.askReagents(recipe)
-    if not recipe or asked[recipe] then return false end
+    if not recipe or (asked[recipe] and ns.now() - asked[recipe] < Orders.ASK_AGAIN) then return false end
     asked[recipe] = ns.now()
     return led:enqueue(led:msg("R", b36(recipe)), nil, true)
 end

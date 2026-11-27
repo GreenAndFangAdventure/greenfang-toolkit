@@ -121,10 +121,11 @@ return function(T)
 
     test("GF-006-C R-9.4 import: M record for the customer, relayed at once, repeat-safe, newer wins", function()
         local ns = login()
+        -- GF-FIX-E (review M-24): another customer's orders come by the Inbox (a paste takes my own only).
         local t = ns.Share.serverNow() - 50
         local s = build(ns, { { cu = "Player-" .. B, t = t, orders = { order(ns, "w12") } } })
         wow.state.sent = {}
-        local r = ns.WebOrders.import(s, "paste")
+        local r = ns.WebOrders.import(s, "inbox")
         eq(r.imported, 1, "imported")
         local rec = ns.Orders.ledger:get(B, "M")
         ok(rec and rec.t == t, "M record with the website's time")
@@ -134,7 +135,7 @@ return function(T)
             if m.prefix == "GFTKO" and m.chatType == "GUILD" and m.msg:find("L1~V~" .. B .. "~M~", 1, true) == 1 then relayed = true end
         end
         ok(relayed, "relayed on GUILD")
-        r = ns.WebOrders.import(s, "paste")
+        r = ns.WebOrders.import(s, "inbox")
         eq(r.imported, 0, "second paste: nothing new"); eq(r.same, 1, "already there")
         local v = ns.Orders.get("w12")
         eq(v.state, "waiting", "a waiting guild order"); eq(v.src, "w", "web order"); eq(v.customer, B, "customer")
@@ -145,7 +146,7 @@ return function(T)
         v = ns.Orders.get("w12")
         eq(v.state, "cancel", "cancelled on the website"); eq(v.closedBy, "web", "closedBy web")
         -- An older list does not undo it.
-        eq(ns.WebOrders.import(s, "paste").imported, 0, "older list ignored")
+        eq(ns.WebOrders.import(s, "inbox").imported, 0, "older list ignored")
         eq(ns.Orders.get("w12").state, "cancel", "still cancelled")
     end)
 
@@ -238,7 +239,8 @@ return function(T)
         ok(ns.OrdersUI.pasteButton, "paste button on the orders page")
         local f = ns.OrdersUI.openPaste()
         ok(f:IsShown(), "shown")
-        local s = build(ns, { { cu = "Player-" .. B, orders = { order(ns, "w12") } } })
+        -- GF-FIX-E (review M-24): a pasted code brings in my own orders only.
+        local s = build(ns, { { cu = "Player-" .. A, orders = { order(ns, "w12") } } })
         f.box:SetText(s:sub(1, 40) .. "\n" .. s:sub(41))
         local r = ns.OrdersUI.pasteImport()
         eq(r.code, "ok", "imported")
