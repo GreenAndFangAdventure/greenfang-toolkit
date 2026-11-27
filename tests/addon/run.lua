@@ -4738,6 +4738,11 @@ assert(loadfile(ROOT .. "/tests/addon/gffixd_tests.lua"))()({ test = test, eq = 
 -- GF-FIX-B: 0.16.6 review batch B: roster caches, search, scroll; one-page tabs, 4:3 fit, order state names (tests/addon/gffixb_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gffixb_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+
+
+-- GF-FIX-F: 0.16.6 review batch F: item events, finder reload, radar, 臨時黑箱; the supply switches (tests/addon/gffixf_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gffixf_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0

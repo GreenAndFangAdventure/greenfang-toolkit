@@ -73,14 +73,17 @@ R.MATCH_TEXT = {
     offer = function(name, total, new) return string.format("「%s」：%d 位職工正在徵求，你可能有多（新增 %d 位）", name, total, new) end,
 }
 
-function R.checkMatches()
+-- GF-FIX-F (review 低-22): one check reads Supply.entries() once and gives
+-- it to both parts (all = that list; nil reads it here).
+function R.checkMatches(all)
     if not N.enabled("supply") then return 0 end
+    all = all or Supply.entries()
     local mem = N.memory("supply")
     if type(mem.seen) ~= "table" then mem.seen = {} end
     local seen, t, pushed = mem.seen, now(), 0
     for _, kind in ipairs({ "need", "offer" }) do
         local extra = 0
-        for _, it in ipairs(Supply.view(kind)) do
+        for _, it in ipairs(Supply.view(kind, all)) do
             if it.mine and #it.others > 0 then
                 local new = 0
                 for _, e in ipairs(it.others) do
@@ -117,12 +120,13 @@ end
 
 -- Guild needs received and valid: { [itemID] = { [author] = true } }, without
 -- the items I already offer myself (the supply is published already).
-function R.wanted()
+function R.wanted(all)
     local want, mineOffer = {}, {}
-    for _, e in ipairs(Supply.entries()) do
+    all = all or Supply.entries()
+    for _, e in ipairs(all) do
         if e.own and e.direction == "offer" then mineOffer[e.itemID] = true end
     end
-    for _, e in ipairs(Supply.entries()) do
+    for _, e in ipairs(all) do
         if not e.own and e.direction == "need" and type(e.itemID) == "number" and e.itemID > 0 and not mineOffer[e.itemID] then
             local w = want[e.itemID]
             if not w then w = {}; want[e.itemID] = w end
@@ -142,7 +146,7 @@ function R.tradeable(itemID)
 end
 
 -- One check: returns the hits { [itemID] = { have, wanted } } (also for tests).
-function R.checkBags()
+function R.checkBags(all)
     local mem = N.memory("radar")
     if type(mem.hit) ~= "table" then mem.hit = {} end
     if type(mem.ignored) ~= "table" then mem.ignored = {} end
@@ -152,7 +156,7 @@ function R.checkBags()
         mem.hit = {}
         return hits
     end
-    local want = R.wanted()
+    local want = R.wanted(all)
     if next(want) then
         local bags = Supply.readBags(want)
         stats.bagReads = stats.bagReads + 1
@@ -208,8 +212,10 @@ function R.checkNow()
     R.dirty = false
     stats.checks = stats.checks + 1
     local t0 = os and os.clock and os.clock() or 0
-    local okM, errM = pcall(R.checkMatches)
-    local okB, errB = pcall(R.checkBags)
+    local okE, all = pcall(Supply.entries)
+    if not okE then all = nil end
+    local okM, errM = pcall(R.checkMatches, all)
+    local okB, errB = pcall(R.checkBags, all)
     stats.ms = math.floor(((os and os.clock and os.clock() or 0) - t0) * 1000 + 0.5)
     if not okM and Supply.note then Supply.note("雷達配對：" .. tostring(errM)) end
     if not okB and Supply.note then Supply.note("雷達背包：" .. tostring(errB)) end

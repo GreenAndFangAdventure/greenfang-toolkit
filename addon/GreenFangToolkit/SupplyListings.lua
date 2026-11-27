@@ -351,29 +351,35 @@ L.CLASS_CATEGORY = { [9] = "recipe", [7] = "material", [5] = "material", [2] = "
 -- { name, link, icon, classID, subclassID, typeName, subTypeName, bindType }
 -- or nil, "loading" / "unknown". noRequest: an item not in the client's cache
 -- is not asked from the server (GF-UI-H: the item finder reads many IDs).
+-- GF-FIX-F (review 中-17): a missing item (the server said so) is not read
+-- or asked again; the client's data is always read fresh (never kept here).
 function L.itemInfo(itemID, noRequest)
     if type(itemID) ~= "number" or itemID <= 0 then return nil, "unknown" end
+    local Wd = ns.Widgets
+    if L.failed[itemID] then return nil, "missing" end
     local getInfo = ns.itemInfoFn() -- GF-009-13 fix: C_Item first (Forever has no global)
     if type(getInfo) ~= "function" then return nil, "unknown" end
     local okCall, name, link, _, _, _, typeName, subTypeName, _, _, icon, _, classID, subclassID, bindType = pcall(getInfo, itemID)
     if not okCall then return nil, "unknown" end
     if type(name) ~= "string" or name == "" then
-        -- A GetItemInfo miss asks the server too: counted either way.
-        requests.all = requests.all + 1
-        if inNameSearch then requests.nameSearch = requests.nameSearch + 1 end
-        if not noRequest and type(C_Item) == "table" and type(C_Item.RequestLoadItemDataByID) == "function" then
-            ns.call(C_Item.RequestLoadItemDataByID, itemID)
+        -- A GetItemInfo miss asks the server too: counted when it is a new
+        -- request (GF-FIX-F: one per item until answered, Widgets.requestItem).
+        if not Wd.itemRequested(itemID) then
+            requests.all = requests.all + 1
+            if inNameSearch then requests.nameSearch = requests.nameSearch + 1 end
         end
+        Wd.requestItem(itemID, noRequest)
         return nil, "loading"
     end
     -- GF-009-13: the game's name wins over the catalog's (noted, never asked).
     local Cat = ns.SupplyCatalog
     if Cat and Cat.loaded() then Cat.noteName(itemID, name) end
-    return { itemID = itemID, name = name, link = type(link) == "string" and link or nil,
+    local info = { itemID = itemID, name = name, link = type(link) == "string" and link or nil,
         icon = icon or Supply.itemIcon(itemID), classID = tonumber(classID), subclassID = tonumber(subclassID),
         typeName = type(typeName) == "string" and typeName ~= "" and typeName or nil,
         subTypeName = type(subTypeName) == "string" and subTypeName ~= "" and subTypeName or nil,
         bindType = tonumber(bindType) }
+    return info
 end
 
 -- GF-009-12: the client's data only when it already has the item
@@ -394,7 +400,9 @@ end
 -- success = false. The one path for links, IDs, drops and finder picks
 -- (SupplyUI setFormItem).
 L.LOAD_WAIT = 5
-L.failed = {} -- [itemID] = true: the server said no such item
+-- [itemID] = true: the server said no such item (GF-FIX-F: the same table
+-- as Widgets.failedItems, so nothing asks for it again).
+L.failed = ns.Widgets.failedItems
 function L.itemAnswer(itemID, success)
     itemID = tonumber(itemID)
     if not itemID then return end
@@ -426,11 +434,22 @@ function L.tradeable(info) return info ~= nil and not L.NO_TRADE_BIND[info.bindT
 
 -- GF-009-13: the item in this character's bags: "bound" when every stack of
 -- it is bound, "free" when one is not, nil when there is none.
+-- GF-FIX-F (review 低-19): the bags the picker and the bound check read:
+-- 0-4 and the reagent bag (Enum.BagIndex.ReagentBag) when the client has
+-- one. The automatic collection still reads 0-4 only (Supply.readBags; a
+-- PM decision).
+function L.bagIndexes()
+    local list = {}
+    for bag = 0, Supply.BAGS do list[#list + 1] = bag end
+    local reagent = type(Enum) == "table" and type(Enum.BagIndex) == "table" and tonumber(Enum.BagIndex.ReagentBag) or nil
+    if reagent and reagent > Supply.BAGS then list[#list + 1] = reagent end
+    return list
+end
 function L.bagBound(itemID)
     local C = type(C_Container) == "table" and C_Container or nil
     if not C or type(C.GetContainerNumSlots) ~= "function" or type(C.GetContainerItemInfo) ~= "function" then return nil end
     local bound = false
-    for bag = 0, Supply.BAGS do
+    for _, bag in ipairs(L.bagIndexes()) do
         local n = tonumber((ns.call(C.GetContainerNumSlots, bag))) or 0
         for slot = 1, n do
             local info = ns.call(C.GetContainerItemInfo, bag, slot)
@@ -510,7 +529,7 @@ function L.bagItems()
     local C = type(C_Container) == "table" and C_Container or nil
     if not C or type(C.GetContainerNumSlots) ~= "function" or type(C.GetContainerItemInfo) ~= "function" then return nil end
     local seen, out = {}, {}
-    for bag = 0, Supply.BAGS do
+    for _, bag in ipairs(L.bagIndexes()) do
         local n = tonumber((ns.call(C.GetContainerNumSlots, bag))) or 0
         for slot = 1, n do
             local info = ns.call(C.GetContainerItemInfo, bag, slot)
@@ -528,6 +547,17 @@ function L.bagItems()
     end
     table.sort(out, function(x, y) return x.itemID < y.itemID end)
     return out
+end
+-- GF-FIX-F (中-18): the finder's copy of bagItems(), read again only after
+-- the bags changed (BAG_UPDATE_DELAYED, Supply.bagVersion) or when the
+-- finder opens (L.forgetBags).
+local bagMemo = {}
+function L.forgetBags() bagMemo = {} end
+function L.bagSnapshot()
+    if bagMemo.v == Supply.bagVersion and bagMemo.list then return bagMemo.list end
+    local list = L.bagItems()
+    bagMemo = { v = Supply.bagVersion, list = list }
+    return list
 end
 
 ---------------------------------------------------------------------------
@@ -555,6 +585,21 @@ local function addID(set, order, id, ask)
     end
 end
 
+-- GF-FIX-F (中-18): a price store reagent text is decoded once (the same
+-- text always gives the same list); a changed or new entry is a new text.
+local reagentMemo, reagentMemoN = {}, 0
+L.REAGENT_KEEP = 20000
+local function reagentsOf(P, s)
+    local r = reagentMemo[s]
+    if r == nil then
+        r = P.decodeReagents(s) or false
+        if reagentMemoN >= L.REAGENT_KEEP then reagentMemo, reagentMemoN = {}, 0 end
+        reagentMemo[s], reagentMemoN = r, reagentMemoN + 1
+    end
+    return r or nil
+end
+function L.forgetReagents() reagentMemo, reagentMemoN = {}, 0 end
+
 -- { [itemID] = askServer } and the order they were found in.
 function L.catalogIDs()
     local set, order = {}, {}
@@ -568,7 +613,7 @@ function L.catalogIDs()
     local okDB, p = pcall(function() return P and P.db() end)
     if okDB and type(p) == "table" then
         for _, s in pairs(type(p.reagents) == "table" and p.reagents or {}) do
-            local r = P.decodeReagents(s)
+            local r = reagentsOf(P, s)
             if r then
                 addID(set, order, r.output, true)
                 for _, x in ipairs(r.list) do addID(set, order, x.id, true) end
@@ -583,8 +628,13 @@ function L.catalogIDs()
 end
 
 -- GF-009-12: a catalog row's info is made when read (rows on screen only).
+-- GF-FIX-F (低-22): made once per row (rawset), not on every read.
 local CAT_ROW = { __index = function(t, k)
-    if k == "info" then return ns.SupplyCatalog.info(rawget(t, "ci")) end
+    if k == "info" then
+        local info = ns.SupplyCatalog.info(rawget(t, "ci"))
+        rawset(t, "info", info)
+        return info
+    end
 end }
 -- classID, subclassID of a finder row without making a catalog row's info.
 function L.rowKind(e)
@@ -629,15 +679,15 @@ function L.catalog(opts)
 end
 function L.catalogList(opts)
     local bag = {}
-    for _, b in ipairs(L.bagItems() or {}) do bag[b.itemID] = b end
+    local bagList = L.bagSnapshot() or {} -- GF-FIX-F (中-18): one bag read, kept until the bags change
+    for _, b in ipairs(bagList) do bag[b.itemID] = b end
     local set, order
     if opts.source == "all" then
         set, order = L.catalogIDs()
-        for _, b in ipairs(L.bagItems() or {}) do addID(set, order, b.itemID, true) end
     else
         set, order = {}, {}
-        for _, b in ipairs(L.bagItems() or {}) do addID(set, order, b.itemID, true) end
     end
+    for _, b in ipairs(bagList) do addID(set, order, b.itemID, true) end
     local text = str(opts.text):gsub("^%s+", ""):gsub("%s+$", "")
     local exact = L.itemFromText(text) or (text:match("^%d+$") and tonumber(text)) or nil
     if exact then addID(set, order, exact, true) end
@@ -876,7 +926,14 @@ end
 -- stay (their data may still be loading). The radar keeps its own checks.
 function L.shownOnPage(e)
     if not e or e.own or not e.manual or e.auto then return true end
-    local info = L.itemInfo(e.itemID, true)
+    -- GF-FIX-F (中-17): only what the client already has; GetItemInfo on an
+    -- unknown item would ask the server on every redraw.
+    local info
+    if type(C_Item) == "table" and type(C_Item.IsItemDataCachedByID) == "function" then
+        info = L.cachedInfo(e.itemID)
+    else
+        info = L.itemInfo(e.itemID, true)
+    end
     return info == nil or L.tradeable(info)
 end
 
@@ -945,6 +1002,7 @@ function L.resetSession()
     for k in pairs(stats) do stats[k] = 0 end
     requests.all, requests.nameSearch = 0, 0
     sweeping = false
+    L.forgetBags(); L.forgetReagents()
 end
 
 -- Started with the automatic collection (after the share login).

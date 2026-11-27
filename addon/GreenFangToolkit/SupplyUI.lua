@@ -31,10 +31,53 @@ UI.DETAIL_ROWS = 9
 -- the page) come two rows: BAR_Y the tabs + the two check boxes over the
 -- detail column; TOOL_Y 刊登 then 收集組 on the left (GF-UI-K; was 刊登 at the list's right edge).
 UI.BAR_Y, UI.TOOL_Y = -40, -84
--- GF-UI-K: 「啟用：」 names what the two boxes are; the boxes follow it.
-UI.CHECK_X = { label = 586, auto = 650, manual = 786 }
-UI.CHECK_LABEL = "啟用："
+-- GF-FIX-F (owner: 「如果是開關，要很明確地展現」): the two switches sit on
+-- the right, one per row (BAR_Y 自動集料, TOOL_Y 手動刊登), apart from the
+-- tabs and 收集組 on the left. Each: its name, a button that reads 開 or 關
+-- (the state in words; gold when on), one line of what it does now, and 說明
+-- (a card with the full text; 自動集料's also lists the collection items).
 UI.AUTO_TEXT, UI.MANUAL_TEXT = "自動集料", "手動刊登" -- switches, not filters (GF-UI-I): names kept
+UI.SWITCH_X = { name = 586, button = 664, line = 720 }
+UI.SWITCH_W = 48
+UI.SWITCH_STATE = { on = "開", off = "關" }
+UI.SWITCH_HELP = { auto = { text = "說明與項目", w = 100 }, manual = { text = "說明", w = 62 } }
+UI.SWITCH_RIGHT = 1078 -- the detail column's right edge (DETAIL_X + DETAIL_W)
+UI.SWITCH_LINE = {
+    auto = { on = "依任務與背包算缺件並分享", off = "已關閉：不計算、不分享" },
+    manual = { on = "自己發布徵求或供應並分享", off = "已關閉：不分享、不顯示刊登" },
+}
+UI.SWITCH_TIP = {
+    auto = "自動集料（實驗功能，預設關）：依白名單任務的進度和背包，自動算出缺的和可能多的物品，"
+        .. "只把這些物品的數量分享給公會。按「說明與項目」看完整說明和包含的物品。",
+    manual = "手動刊登：自己發布徵求或供應，分享給公會。關掉後不再分享我的刊登，也不顯示別人的刊登。",
+}
+-- The cards (W.flowCard frames, built when first opened).
+UI.CARD_NAME = { auto = "GreenFangToolkit_SupplyAutoCard", manual = "GreenFangToolkit_SupplyManualCard" }
+UI.CARD_W = 640
+UI.CARD_TITLE = { auto = "自動集料說明", manual = "手動刊登說明" }
+UI.CARD_SUB = {
+    auto = "事務所只盯名單上的東西；你背包裡其他見不得光的，我們一概不問。",
+    manual = "想要什麼就開口，想給什麼就喊價；事務所只負責把話傳出去。",
+}
+UI.CARD_LINES = {
+    auto = {
+        "它會做什麼：依白名單裡的收集任務，對照你的任務進度和背包數量，自動算出你還缺的物品和可能多出來的物品。",
+        "資料從哪來：只讀這個角色的任務狀態和背包（行囊、背包 1～4），不讀銀行。",
+        "分享給公會什麼：只有白名單物品的「缺幾個／可能多幾個」；公會成員在調貨所看得到。",
+        "不會做什麼：不公開整個背包、不讀銀行、不自動交易或郵寄；要不要聯絡、怎麼交換都由你決定。",
+        "關掉後：不再計算，已分享的缺件和餘料會清空；你也看不到別人的自動集料資料。",
+        "為什麼預設關：這是實驗功能，白名單的任務和書頁規則還沒在 Forever 實機確認，確認前由你自己決定要不要開。",
+    },
+    manual = {
+        "它會做什麼：讓你自己發布徵求或供應（物品、數量、交易條件、備註），分享給公會。",
+        "分享給公會什麼：只有你刊登中的內容；到期或結束的不再分享。",
+        "不會做什麼：不自動交易、不扣物品；聯絡只會打開密語框，由你自己按送出。",
+        "關掉後：不再分享你的刊登（別人那邊會清空），也不顯示別人的刊登，「刊登」按鈕不能按。你的刊登留在「我的刊登」，再打開就恢復分享。",
+    },
+}
+UI.CARD_ITEMS_TITLE = "包含的項目"
+UI.CARD_RULE_STATE = { experimental = "實驗，尚未實機確認", enabled = "已實機確認" }
+UI.CARD_COLS, UI.CARD_ROW_H = 3, 30
 -- GF-UI-K: an ended listing of mine sits after the live ones, faded.
 UI.ENDED_ALPHA = 0.55
 -- GF-UI-K: 交易條件 / 備註 lines of my listing: label 4..80, value from 84.
@@ -643,8 +686,8 @@ function UI.refresh()
     if not panel then return end
     if ns.inCombat() then UI.pending = true; return end
     UI.pending = false
-    autoBox:SetChecked(Supply.autoOn())
-    manualBox:SetChecked(Supply.manualOn())
+    autoBox.setOn(Supply.autoOn())
+    manualBox.setOn(Supply.manualOn())
     W.setEnabled(postButton, Supply.manualOn())
     local keepItem = state.selected and state.items[state.selected] and state.items[state.selected].itemID
     local keepListing = state.selected and state.items[state.selected] and state.items[state.selected].listing
@@ -691,26 +734,170 @@ local function label(parent, text, font)
     return fs
 end
 
-local function checkWithLabel(parent, text, x, y, onClick)
-    local c = Th.checkBox(parent)
-    c:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
-    c.label = label(c, text)
-    c.label:SetPoint("LEFT", c, "RIGHT", 2, 0)
-    c:SetScript("OnClick", function(self) onClick(self:GetChecked() and true or false) end)
+-- GF-FIX-F: the switch text (pure): 「開」/「關」 and the line beside it.
+function UI.switchState(on) return on and UI.SWITCH_STATE.on or UI.SWITCH_STATE.off end
+function UI.switchLine(key, on) return UI.SWITCH_LINE[key][on and "on" or "off"] end
+
+-- GF-FIX-F: one switch: the name, a check button drawn as a theme button
+-- whose text is the state (開 gold / 關 grey; a click turns it over), the
+-- line of what it does now and the 說明 button. c.label is the name.
+local function switchRow(parent, key, text, y, onClick)
+    local X = UI.SWITCH_X
+    local c = CreateFrame("CheckButton", nil, parent)
+    c:SetSize(UI.SWITCH_W, ns.BUTTON_H)
+    c:SetPoint("TOPLEFT", parent, "TOPLEFT", X.button, y)
+    c.gfSwitch = key
+    c.gfFill = Th.fill(c, Th.C.fill, "BACKGROUND")
+    c.gfEdges = Th.border(c, Th.C.line, "BORDER")
+    c.gfHover = Th.fill(c, Th.C.hover, "HIGHLIGHT")
+    c.gfHoverEdges = Th.border(c, Th.C.lineHover, "HIGHLIGHT")
+    c.stateText = c:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT)
+    c.stateText:SetPoint("CENTER", c, "CENTER", 0, 0)
+    c.label = label(parent, text, ns.FIELD_FONT)
+    c.label:SetPoint("TOPLEFT", parent, "TOPLEFT", X.name, y - 6)
+    c.line = label(parent, "", ns.LABEL_FONT)
+    c.line:SetPoint("TOPLEFT", parent, "TOPLEFT", X.line, y - 6)
+    local help = UI.SWITCH_HELP[key]
+    c.help = Th.button(parent, help.text, help.w, ns.BUTTON_H)
+    c.help:SetPoint("TOPLEFT", parent, "TOPLEFT", UI.SWITCH_RIGHT - help.w, y)
+    c.help:SetScript("OnClick", function(self) UI.openCard(key, self) end)
+    c.line:SetWidth(UI.SWITCH_RIGHT - help.w - 8 - X.line)
+    if c.line.SetWordWrap then c.line:SetWordWrap(false) end
+    function c.setOn(on)
+        on = on and true or false
+        c:SetChecked(on)
+        c.gfOn = on
+        c.stateText:SetText(UI.switchState(on))
+        local col = on and Th.C.gold or Th.C.muted
+        c.stateText:SetTextColor(col[1], col[2], col[3])
+        local edge = on and Th.C.selLine or Th.C.line
+        for _, t in ipairs(c.gfEdges or {}) do Th.color(t, edge) end
+        Th.color(c.gfFill, on and Th.C.goldFill or Th.C.fill)
+        c.line:SetText(UI.switchLine(key, on))
+    end
+    -- A click turns the shown state over (the client's own check flag is set again by setOn).
+    c:SetScript("OnClick", function(self) onClick(not self.gfOn) end)
+    c.tip = UI.SWITCH_TIP[key]
+    Th.guardHover(c)
     return c
 end
+UI.switchRow = switchRow
+
+-- GF-FIX-F: what 自動集料 covers, straight from SupplyRules (never a copy):
+-- { { rule, title, state, chapters = { { title, items = { { itemID, label } } } } } }.
+function UI.collectionGroups()
+    local out = {}
+    for _, r in ipairs(ns.SupplyRules.list) do
+        if r.usable and r.state ~= "disabled" then
+            local g = { rule = r, title = r.title, state = r.state, chapters = {} }
+            for _, ch in ipairs(r.chapters or {}) do
+                local c = { title = ch.title, items = {} }
+                for _, it in ipairs(ch.items or {}) do c.items[#c.items + 1] = { itemID = it.itemID, label = it.label } end
+                g.chapters[#g.chapters + 1] = c
+            end
+            out[#out + 1] = g
+        end
+    end
+    return out
+end
+
+-- The card (the 規則 card's frame, W.flowCard): title, a muted subtitle,
+-- the lines, and for 自動集料 the collection groups with each item's icon
+-- and name (W.itemRow: the client's name, 載入中 until it arrives).
+local cards = {}
+UI.cards = cards
+local function cardText(f, font)
+    f.gfTexts = f.gfTexts or {}
+    f.gfTextN = (f.gfTextN or 0) + 1
+    local fs = f.gfTexts[f.gfTextN]
+    if not fs then
+        fs = f:CreateFontString(nil, "ARTWORK", font or ns.LABEL_FONT)
+        fs:SetJustifyH("LEFT")
+        if fs.SetWordWrap then fs:SetWordWrap(true) end
+        f.gfTexts[f.gfTextN] = fs
+    end
+    return fs
+end
+function UI.drawCard(key)
+    local f = cards[key]
+    if not f then return nil end
+    local pad, w = W.CARD_PAD, UI.CARD_W - 2 * W.CARD_PAD
+    f.gfTextN = 0
+    local y = -46
+    local function put(text, font, color, gap)
+        local fs = cardText(f, font)
+        fs:ClearAllPoints()
+        fs:SetPoint("TOPLEFT", f, "TOPLEFT", pad, y)
+        fs:SetWidth(w)
+        fs:SetText(text)
+        local c = color or Th.C.text
+        fs:SetTextColor(c[1], c[2], c[3])
+        fs:Show()
+        y = y - ns.textHeight(fs, w) - (gap or 6)
+        return fs
+    end
+    f.sub = put(UI.CARD_SUB[key], ns.LABEL_FONT, Th.C.muted, 10)
+    f.lines = {}
+    for _, line in ipairs(UI.CARD_LINES[key]) do f.lines[#f.lines + 1] = put(line) end
+    f.itemRows = f.itemRows or {}
+    local used = 0
+    f.groups = nil
+    if key == "auto" then
+        y = y - 6
+        f.itemsTitle = put(UI.CARD_ITEMS_TITLE, ns.FIELD_FONT, Th.C.gold)
+        f.groups = UI.collectionGroups()
+        if #f.groups == 0 then put("目前沒有收集組", ns.LABEL_FONT, Th.C.muted) end
+        local colW = math.floor(w / UI.CARD_COLS)
+        for _, g in ipairs(f.groups) do
+            local st = UI.CARD_RULE_STATE[g.state]
+            put(g.title .. (st and ("（" .. st .. "）") or ""), ns.FIELD_FONT, Th.C.title, 4)
+            for _, ch in ipairs(g.chapters) do
+                put(ch.title, ns.LABEL_FONT, Th.C.sub, 2)
+                for i, it in ipairs(ch.items) do
+                    used = used + 1
+                    local row = f.itemRows[used]
+                    if not row then row = W.itemRow(f, colW - 6, UI.CARD_ROW_H - 2); f.itemRows[used] = row end
+                    local col = (i - 1) % UI.CARD_COLS
+                    if col == 0 and i > 1 then y = y - UI.CARD_ROW_H end
+                    row:ClearAllPoints()
+                    row:SetPoint("TOPLEFT", f, "TOPLEFT", pad + col * colW, y)
+                    row.set(it.itemID, it.label)
+                end
+                y = y - UI.CARD_ROW_H - 4
+            end
+        end
+    end
+    for i = used + 1, #f.itemRows do f.itemRows[i]:Hide() end
+    for i = f.gfTextN + 1, #(f.gfTexts or {}) do f.gfTexts[i]:Hide() end
+    f:SetSize(UI.CARD_W, -y + W.CARD_PAD)
+    return f
+end
+function UI.openCard(key, owner)
+    if not UI.CARD_TITLE[key] then return nil end
+    local f = cards[key]
+    if not f then
+        f = W.flowCard(UI.CARD_NAME[key], UI.CARD_TITLE[key])
+        W.closeButton(f)
+        if f.SetClampedToScreen then f:SetClampedToScreen(true) end
+        cards[key] = f
+    end
+    UI.drawCard(key)
+    f:ClearAllPoints()
+    if owner then f:SetPoint("TOPRIGHT", owner, "BOTTOMRIGHT", 0, -4) else f:SetPoint("CENTER", UIParent, "CENTER", 0, 40) end
+    f:Show()
+    return f
+end
+function UI.card(key) return cards[key] end
 
 local function build(p)
     panel = p
     -- GF-UI-H: no title line (it sat under the sub-tab row); see UI.BAR_Y.
-    -- GF-UI-K: 「啟用：」 in front, so the two boxes read as switches, not buttons.
-    autoBox = checkWithLabel(p, UI.AUTO_TEXT, UI.CHECK_X.auto, UI.BAR_Y, function(on) Supply.setAuto(on); UI.refresh() end)
-    UI.checkLabel = label(p, UI.CHECK_LABEL, ns.FIELD_FONT)
-    UI.checkLabel:SetPoint("LEFT", autoBox, "LEFT", UI.CHECK_X.label - UI.CHECK_X.auto, 0) -- on the boxes' line
-    autoBox.tip = "試用：荊棘谷書頁，依任務與背包自動算出缺的和可能多的（規則尚未實機確認）"
-    manualBox = checkWithLabel(p, UI.MANUAL_TEXT, UI.CHECK_X.manual, UI.BAR_Y, function(on) Supply.setManual(on); UI.refresh() end)
-    manualBox.tip = "關掉後不再分享我的刊登，也不顯示別人的刊登"
+    -- GF-FIX-F: two switch rows on the right (was 「啟用：」 + two check boxes).
+    autoBox = switchRow(p, "auto", UI.AUTO_TEXT, UI.BAR_Y, function(on) Supply.setAuto(on); UI.refresh() end)
+    manualBox = switchRow(p, "manual", UI.MANUAL_TEXT, UI.TOOL_Y, function(on) Supply.setManual(on); UI.refresh() end)
     withTip(autoBox); withTip(manualBox)
+    autoBox.help.tip, manualBox.help.tip = "自動集料做什麼、分享什麼、包含哪些物品", "手動刊登做什麼、關掉後會怎樣"
+    withTip(autoBox.help); withTip(manualBox.help)
     tabs = Th.tabStrip(p, (function()
         local items = {}
         for _, t in ipairs(UI.TABS) do items[#items + 1] = { key = t.key, text = t.text } end
@@ -754,6 +941,8 @@ local function build(p)
     UI.statePanel = statePanel
     -- A screenshot preview never outlives the page.
     if p.HookScript then p:HookScript("OnHide", function() state.preview = nil end) end
+    -- GF-FIX-F: the switch cards go with the page too.
+    if p.HookScript then p:HookScript("OnHide", function() for _, f in pairs(cards) do f:Hide() end end) end
     -- GF-009-13: the form and the finder never outlive the page (the window's
     -- X, another module, /gftk); an unsaved form is kept as a draft.
     if p.HookScript then p:HookScript("OnHide", function() UI.closeWithPage() end) end
@@ -979,6 +1168,7 @@ function UI.askDiscard()
     return W.confirm(UI.DISCARD_TEXT, function() UI.closeForm(true) end)
 end
 
+UI.ITEM_TYPE_WAIT = 0.25 -- GF-FIX-F: the same wait as the finder's search
 UI.PREVIEW_TEXT = { loading = "物品資料載入中", missing = "找不到這個物品", bad = "請貼物品連結或輸入物品編號",
     timeout = "物品資料逾時，請稍後再試" } -- GF-009-13: timeout / missing / blocked are three messages
 local loadToken = 0
@@ -1108,7 +1298,20 @@ local function buildForm()
     y = y - 50
     f.itemBox = Th.editBox(f, 230, 30)
     f.itemBox:SetPoint("TOPLEFT", f, "TOPLEFT", 104, y)
-    f.itemBox:SetScript("OnTextChanged", function(self) UI.formFromText(self:GetText()) end)
+    -- GF-FIX-F (review 低-20): typed digits wait 0.25 s (1, 12, 123 … are not
+    -- each asked for); a link (Shift-click, paste) or Enter reads it at once.
+    local itemToken = 0
+    f.itemBox:SetScript("OnTextChanged", function(self, userInput)
+        itemToken = itemToken + 1
+        local token, text = itemToken, self:GetText()
+        if userInput == false or ns.str(text):find("|Hitem:", 1, true) then UI.formFromText(text); return end
+        ns.after(UI.ITEM_TYPE_WAIT, function() if token == itemToken then UI.formFromText(text) end end)
+    end)
+    f.itemBox:SetScript("OnEnterPressed", function(self)
+        itemToken = itemToken + 1
+        self:ClearFocus()
+        UI.formFromText(self:GetText())
+    end)
     f.itemBox.tip = "貼上物品連結或輸入物品編號"
     withTip(f.itemBox)
     f.pick = Th.button(f, "從背包選", 110, ns.BUTTON_H)
@@ -1643,6 +1846,7 @@ function UI.openPicker(source)
     end
     pickState.source = source == "all" and "all" or "bag"
     pickState.text, pickState.class, pickState.subclass, pickState.offset = "", nil, nil, 0
+    L.forgetBags() -- GF-FIX-F: a fresh bag read per opening (then kept until the bags change)
     picker.search:SetText("")
     picker.title:SetText(UI.PICK_TITLE) -- GF-009-14 A: always 找物品 (背包 / 全部 are the tabs)
     UI.pickReload()
@@ -1673,7 +1877,34 @@ end
 ---------------------------------------------------------------------------
 
 Supply.onChanged = UI.refreshSoon
-Supply.onItemInfo = function() UI.refreshSoon(); UI.pickerItemInfoSoon(); UI.formItemInfo() end
+-- GF-FIX-F (review 中-16): only answers to the toolkit's own requests come
+-- here (Widgets.lua drops the rest). The rows on screen with that item are
+-- drawn again at once; the lists are read again (the item may now be hidden
+-- or shown) only where the item is in them.
+local function hasItem(list, id, n)
+    for i = 1, math.min(#list, n or #list) do
+        local e = list[i]
+        if e and e.itemID == id then return true end
+    end
+    return false
+end
+function UI.itemArrived(itemID)
+    local id = tonumber(itemID)
+    if panel and ns.Framework.isModuleShown(UI.ID) and id then
+        local shownRows = {}
+        for i = 1, UI.ROWS do shownRows[i] = state.items[state.offset + i] end
+        if hasItem(shownRows, id) then UI.drawList(); UI.drawDetail() end
+        if hasItem(state.items, id) then UI.refreshSoon() end
+    end
+    if picker and picker:IsShown() then
+        local shownRows = {}
+        for i = 1, UI.PICK_ROWS do shownRows[i] = pickState.items[pickState.offset + i] end
+        if id == nil or hasItem(shownRows, id) then drawPicker() end
+        UI.pickerItemInfoSoon()
+    end
+    UI.formItemInfo()
+end
+Supply.onItemInfo = function(itemID) UI.itemArrived(itemID) end
 ns.Share.onUpdate(function() Supply.invalidate(); UI.refreshSoon() end)
 
 local regen = CreateFrame("Frame")

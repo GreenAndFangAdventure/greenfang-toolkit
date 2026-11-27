@@ -29,6 +29,9 @@ Bank.FORMAT = "1"
 Bank.MAX_ACTIVE = 10
 Bank.MAX_REVOKED = 10
 Bank.ROSTER_CACHE = 5      -- seconds the live roster read is kept (memory only)
+-- GF-FIX-F (review 低-21): a wire value longer than this is refused before
+-- it is parsed (20 entries of about 40 bytes fit with room to spare).
+Bank.MAX_VALUE = 2048
 Bank.RETRY = 60            -- a republish refused as "future" is tried again after this
 Bank.KINDS = { b = true, k = true, bk = true }
 Bank.KIND_NAME = { bags = "背包", bank = "銀行" }
@@ -84,7 +87,8 @@ Bank.guildData = guildData
 ---------------------------------------------------------------------------
 
 local cache = { at = -1 }
-function Bank.invalidate() cache.at = -1 end
+local currentMemo = {}
+function Bank.invalidate() cache.at = -1; currentMemo = {} end
 
 -- The guild master's author id from the live roster, or nil when it cannot be
 -- told (roster not loaded, a row missing, not exactly one rank 0, no GUID).
@@ -158,14 +162,17 @@ end
 
 -- nil for anything malformed (Share then neither stores nor relays it).
 function Bank.decode(_, v)
-    if type(v) ~= "string" then return nil end
+    if type(v) ~= "string" or #v > Bank.MAX_VALUE then return nil end
     local ep, leader, body = v:match("^1;([0-9a-z]+);([%w%-]+);(.*)$")
     local epoch = ep and S().unb36(ep)
     if not epoch or epoch < S().EPOCH or epoch > S().serverNow() + S().FUTURE then return nil end
     local d = { epoch = epoch, leader = leader, entries = {} }
     local seenA, active, revoked = {}, 0, 0
+    local most, n = Bank.MAX_ACTIVE + Bank.MAX_REVOKED, 0
     if body ~= "" then
         for item in (body .. "/"):gmatch("([^/]*)/") do
+            n = n + 1
+            if n > most then return nil end -- GF-FIX-F: stop at the first entry too many
             local a, kinds, on, eep = item:match("^([%w%-]+),(%a+),([01]),([0-9a-z]+)$")
             local e = eep and S().unb36(eep)
             if not a or not Bank.KINDS[kinds] or not e or e > epoch or seenA[a] then return nil end
@@ -185,11 +192,16 @@ end
 
 -- Returns { state, leader, leaderName, list, direct, at }; state is a key of
 -- Bank.STATE_NAME. Only state "ok" has a list.
+-- GF-FIX-F (review 低-18): kept until a record changes (Share.version) or
+-- the roster is read again; one page draw asks for it several times.
 function Bank.current()
     local out = { state = "unknown" }
     if ns.guildState() ~= "target" or not S().store() then return out end
     local leaderA, leaderName = Bank.rosterLeader()
     if not leaderA then return out end
+    local key = tostring(S().version) .. "|" .. tostring(cache.at) .. "|" .. leaderA
+    if currentMemo.key == key then return currentMemo.out end
+    currentMemo = { key = key, out = out }
     out.leader, out.leaderName = leaderA, leaderName
     local rec = S().get(leaderA, Bank.GROUP)
     if not rec then
@@ -501,9 +513,23 @@ ns.Share.registerGroup({
     own = function() return Bank.ownValue() end,
 })
 
+-- GF-FIX-F (review 低-18): Share tells us about every record of everybody;
+-- the page is drawn again only when someone's K record changed (its value,
+-- time or whether it came from the author), or for a change with no author.
+local kSig = {}
+function Bank.kChanged(a)
+    if a == nil then return true end
+    local rec = S().get(a, Bank.GROUP)
+    local sig = rec and (tostring(rec.h or rec.v) .. "|" .. tostring(rec.t) .. "|" .. tostring(rec.fromAuthor == true)) or false
+    local old = kSig[a]
+    if old == nil then old = false end
+    kSig[a] = sig
+    return old ~= sig
+end
+function Bank.resetSignatures() kSig = {} end
 ns.Share.onUpdate(function(a)
     if a == S().selfAuthor() then Bank.heal() end
-    if Bank.onChanged then Bank.onChanged() end
+    if Bank.kChanged(a) and Bank.onChanged then Bank.onChanged() end
 end)
 
 local events = CreateFrame("Frame")
