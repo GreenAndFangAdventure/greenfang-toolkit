@@ -4,7 +4,7 @@
 
 安裝：把 `GreenFangToolkit` 資料夾放到 `World of Warcraft\_forever_\Interface\AddOns\`。在遊戲裡按小地圖按鈕，或輸入 `/gftk`（也可以用 `/綠皮`）打開工具箱。
 
-## 下一版
+## 0.16.15（臨時黑箱：看得到保管人的公產庫存）
 
 ### 臨時黑箱看得到庫存（GF-012-B；只做過離線測試，未實機驗證）
 
