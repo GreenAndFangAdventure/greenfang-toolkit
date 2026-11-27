@@ -368,6 +368,13 @@ local function newRow(i)
     return r
 end
 
+-- GF-009-10: 「教：亞麻斗篷｜裁縫」 for a recipe item whose recipe is known by
+-- its ID (RecipeLink), else nil (nothing guessed).
+function UI.teachText(itemID)
+    local RL = ns.RecipeLink
+    return RL and RL.teachText(itemID) or nil
+end
+
 -- The rows of the current tab: { itemID, qtyText, matchText, tip, ref }.
 function UI.listFor(kind)
     local out = {}
@@ -385,9 +392,11 @@ function UI.listFor(kind)
             local st = L.STATUS_TEXT[l.status] or ""
             local tip = { L.categoryText(l.category), "交易條件：" .. L.termsText(l.terms, l.price) }
             if (l.note or "") ~= "" then tip[#tip + 1] = "備註：" .. l.note end
+            local teach = UI.teachText(l.itemID) -- GF-009-10
+            if teach then table.insert(tip, 1, teach) end
             out[#out + 1] = { itemID = l.itemID, listing = l, qty = q, qtyShort = q, match = st, matchShort = st,
                 fresh = l.status == "active" and ("剩 " .. days .. " 天") or "", ended = l.status ~= "active",
-                tip = tip, hasNote = (l.note or "") ~= "" }
+                tip = tip, hasNote = (l.note or "") ~= "", teach = teach }
         end
         return out
     end
@@ -412,9 +421,11 @@ function UI.listFor(kind)
                     if (UI.manualOf(e).note or "") ~= "" then hasNote = true end
                 end
             end
+            local teach = UI.teachText(it.itemID) -- GF-009-10
+            if teach then table.insert(tip, 1, teach) end
             out[#out + 1] = { itemID = it.itemID, item = it, qty = UI.qtyText(kind, it), match = UI.matchText(kind, it),
                 qtyShort = UI.qtyShort(kind, it), matchShort = UI.matchShort(kind, it), fresh = UI.freshShort(it),
-                tip = tip, hasNote = hasNote, where = where }
+                tip = tip, hasNote = hasNote, where = where, teach = teach }
         end
     end
     return out
@@ -442,9 +453,11 @@ function UI.drawList()
             r.match:SetText(data.matchShort or data.match or "")
             r.fresh:SetText(data.fresh or "")
             -- GF-009-15: where my own items are, on a second line.
-            local two = (data.where or "") ~= ""
+            -- GF-009-10: a recipe item says what it teaches there (when nothing else does).
+            local second = (data.where or "") ~= "" and data.where or data.teach
+            local two = (second or "") ~= ""
             if two ~= (r.gfTwoLine == true) then r.gfTwoLine = two; UI.placeRow(r, UI.listWidth()) end
-            r.where:SetText(two and data.where or "")
+            r.where:SetText(two and second or "")
             if two then r.where:Show() else r.where:Hide() end
             r.noteIcon:ClearAllPoints()
             r.noteIcon:SetPoint("BOTTOMRIGHT", r.icon, "BOTTOMRIGHT", 4, -4)
@@ -1570,6 +1583,23 @@ function UI.openForm(listing, force)
         f.gold:SetText(d.gold or ""); f.silver:SetText(d.silver or ""); f.copper:SetText(d.copper or "")
         if (f.msg:GetText() or "") == "" then formMessage(UI.DRAFT_BACK) end
     end
+    return true
+end
+
+-- GF-009-10 「尋找圖紙」: a new listing with the item filled in (方向 徵求,
+-- 數量 1, the rest as for 刊登); nothing is sent until the player presses 刊登.
+-- category: the type until the client has the item (then its class decides).
+-- An open form with unsaved changes is kept: false, "busy".
+function UI.prefill(itemID, category)
+    if not Supply.manualOn() then return false, "off" end
+    if UI.formDirty() then
+        if form.Raise then form:Raise() end
+        return false, "busy"
+    end
+    if not UI.openForm(nil, true) then return false, "off" end
+    setFormItem(itemID)
+    if category and formState.category == "other" then formState.category = category end
+    formState.initial = formSnapshot() -- filled in by us: closing it asks nothing
     return true
 end
 

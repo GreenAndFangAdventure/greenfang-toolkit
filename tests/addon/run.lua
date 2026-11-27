@@ -4779,6 +4779,9 @@ assert(loadfile(ROOT .. "/tests/addon/gf012fix_tests.lua"))()({ test = test, eq 
 -- GF-DIGEST-01: /gftkdev traits, the talent tree's IDs as copyable text (tests/addon/digest01_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/digest01_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-009-10: 「尋找圖紙」 on the 配方 page and what a recipe item teaches in 綠皮調貨所 (tests/addon/gf00910_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf00910_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0
