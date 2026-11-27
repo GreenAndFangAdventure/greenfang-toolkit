@@ -1617,7 +1617,8 @@ end
 
 -- GF-002-J (owner: test records): clear every ended ticket of mine (expired, unfinished,
 -- cancelled, done), my signups on ended tickets, my closed worker ticket and my whole
--- completion log. They are gone from my next upload. Returns tickets, log records removed.
+-- completion log. They are gone from my next upload, but no removed is sent: the site
+-- keeps what it has (owner 2026-11-27). Returns tickets, log records removed.
 function Adv.clearEnded()
     local my = me()
     if not my then return 0, 0 end
@@ -1626,7 +1627,6 @@ function Adv.clearEnded()
     for _, e in ipairs(mine) do
         local v = views[e.id]
         if e.st == "x" or e.st == "c" or (v and v.closed) then n = n + 1; Adv.local_().reopen[e.id] = nil
-            Adv.markRemoved(e.id, "test")
         else kept[#kept + 1] = e end
     end
     if n > 0 then save("T", kept) end
@@ -1639,7 +1639,6 @@ function Adv.clearEnded()
     local w = listOf(my, "W")[1]
     if w and w.st == "x" then save("W", {}) end
     local logN = #Adv.myLog()
-    for _, r in ipairs(Adv.myLog()) do Adv.markRemoved(r.id, "test") end
     Adv.local_().log[my] = {}
     for id in pairs(Adv.local_().deleted) do Adv.local_().deleted[id] = nil end
     return n, logN
@@ -1647,7 +1646,10 @@ end
 
 -- GF-016-T (T5, upload-api v1.6 §4a): my deleted tickets, sent as adventure.removed
 -- with every upload while they are kept (removed is cumulative on the site; leaving
--- the list here does not undo it). why: "owner" (刪除) or "test" (清除已結束).
+-- the list here does not undo it). Only 刪除 (deleteTicket) sends one, why = "owner".
+-- owner 2026-11-27: 清除已結束 (clearEnded) only tidies this computer and sends nothing,
+-- so what the site keeps stays; it does not clear these either. "test" is allowed by
+-- upload-api §4a but nothing in the AddOn sends it now.
 -- db.adventure.removed[<author>] = { [<id>] = { at, why } }, 30 days / 50 like the log.
 function Adv.myRemoved()
     local o = Adv.local_()

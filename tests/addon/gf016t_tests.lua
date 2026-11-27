@@ -2,7 +2,7 @@
 --   T1 log records carry at        T2 log records carry by (leader / seen)
 --   T3 a step back keeps a revoked record (at = the step back)
 --   T4 reopenOf on 重開 is a new event revision (correction)
---   T5 deleteTicket / clearEnded send adventure.removed
+--   T5 deleteTicket sends adventure.removed (owner); clearEnded sends nothing (owner 2026-11-27)
 --   T6 one revision per ticket, shared by tickets and log, +1 only on a real change
 --   T7 a member's event destination is checked here (quest ids, dungeon code, zone)
 -- Old saves (no rv / by) load and upload without made-up fields.
@@ -273,7 +273,7 @@ return function(T)
     -- T5
     ---------------------------------------------------------------------------
 
-    test("gf016t T5 刪除 / 清除已結束: adventure.removed (owner / test), kept 30 days", function()
+    test("gf016t T5 刪除: adventure.removed (owner), kept 30 days; 清除已結束: none, earlier ones stay", function()
         local ns = login()
         local Adv = ns.Adventure
         local id = Adv.open({ dungeon = "smg", leaderRole = "d" })
@@ -282,17 +282,32 @@ return function(T)
         local up = upMine(ns)
         ok(up and up.removed, "removed sent")
         eq(up.removed.value[id].why, "owner", "owner"); eq(up.removed.value[id].at, t, "at")
-        -- 清除已結束: an ended ticket and the log.
+        -- 清除已結束: only this computer; no removed for the ended ticket or its log record.
         local id2 = formed(ns)
         Adv.leader(id2, "done")
-        Adv.clearEnded()
+        local n, logN = Adv.clearEnded()
+        ok(n >= 1 and logN >= 1, "cleared here")
         up = upMine(ns)
-        eq(up.removed.value[id2].why, "test", "test"); eq(up.removed.value[id].why, "owner", "still the first")
+        eq(up.removed.value[id2], nil, "清除已結束 sends no removed")
+        eq(up.removed.value[id].why, "owner", "the 刪除 one stays")
+        local count = 0
+        for _ in pairs(up.removed.value) do count = count + 1 end
+        eq(count, 1, "only the 刪除 one")
         -- Not in another leader's upload.
         eq((Adv.uploadFor(B) or {}).removed, nil, "only mine")
         wow.state.now = wow.state.now + 31 * DAY
         up = upMine(ns)
         eq(up and up.removed, nil, "gone after 30 days")
+    end)
+
+    test("gf016t T5 清除已結束 alone: nothing sent, no removed table in the save", function()
+        local ns = login()
+        local Adv = ns.Adventure
+        local id = formed(ns)
+        Adv.leader(id, "done")
+        Adv.clearEnded()
+        eq((upMine(ns) or {}).removed, nil, "no removed")
+        eq(GreenFangToolkitDB.adventure.removed, nil, "no table")
     end)
 
     ---------------------------------------------------------------------------
