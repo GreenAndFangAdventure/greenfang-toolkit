@@ -770,12 +770,36 @@ function Orders.maintain()
 end
 
 -- Local data: GreenFangToolkitDB.orders (history, seen, trades, unsure).
+-- GF-FIX-H: a damaged save (a list that is a string, ...) is checked once per
+-- table: the broken entry is dropped, everything else stays.
+local LOCAL_TABLES = { "history", "seen", "trades", "unsure", "reagents" }
+local checked = setmetatable({}, { __mode = "k" })
+local function scrubLocal(o)
+    for key, list in pairs(o.history) do
+        if type(list) ~= "table" then
+            o.history[key] = nil
+        else
+            for i = #list, 1, -1 do
+                if type(list[i]) ~= "table" then table.remove(list, i) end
+            end
+        end
+    end
+    for id, at in pairs(o.unsure) do
+        if type(at) ~= "number" then o.unsure[id] = nil end
+    end
+end
 function Orders.local_()
     local db = ns.db
     if type(db.orders) ~= "table" then db.orders = {} end
     local o = db.orders
-    for _, k in ipairs({ "history", "seen", "trades", "unsure", "reagents" }) do
+    for i = 1, #LOCAL_TABLES do
+        local k = LOCAL_TABLES[i]
         if type(o[k]) ~= "table" then o[k] = {} end
+    end
+    -- Checked again only when one of the two tables was replaced.
+    if checked[o.history] ~= o.unsure then
+        scrubLocal(o)
+        checked[o.history] = o.unsure
     end
     return o
 end

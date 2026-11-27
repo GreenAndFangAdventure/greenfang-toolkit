@@ -334,7 +334,11 @@ local STORE_TABLES = { "rec", "tomb", "gone", "queued", "idsSent", "named" }
 -- GF-001-D23: records kept under "|<guild>" while the realm was empty,
 -- merged into the realm's store g (newer wins).
 local mergeChecked
+-- GF-FIX-H: set below (needs the caches declared further down).
+local scrubStore
+local checkedRec = setmetatable({}, { __mode = "k" })
 function Share.mergeLost(g, old)
+    scrubStore(old)
     for a, groups in pairs(type(old.rec) == "table" and old.rec or {}) do
         g.rec[a] = g.rec[a] or {}
         for gr, rec in pairs(groups) do
@@ -367,6 +371,11 @@ local function store()
     for i = 1, #STORE_TABLES do
         local k = STORE_TABLES[i]
         if type(g[k]) ~= "table" then g[k] = {} end
+    end
+    -- GF-FIX-H: a damaged save is checked once per rec table (see scrubStore).
+    if not checkedRec[g.rec] then
+        checkedRec[g.rec] = true
+        scrubStore(g)
     end
     -- GF-001-D23: while GetRealmName() gave "", 0.9.5/0.9.6 kept this guild's
     -- data under "|<guild>". Merge it in once the realm is known (newer wins).
@@ -437,6 +446,45 @@ function Share.digest(a)
     digestCache[a] = { d = d, m = m }
     return d, m
 end
+-- GF-FIX-H: a damaged save (an author's records that are a string, one
+-- record without t/h/v, a tombstone that is not a time, ...) is checked once
+-- per rec table: the broken entries are dropped, everything else stays. What
+-- is stored afterwards went through offer()/tombstone and is well formed.
+local function dropBad(t, ok)
+    if type(t) ~= "table" then return false end
+    local dropped = false
+    for a, inner in pairs(t) do
+        if type(a) ~= "string" or type(inner) ~= "table" then
+            t[a] = nil; dropped = true
+        else
+            for k, v in pairs(inner) do
+                if type(k) ~= "string" or not ok(v) then inner[k] = nil; dropped = true end
+            end
+        end
+    end
+    return dropped
+end
+local function goodRec(r)
+    return type(r) == "table" and type(r.t) == "number" and type(r.h) == "string" and type(r.v) == "string"
+end
+local function isNumber(v) return type(v) == "number" end
+local function isTable(v) return type(v) == "table" end
+scrubStore = function(g)
+    local dropped = dropBad(g.rec, goodRec)
+    dropped = dropBad(g.tomb, isNumber) or dropped
+    dropBad(g.queued, isTable)
+    dropBad(g.idsSent, isTable)
+    if type(g.gone) == "table" then
+        for a, at in pairs(g.gone) do
+            if type(at) ~= "number" then g.gone[a] = nil end
+        end
+    end
+    if dropped then
+        recordCount, digestCache = nil, {}
+        Share.version = (Share.version or 0) + 1
+    end
+end
+
 function Share.digestNow(a)
     local s = store()
     local items, maxT = {}, 0

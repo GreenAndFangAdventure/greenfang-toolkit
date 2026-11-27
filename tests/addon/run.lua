@@ -4747,6 +4747,9 @@ assert(loadfile(ROOT .. "/tests/addon/gffixf_tests.lua"))()({ test = test, eq = 
 -- GF-009-15: 調貨所 「開｜關」 switch cells; 自動集料 sources 行囊／材料袋／銀行／信箱（未收） (tests/addon/gf00915_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gf00915_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-TEST-01: 0.12.6 and 0.15.1 saves loaded by this version (tests/addon/gftest01_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gftest01_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0

@@ -105,23 +105,54 @@ end
 -- Storage: GreenFangToolkitDB.ledger[<id>][<realm|guild>].rec[a][g] = { t, h, v }
 ---------------------------------------------------------------------------
 
+-- GF-FIX-H: a damaged save (an author's records or one record that is not a
+-- table, a field of the wrong type) is checked once per rec table, the first
+-- time it is read: the broken entries are dropped, everything else stays.
+-- What is stored afterwards went through offer() and is always well formed.
+local checked = setmetatable({}, { __mode = "k" })
+local function scrub(self, rec)
+    checked[rec] = true
+    local dropped = false
+    for a, groups in pairs(rec) do
+        if type(a) ~= "string" or type(groups) ~= "table" then
+            rec[a] = nil; dropped = true
+        else
+            local here = false
+            for g, r in pairs(groups) do
+                if type(g) ~= "string" or type(r) ~= "table" or type(r.t) ~= "number"
+                    or type(r.h) ~= "string" or type(r.v) ~= "string" then
+                    groups[g] = nil; here = true
+                end
+            end
+            if here then
+                dropped = true
+                if next(groups) == nil then rec[a] = nil end -- as drop() does
+            end
+        end
+    end
+    if dropped then self.digests, self.totalsCache = {}, nil end
+end
+
 -- readOnly: do not create empty tables (reading must not grow the save file).
 function L:store(readOnly)
     local db = ns.db
     if not db then return nil end
     local key = guildKey()
     if not key then return nil end
+    local g
     if readOnly then
         local mine = type(db.ledger) == "table" and db.ledger[self.cfg.id]
-        local g = type(mine) == "table" and mine[key]
-        return type(g) == "table" and type(g.rec) == "table" and g or nil
+        g = type(mine) == "table" and mine[key]
+        if type(g) ~= "table" or type(g.rec) ~= "table" then return nil end
+    else
+        if type(db.ledger) ~= "table" then db.ledger = {} end
+        local mine = db.ledger[self.cfg.id]
+        if type(mine) ~= "table" then mine = {}; db.ledger[self.cfg.id] = mine end
+        g = mine[key]
+        if type(g) ~= "table" then g = {}; mine[key] = g end
+        if type(g.rec) ~= "table" then g.rec = {} end
     end
-    if type(db.ledger) ~= "table" then db.ledger = {} end
-    local mine = db.ledger[self.cfg.id]
-    if type(mine) ~= "table" then mine = {}; db.ledger[self.cfg.id] = mine end
-    local g = mine[key]
-    if type(g) ~= "table" then g = {}; mine[key] = g end
-    if type(g.rec) ~= "table" then g.rec = {} end
+    if not checked[g.rec] then scrub(self, g.rec) end
     return g
 end
 
