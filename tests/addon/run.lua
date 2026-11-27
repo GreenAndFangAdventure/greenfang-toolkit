@@ -3875,6 +3875,7 @@ test("D19 roster filters: profession (incl. secondary), class, online, minimum l
     eq(shown(), "測試乙,測試甲", "level 30+")
     ns.UI.levelBox:SetText("50")
     ns.UI.levelBox._scripts.OnTextChanged(ns.UI.levelBox)
+    wow.advance(0.16) -- GF-FIX-B: keys within 0.15 s make one more redraw at the end of it
     eq(shown(), "測試乙", "level 50+")
     ns.UI.skillChoice.setOnly(197)
     eq(shown(), "", "nobody: tailoring and 50+")
@@ -4731,6 +4732,11 @@ assert(loadfile(ROOT .. "/tests/addon/gffixe_tests.lua"))()({ test = test, eq = 
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 -- GF-FIX-D: 0.16.6 review batch D: adventure quest log cache, rowsFor once per change, guards (tests/addon/gffixd_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gffixd_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+
+
+-- GF-FIX-B: 0.16.6 review batch B: roster caches, search, scroll; one-page tabs, 4:3 fit, order state names (tests/addon/gffixb_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gffixb_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 

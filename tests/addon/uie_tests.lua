@@ -73,13 +73,15 @@ return function(env)
         eq(_G[F.WINDOW_NAME].TitleText:GetText(), "綠皮冒險工具箱｜委託業務", "GF-UI-K: the entry name")
     end)
 
-    test("GF-UI-E single-page entries show no tab (GF-UI-K); 事務設定 opens 同步與診斷", function()
+    test("GF-UI-E single-page entries show their one tab (GF-FIX-B); 事務設定 opens 同步與診斷", function()
         local ns = login()
         local F = ns.Framework
         SlashCmdList.GREENFANGTOOLKIT("adventure")
         local tabs = {}
         for _, b in ipairs(F.subTabButtons()) do if b:IsShown() then tabs[#tabs + 1] = b end end
-        eq(#tabs, 0, "GF-UI-K: one page, no tab row")
+        eq(#tabs, 1, "GF-FIX-B (owner): one page, its one tab")
+        eq(tabs[1]:GetText(), "業務大廳", "the page's name")
+        ok(tabs[1].gfSelected, "chosen (gold), like the open tab of a multi-page entry")
         eq(_G[F.WINDOW_NAME].TitleText:GetText(), "綠皮冒險工具箱｜冒險業務", "the title names the entry")
         local s = F.settingsButton()
         ok(not ns.Diag.isShown(), "closed")

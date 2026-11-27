@@ -517,7 +517,76 @@ function T.window(name, parent, w, h)
     f.gfTitleLine = T.hline(f, -T.TITLE_H, 1, 1)
     f.CloseButton = T.closeButton(f)
     f.gfClose = f.CloseButton
+    -- GF-FIX-B (owner: 4:3 screens): every window fits on the screen (T.fit).
+    f.gfFitW, f.gfFitH = w, h
+    T.fitFrames[#T.fitFrames + 1] = f
+    if f.HookScript then f:HookScript("OnShow", function(self) T.fit(self) end) end
     return f
+end
+
+---------------------------------------------------------------------------
+-- GF-FIX-B (owner): fit the windows on narrow screens (4:3, a big UI scale).
+-- When a window opens, and on DISPLAY_SIZE_CHANGED / UI_SCALE_CHANGED (the
+-- main window listens, Framework), a window wider or taller than the screen
+-- less T.FIT_MARGIN on each side is scaled down evenly until it just fits;
+-- with room enough its scale is 1. The layout inside never changes. The main
+-- window (gfFitMain) sets the ratio; a separate window that does not fit at 1
+-- takes the same ratio (smaller still only if it needs it). Children of the
+-- main window follow it by themselves. No frame, no timer, no OnUpdate; in
+-- combat a protected window is left alone (T.fitPending, redone after).
+---------------------------------------------------------------------------
+T.FIT_MARGIN = 20
+T.FIT_MIN = 0.3
+T.fitFrames = {}
+T.mainScale = 1
+T.fitPending = false
+
+-- The scale that makes w x h fit in UIParent (1 when it fits as it is).
+function T.fitScale(w, h)
+    local W = UIParent and ns.num((ns.call(UIParent.GetWidth, UIParent)))
+    local H = UIParent and ns.num((ns.call(UIParent.GetHeight, UIParent)))
+    w, h = ns.num(w), ns.num(h)
+    if not (W and H and w and h) or W <= 0 or H <= 0 or w <= 0 or h <= 0 then return 1 end
+    local s = math.min(1, (W - 2 * T.FIT_MARGIN) / w, (H - 2 * T.FIT_MARGIN) / h)
+    return math.max(T.FIT_MIN, s)
+end
+
+local function sizeOf(f)
+    local w = math.max(ns.num(f.gfFitW) or 0, ns.num((ns.call(f.GetWidth, f))) or 0)
+    local h = math.max(ns.num(f.gfFitH) or 0, ns.num((ns.call(f.GetHeight, f))) or 0)
+    return w, h
+end
+
+-- Fit one window; returns the scale it has (nil: left alone in combat).
+function T.fit(f)
+    if not (f and f.SetScale) then return nil end
+    if ns.inCombat() and f.IsProtected and f:IsProtected() then T.fitPending = true; return nil end
+    local own = T.fitScale(sizeOf(f))
+    local s
+    if f.gfFitMain then
+        s = own
+        T.mainScale = s
+    elseif own >= 1 then
+        s = 1
+    else
+        s = math.min(own, T.mainScale)
+    end
+    if f.gfFitScale ~= s then
+        f:SetScale(s)
+        f.gfFitScale = s
+    end
+    return s
+end
+
+-- The screen changed: the main window first (it sets the ratio), then every
+-- open window. Closed ones fit when they open.
+function T.refit()
+    T.fitPending = false
+    for _, f in ipairs(T.fitFrames) do if f.gfFitMain then T.fit(f) end end
+    for _, f in ipairs(T.fitFrames) do
+        if not f.gfFitMain and f.IsShown and f:IsShown() then T.fit(f) end
+    end
+    return T.mainScale
 end
 
 ---------------------------------------------------------------------------
