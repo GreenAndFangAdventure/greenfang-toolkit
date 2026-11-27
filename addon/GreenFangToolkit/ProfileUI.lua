@@ -190,7 +190,11 @@ function ProfileUI.refresh()
         drawRole(controls.can[r], own ~= nil and (own.can[r] == true or isMain), enabled and not isMain, suggested)
         if isMain then ns.OrdersUI.setSelected(controls.can[r], true) end
     end
-    if own and own.main == nil then controls.unset:Disable() else controls.unset:Enable() end
+    -- GF-UI-K (owner: grey 「未設定」 looked unusable): when no main role is set it
+    -- is the chosen one (gold, like the chosen role icon); it cannot be pressed again.
+    local unsetOn = own ~= nil and own.main == nil
+    ns.Theme.setSelected(controls.unset, unsetOn)
+    if unsetOn then controls.unset:Disable() else controls.unset:Enable() end
     controls.share.set(own ~= nil and own.share == true)
     -- 我的業務
     local items = Pr.myBusiness()

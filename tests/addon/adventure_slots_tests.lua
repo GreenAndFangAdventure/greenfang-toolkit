@@ -520,7 +520,7 @@ return function(T)
             for _, r in ipairs(U.rowFrames()) do
                 if r:IsShown() and r.view and r.view.id == id then
                     for _, b in ipairs(r.buttons) do if b:IsShown() and b.action == "done" then glow = b.glowing and b.sel:IsShown() end end
-                    eq(plain(r.badge.text._text), "成團", "GF-002-I R-17.11: 成團 on the state badge (line 2)")
+                    eq(plain(r.badge.text._text), "已成團", "GF-002-I R-17.11: 成團 on the state badge (line 2)")
                 end
             end
         end
@@ -560,7 +560,7 @@ return function(T)
         eq(#d14, 1, "day 14"); ok(d14[1].final, "finalized")
         -- The window.
         ns.Framework.open("adventure")
-        ok(plain(U.calendarButton:GetText()) == " 行事曆" or plain(U.calendarButton:GetText()):find("行事曆", 1, true), "行事曆 button")
+        ok(plain(U.calendarButton:GetText()):find("業務排程", 1, true), "GF-UI-K: 行事曆 = 業務排程 (spec §3)")
         wow.click(U.calendarButton)
         local f = U.calendar()
         ok(f:IsShown(), "opened")
@@ -797,9 +797,18 @@ return function(T)
         U.pickWorkerQuests(wf.quests)
         local qp = U.questPickerFrame()
         ok(qp.all:IsShown(), "日誌全部 at the top"); eq(qp.all.label._text, "日誌全部 3", "with the count")
+        -- GF-UI-K: the zones first (as the adventure ticket); each zone opens its quests, 區域 goes back.
+        local zones = {}
+        for _, z in ipairs(qp.zoneRows) do if z:IsShown() then zones[#zones + 1] = z.zone end end
+        ok(#zones >= 1, "zones first: " .. #zones)
+        for _, r in ipairs(qp.rows) do ok(not r:IsShown(), "no quest rows before a zone is chosen") end
         local rows = {}
-        for _, r in ipairs(qp.rows) do if r:IsShown() then rows[r.questId] = r end end
-        wow.click(rows[850]); wow.click(rows[851]); wow.click(rows[1101])
+        for _, name in ipairs(zones) do
+            for _, z in ipairs(qp.zoneRows) do if z:IsShown() and z.zone == name then wow.click(z); break end end
+            for _, r in ipairs(qp.rows) do if r:IsShown() and (r.questId == 850 or r.questId == 851 or r.questId == 1101) then rows[#rows + 1] = r.questId; wow.click(r) end end
+            wow.click(qp.back)
+        end
+        eq(#rows, 3, "three quests from the zones")
         ok(plain(wf.quests:GetText()):find("測試任務：草原之心 16、測試任務：綠洲 22 +1", 1, true), "names on the button: " .. plain(wf.quests:GetText()))
         U.saveWorker()
         local w = ns.Adventure.myWorker()

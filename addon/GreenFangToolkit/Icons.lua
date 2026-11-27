@@ -119,6 +119,69 @@ function Icons.setClassIcon(tex, token)
     return false
 end
 
+---------------------------------------------------------------------------
+-- GF-UI-K (owner, 0.16.6): the personnel file's picture is the game's own race
+-- head: a male character gets the orc (then goblin) head, a female character
+-- the 天裔精靈 head (Forever's new race). Only atlases the client ships; each
+-- is checked with C_Texture.GetAtlasInfo and the class icon stays otherwise.
+-- 天裔精靈's internal race file is not known offline: the guild roster data has
+-- raceID 96 (塑風者天裔精靈) and 95 (高天盟天裔精靈), and the client gives
+-- the file name (C_CreatureInfo.GetRaceInfo(id).clientFileString) at run time.
+-- Not verified in game (MANUAL GF-UI-K); /gftk probe lists what exists.
+---------------------------------------------------------------------------
+
+Icons.PORTRAIT_MALE = { "raceicon128-orc-male", "raceicon-orc-male", "raceicon128-goblin-male", "raceicon-goblin-male" }
+Icons.PORTRAIT_FEMALE_RACES = { 96, 95 }
+Icons.SEX_MALE, Icons.SEX_FEMALE = 2, 3 -- UnitSex
+
+function Icons.atlasExists(name)
+    local ct = rawget(_G, "C_Texture")
+    if type(name) ~= "string" or type(ct) ~= "table" or type(ct.GetAtlasInfo) ~= "function" then return false end
+    local ok, info = pcall(ct.GetAtlasInfo, name)
+    return ok and info ~= nil and info ~= false
+end
+
+-- The race file of a raceID (lower case), or nil.
+function Icons.raceFile(raceID)
+    local ci = rawget(_G, "C_CreatureInfo")
+    if type(ci) ~= "table" or type(ci.GetRaceInfo) ~= "function" then return nil end
+    local ok, info = pcall(ci.GetRaceInfo, raceID)
+    local file = ok and type(info) == "table" and info.clientFileString or nil
+    return type(file) == "string" and file ~= "" and file:lower() or nil
+end
+
+-- The atlas names to try for a sex (UnitSex: 2 male, 3 female), in order.
+function Icons.portraitAtlases(sex)
+    if sex == Icons.SEX_MALE then return Icons.PORTRAIT_MALE end
+    local out = {}
+    if sex == Icons.SEX_FEMALE then
+        for _, id in ipairs(Icons.PORTRAIT_FEMALE_RACES) do
+            local file = Icons.raceFile(id)
+            if file then
+                out[#out + 1] = "raceicon128-" .. file .. "-female"
+                out[#out + 1] = "raceicon-" .. file .. "-female"
+            end
+        end
+    end
+    return out
+end
+
+-- The race head for sex, else the class icon. Returns "atlas", name / "class".
+function Icons.setPortrait(tex, sex, classToken)
+    if not tex then return nil end
+    if tex.SetAtlas then
+        for _, name in ipairs(Icons.portraitAtlases(sex)) do
+            if Icons.atlasExists(name) and pcall(tex.SetAtlas, tex, name) then
+                tex:Show()
+                return "atlas", name
+            end
+        end
+    end
+    if tex.SetTexCoord then tex:SetTexCoord(0, 1, 0, 1) end
+    Icons.setClassIcon(tex, classToken)
+    return "class"
+end
+
 -- Put a profession icon on a texture: the client's own icon first (file ID or
 -- path from GetProfessionInfo), else the built-in table. False = use text.
 function Icons.setProfessionIcon(tex, prof)

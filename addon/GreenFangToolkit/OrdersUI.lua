@@ -34,7 +34,7 @@ UI.ICON = {
     online = "Interface\\FriendsFrame\\StatusIcon-Online",
     unknown = "Interface\\Icons\\INV_Misc_QuestionMark",
 }
-UI.STATE_NAME = { waiting = "等接單", making = "製作中", checking = "待驗收", deal = "成交", cancel = "取消" }
+UI.STATE_NAME = { waiting = "等接單", making = "製作中", checking = "待驗收", deal = "已成交", cancel = "已取消" } -- GF-UI-K: 已 on the ended ones (spec §3)
 UI.BUTTON = {
     accept = { icon = "deal", tip = "接單" }, decline = { icon = "cancel", tip = "不接" },
     cancel = { icon = "cancel", tip = "取消" }, deal = { icon = "deal", tip = "成交" },
@@ -698,7 +698,7 @@ function UI.refresh()
     shownRows = UI.pageRows()
     content:SetHeight(math.max(1, #shownRows * ROW_HEIGHT))
     UI.layoutRows()
-    UI.emptyLine:SetText(#shownRows == 0 and "沒有訂單" or "") -- GF-002-D
+    UI.emptyLine:SetText(#shownRows == 0 and "沒有委託" or "") -- GF-002-D; GF-UI-K: 訂單 = 委託
     if UI.servicesPopup and UI.servicesPopup:IsShown() then UI.drawServices() end
 end
 

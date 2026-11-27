@@ -303,7 +303,7 @@ return function(T)
         end
         ok(table.concat(names, ","):find("職工名冊,委託業務", 1, true), "職工名冊, 委託業務: " .. table.concat(names, ","))
         ok(ns.Framework.isShown(), "window open")
-        eq(_G.GreenFangToolkit_MainWindow.TitleText:GetText(), "綠皮冒險工具箱｜訂單", "the window title keeps the full name")
+        eq(_G.GreenFangToolkit_MainWindow.TitleText:GetText(), "綠皮冒險工具箱｜委託業務", "GF-UI-K: the window title is the entry name")
     end)
 
     ---------------------------------------------------------------------------

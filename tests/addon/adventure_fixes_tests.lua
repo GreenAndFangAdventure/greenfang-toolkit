@@ -189,7 +189,7 @@ return function(T)
         table.sort(want)
         eq(collect(), table.concat(want, ","), "已結束: 過期, 成行, 取消 and my closed worker ticket")
         ok(U.clearButton:IsShown() and plain(U.clearButton:GetText()):find("清除", 1, true), "清除 on 已結束")
-        eq(rowOf(U, done).badge, "成行", "成行 is there"); eq(rowOf(U, past).badge, "過期", "過期 too")
+        eq(rowOf(U, done).badge, "已成行", "成行 is there"); eq(rowOf(U, past).badge, "已過期", "過期 too")
         wow.click(U.activeTab)
         eq(U.tab, "active", "back")
     end)
@@ -354,6 +354,12 @@ return function(T)
         for i = 1, 30 do z2[#z2 + 1] = { 4000 + i, "測試任務 乙" .. i, 22 } end
         questLog({ z1, z2 })
         local qp = (U.openWorker() and U.pickWorkerQuests(UIParent))
+        -- GF-UI-K: the worker picker shows the zones first too; open 貧瘠之地.
+        local function openZone(name)
+            for _, z in ipairs(qp.zoneRows) do if z:IsShown() and z.zone == name then wow.click(z); return true end end
+            return false
+        end
+        ok(openZone("貧瘠之地"), "zone row")
         ok(qp.pages >= 2, "pages: " .. qp.pages)
         ok(qp._h <= U.QP_MAX_Y + 60, "the height stays: " .. qp._h)
         ok(qp.prev:IsShown() and qp.next:IsShown() and qp.pageText._text == "1/" .. qp.pages, "◀ 1/N ▶")
@@ -367,20 +373,23 @@ return function(T)
         ok(other and not other.elite:IsShown() and other.name._color[1] < 1, "the others dimmer")
         -- Every row of a page inside the frame.
         local seen = {}
-        for page = 1, qp.pages do
-            for _, r in ipairs(qp.rows) do
-                if r:IsShown() then
-                    local p = r._points[1]
-                    ok(p[4] >= 0 and p[4] + r._w <= qp._w and -p[5] + r._h <= qp._h - 50, "inside: " .. r.questId)
-                    seen[r.questId] = true
+        for _, zone in ipairs({ "貧瘠之地", "灰谷" }) do
+            if zone ~= "貧瘠之地" then wow.click(qp.back); ok(openZone(zone), zone) end
+            for page = 1, qp.pages do
+                for _, r in ipairs(qp.rows) do
+                    if r:IsShown() then
+                        local p = r._points[1]
+                        ok(p[4] >= 0 and p[4] + r._w <= qp._w and -p[5] + r._h <= qp._h - 50, "inside: " .. r.questId)
+                        seen[r.questId] = true
+                    end
                 end
+                wow.click(qp.next)
             end
-            wow.click(qp.next)
+            ok(qp.next.disabled, "the last page: ▶ greyed out")
         end
         local n = 0
         for _ in pairs(seen) do n = n + 1 end
         eq(n, 60, "every quest on some page")
-        ok(qp.next.disabled, "the last page: ▶ greyed out")
         C_QuestLog = nil
     end)
 
