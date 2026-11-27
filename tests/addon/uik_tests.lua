@@ -253,12 +253,9 @@ return function(T)
         eq(pt[4] .. "," .. pt[5], UI.LIST_X .. "," .. UI.TOOL_Y, "at the list's left edge, right over the header")
         ok(-pt[5] + UI.postButton._h <= -UI.HEAD_Y, "above the column header")
         -- B2
-        eq(UI.checkLabel._text, "啟用：", "the two boxes are labelled")
+        -- GF-FIX-F: 「啟用：」 + two boxes became two switch rows (開／關 in words).
         eq(UI.autoBox.label._text, "自動集料", "自動集料"); eq(UI.manualBox.label._text, "手動刊登", "手動刊登")
-        local lp = UI.checkLabel._points[1]
-        eq(lp[2], UI.autoBox, "on the boxes' line"); eq(lp[4], UI.CHECK_X.label - UI.CHECK_X.auto, "in front of them")
-        ok(UI.CHECK_X.label + ns.labelWidth("啟用：") <= UI.CHECK_X.auto, "the label ends before the first box")
-        ok(UI.CHECK_X.auto + 20 + ns.labelWidth("自動集料") + 8 <= UI.CHECK_X.manual, "the boxes apart")
+        ok(UI.SWITCH_X.name + ns.labelWidth("自動集料") <= UI.SWITCH_X.button, "the name ends before its switch")
         -- B3
         eq(UI.header.cells[2]._text, "類型／數量", "the column says what the cell shows")
         -- B4: the live one first, the ended one after and faded.

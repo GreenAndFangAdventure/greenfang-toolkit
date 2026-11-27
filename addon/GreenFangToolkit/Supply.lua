@@ -318,6 +318,12 @@ function Supply.scanNow()
     if ns.inCombat() then stats.combatSkips = stats.combatSkips + 1; return "combat" end
     Supply.dirty = false
     stats.scans = stats.scans + 1
+    -- GF-FIX-F (review 低-22): the page hears about a scan only when it
+    -- changed something it shows (a snapshot stored, the counts, a read
+    -- that failed or came back, the first scan).
+    local before = table.concat({ tostring(last.scanAt ~= nil), tostring(last.questOK), tostring(last.bagOK),
+        tostring(last.missing), tostring(last.surplus) }, "|")
+    local stored = false
     last.scanAt = ns.Share.serverNow()
     local active = Supply.activeRules()
     local activeSet = {}
@@ -327,7 +333,7 @@ function Supply.scanNow()
         if rule.usable and not activeSet[rule] then
             local a = ns.Share.selfAuthor()
             local rec = a and ns.Share.get(a, Rules.groupOf(rule))
-            if rec and rec.v ~= Supply.emptyValue(rule) then publish(rule, Supply.emptyValue(rule)) end
+            if rec and rec.v ~= Supply.emptyValue(rule) and publish(rule, Supply.emptyValue(rule)) == "stored" then stored = true end
             last.snaps[rule.collectionID] = nil
         end
     end
@@ -347,10 +353,12 @@ function Supply.scanNow()
         for _ in pairs(snap.missing) do missing = missing + 1 end
         for _ in pairs(snap.surplus) do surplus = surplus + 1 end
         if next(snap.unknown) then note("有任務狀態不明的章節：那些物品不列入供需") end
-        publish(rule, Supply.encode(rule, snap))
+        if publish(rule, Supply.encode(rule, snap)) == "stored" then stored = true end
     end
     last.missing, last.surplus = missing, surplus
-    if Supply.onChanged then Supply.onChanged() end
+    local after = table.concat({ "true", tostring(last.questOK), tostring(last.bagOK),
+        tostring(last.missing), tostring(last.surplus) }, "|")
+    if (stored or after ~= before) and Supply.onChanged then Supply.onChanged() end
     return "ok"
 end
 
@@ -409,9 +417,11 @@ function Supply.setManual(on)
 end
 
 local events = CreateFrame("Frame")
+-- GF-FIX-F (review 中-16): the item data events (GET_ITEM_INFO_RECEIVED,
+-- ITEM_DATA_LOAD_RESULT) are no longer ours: Widgets.lua passes on only the
+-- answers to the toolkit's own requests (W.onItemAnswer, below).
 Supply.EVENTS = { "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "BAG_UPDATE_DELAYED", "QUEST_LOG_UPDATE", "QUEST_ACCEPTED",
-    "QUEST_TURNED_IN", "QUEST_REMOVED", "PLAYER_REGEN_ENABLED", "GET_ITEM_INFO_RECEIVED",
-    "ITEM_DATA_LOAD_RESULT" } -- GF-009-13 fix: RequestLoadItemDataByID answers with this one
+    "QUEST_TURNED_IN", "QUEST_REMOVED", "PLAYER_REGEN_ENABLED" }
 for _, e in ipairs(Supply.EVENTS) do pcall(events.RegisterEvent, events, e) end
 events:SetScript("OnEvent", function(_, event, a, b)
     if event == "PLAYER_LOGIN" or event == "PLAYER_ENTERING_WORLD" then
@@ -419,10 +429,6 @@ events:SetScript("OnEvent", function(_, event, a, b)
         if not Supply.started then
             ns.after(ns.Share.LOGIN_DELAY, function() Supply.start() end)
         end
-    elseif event == "GET_ITEM_INFO_RECEIVED" or event == "ITEM_DATA_LOAD_RESULT" then
-        -- GF-009-13: (itemID, success): success = false is "no such item".
-        if ns.SupplyListings and ns.SupplyListings.itemAnswer then ns.SupplyListings.itemAnswer(a, b) end
-        if Supply.onItemInfo then Supply.onItemInfo() end
     elseif event == "PLAYER_REGEN_ENABLED" then
         -- Next frame: Init.lua clears the toolkit's combat flag after us.
         ns.after(0, function()
@@ -430,8 +436,18 @@ events:SetScript("OnEvent", function(_, event, a, b)
             if ns.SupplyListings then ns.SupplyListings.afterCombat() end
         end)
     else
+        -- GF-FIX-F (中-18): the finder's bag list is read again after a change.
+        if event == "BAG_UPDATE_DELAYED" then Supply.bagVersion = Supply.bagVersion + 1 end
         Supply.markDirty()
     end
+end)
+Supply.bagVersion = 0
+
+-- GF-009-13: (itemID, success): success = false is "no such item". Only the
+-- answers to our own requests come here, at once (GF-FIX-F, 中-16).
+ns.Widgets.onItemAnswer(function(itemID, success)
+    if ns.SupplyListings and ns.SupplyListings.itemAnswer then ns.SupplyListings.itemAnswer(itemID, success) end
+    if Supply.onItemInfo then Supply.onItemInfo(itemID, success) end
 end)
 
 ---------------------------------------------------------------------------
@@ -551,11 +567,12 @@ Supply.better = better
 --   mine "need":  what I lack, others = who may have it
 --   mine "offer": what I may have extra, others = who needs it
 --   guild:        everybody else's needs and offers, by item
-function Supply.view(kind)
+-- GF-FIX-F: entries = a Supply.entries() list read once by the caller (the radar).
+function Supply.view(kind, entries)
     local all = {}
     -- GF-UI-H: others' manual listings of untradeable items are left out here.
     local Lst = ns.SupplyListings
-    for _, e in ipairs(Supply.entries()) do
+    for _, e in ipairs(entries or Supply.entries()) do
         if not (Lst and Lst.shownOnPage) or Lst.shownOnPage(e) then all[#all + 1] = e end
     end
     local items, order = {}, {}
@@ -618,17 +635,20 @@ end
 function Supply.getItemInfo(itemID) return ns.itemInfo(itemID) end
 
 function Supply.itemName(itemID)
+    if ns.Widgets.itemFailed(itemID) then return nil end -- GF-FIX-F: never read or asked again
     local name
     if type(C_Item) == "table" and type(C_Item.GetItemNameByID) == "function" then name = ns.call(C_Item.GetItemNameByID, itemID) end
     if type(name) ~= "string" or name == "" then name = Supply.getItemInfo(itemID) end
     if type(name) == "string" and name ~= "" then return name end
-    if type(C_Item) == "table" and type(C_Item.RequestLoadItemDataByID) == "function" then ns.call(C_Item.RequestLoadItemDataByID, itemID) end
+    -- GF-FIX-F (中-17): one request per item until it is answered; none for a missing one.
+    ns.Widgets.requestItem(itemID)
     return nil
 end
 -- What a row shows: the client's name, else the rule's label, else 載入中.
 function Supply.itemLabel(itemID)
     local name = Supply.itemName(itemID)
     if name then return name, true end
+    if ns.Widgets.itemFailed(itemID) then return ns.Widgets.TEXT.itemMissing, false end -- GF-FIX-F
     for _, r in ipairs(Rules.list) do
         local it = r.items and r.items[itemID]
         if it and it.label then return r.title .. " " .. it.label, false end
