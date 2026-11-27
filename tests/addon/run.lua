@@ -4793,6 +4793,9 @@ assert(loadfile(ROOT .. "/tests/addon/gf01405_tests.lua"))()({ test = test, eq =
 -- GF-DEV-02: /gftkdev preview, made-up rows on the windows, never saved or sent (tests/addon/gfdev02_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gfdev02_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-016-T: the adventure upload for upload-api v1.6: log at / by / revoked, revision, removed, reopenOf, destination (tests/addon/gf016t_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf016t_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0

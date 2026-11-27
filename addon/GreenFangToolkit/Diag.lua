@@ -153,7 +153,7 @@ local SECTIONS = {
     { title = "價格（拍賣場、商人、公會分享）", text = Diag.pricesText },
     { title = "冒險（冒險單與職工單）", text = function() return Diag.adventureText() .. (ns.NativeLFG and ("｜尋求組隊：" .. ns.NativeLFG.diagText()) or "")
         -- GF-002-H: the completion log this computer keeps (R-16.19).
-        .. ((ns.Adventure and ns.db and type(ns.db.adventure) == "table") and ("｜成行紀錄：" .. #ns.Adventure.myLog()) or "") end },
+        .. ((ns.Adventure and ns.db and type(ns.db.adventure) == "table") and ("｜成行紀錄：" .. ns.Adventure.logCount()) or "") end },
     { title = "職工名冊", text = Diag.rosterText },
     { title = "公會管理（GF-001-Q）", text = function() return ns.GuildAdmin and ns.GuildAdmin.diagText() or "" end },
     { title = "職責定位（GF-010）", text = function() return ns.Profile and ns.Profile.diagText() or "" end },

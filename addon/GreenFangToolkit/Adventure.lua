@@ -64,7 +64,10 @@ local NUM = { ver = true, cr = true, s = true, e = true, rt = true, rh = true, r
     dt = true, qc = true,
     -- GF-002-I (R-17.3, R-17.7): fp party seen together (leader T / member A), fb stepped
     -- back from 成團 at, bk stepped back from 成行 at, ff kept 成團 (the step back from 成行).
-    fp = true, fb = true, bk = true, ff = true }
+    fp = true, fb = true, bk = true, ff = true,
+    -- GF-016-T (upload-api v1.6 §3.11 item 3): rv = the ticket's revision, +1 each time the
+    -- leader's ticket really changes; its log records carry the same number (one sequence).
+    rv = true }
 
 function Adv.encodeEntry(e)
     local keys = {}
@@ -963,7 +966,27 @@ end
 ---------------------------------------------------------------------------
 
 local function me() return S().selfAuthor() end
+-- GF-016-T (T6): one revision sequence per ticket, kept by its leader. A ticket
+-- whose contents differ from what my record holds gets rv + 1, once per save
+-- (a caller that already raised it, before writing a log record, is left as is);
+-- a new ticket starts at 1. Nothing changed: nothing raised. Only on my writes.
+function Adv.stampRevisions(list, old)
+    local before = {}
+    for _, o in ipairs(old or {}) do before[o.id] = o end
+    for _, e in ipairs(list) do
+        local o = before[e.id]
+        if not o then
+            if not e.rv then e.rv = 1 end
+        elseif e.rv == o.rv and Adv.encodeEntry(e) ~= Adv.encodeEntry(o) then
+            e.rv = (o.rv or 0) + 1
+        end
+    end
+end
+-- The next revision of entry e (the caller writes a log record with it before saving).
+local function bump(e) e.rv = (e.rv or 0) + 1; return e.rv end
+Adv.bumpRevision = bump
 local function save(g, list)
+    if g == "T" then Adv.stampRevisions(list, listOf(me(), "T")) end
     local v = Adv.encodeList(list)
     if #v > 12000 then return false, "full" end
     local r = led:put(g, v)
@@ -1124,8 +1147,11 @@ function Adv.leader(id, action, arg, extra)
         local v = Adv.get(id)
         if not v then return false, "unknown" end
         if v.state == "done" then
+            -- GF-016-T (T3): the record stays, as revoked (at = the step back).
+            local was = Adv.logRecord(e)
             e.st, e.sa, e.bk, e.ff, e.dt = "o", t, t, t, nil
-            Adv.removeLog(id)
+            bump(e)
+            if was then Adv.revokeLog(was, t, e.rv) else Adv.removeLog(id) end
         elseif v.state == "formed" then
             if e.st == "g" then e.st = "o" end
             e.sa, e.fb, e.ff, e.fp = t, t, nil, nil
@@ -1144,6 +1170,7 @@ function Adv.leader(id, action, arg, extra)
         if not (v and v.formed) then return false, "not-formed" end
         snapshot(e, v, t)
         e.st, e.sa = "c", t
+        bump(e)
         Adv.addLog(e, "done")
     elseif action == "auto" then
         -- R-16.22 / R-16.23: detected here (the leader); 成團 and 成行 together.
@@ -1152,6 +1179,7 @@ function Adv.leader(id, action, arg, extra)
         snapshot(e, v, t)
         e.fm = math.min(e.fm or t, t)
         e.st, e.sa, e.dt = "c", t, t
+        bump(e)
         Adv.addLog(e, "done")
         -- GF-016: seen here, by the leader (Events.leaderEvidence); a copy of a
         -- member's detection (maintain) is not marked.
@@ -1470,6 +1498,10 @@ end
 ---------------------------------------------------------------------------
 
 -- One log record from a closed ticket entry (nil when it is not one).
+-- GF-016-T: by = "leader" (written from the leader's entry) or "seen" (R-16.24: worked
+-- out here from what members saw; no revision, the leader has not written it). rv = the
+-- entry's revision (T6, absent on entries from before 0.16.13). A ticket stepped back
+-- from 成行 (bk) and not done again is a revoked record (T3) from the leader's entry.
 function Adv.logRecord(e, v)
     local status = e.st == "c" and "done" or (e.st == "x" and e.rs == "unfinished") and "unfinished" or nil
     if not status and v and v.auto and v.state == "done" then
@@ -1479,13 +1511,16 @@ function Adv.logRecord(e, v)
         mb[v.leader] = (v.capacity.any and "any") or v.leaderRole or "d"
         local slotStart = v.slot and v.slot.s
         return { id = e.id, ds = e.ds ~= "" and e.ds or nil, qs = e.qs ~= "" and e.qs or nil, fs = slotStart,
-            fm = v.formedAt, dn = v.closedAt, at = v.closedAt, st = "done", mb = Adv.encodePairs(mb), auto = true }
+            fm = v.formedAt, dn = v.closedAt, at = v.closedAt, st = "done", mb = Adv.encodePairs(mb), auto = true,
+            by = "seen" }
     end
+    if not status and e.bk and e.st ~= "c" then status = "revoked" end
     if not status or not e.mb or e.mb == "" then return nil end
     local slotStart
     for _, sl in ipairs(entrySlots(e)) do if sl.id == e.fx then slotStart = sl.s end end
     return { id = e.id, ds = e.ds ~= "" and e.ds or nil, qs = e.qs ~= "" and e.qs or nil, fs = slotStart,
-        fm = e.fm, dn = status == "done" and e.sa or nil, at = e.sa, st = status, mb = e.mb, auto = e.dt ~= nil or nil }
+        fm = e.fm, dn = status == "done" and e.sa or nil, at = status == "revoked" and e.bk or e.sa, st = status,
+        mb = e.mb, auto = (status ~= "revoked" and e.dt ~= nil) or nil, by = "leader", rv = e.rv }
 end
 
 function Adv.myLog()
@@ -1519,7 +1554,28 @@ function Adv.addLog(e, status)
     return r
 end
 
--- GF-002-I (R-17.7): a step back from 成行 takes its record out of my log.
+-- GF-016-T (T3, upload-api v1.6 §3.11 item 5): a step back from 成行 keeps the
+-- record, revoked at t (with the ticket's new revision), in place of the done one.
+-- It ages out with the rest (30 days / 50). r: the done record (Adv.logRecord).
+function Adv.revokeLog(r, t, rv)
+    local x = {}
+    for k, v in pairs(r) do x[k] = v end
+    x.st, x.at, x.rv, x.by, x.dn, x.auto = "revoked", t, rv, "leader", nil, nil
+    local list = Adv.myLog()
+    for i = #list, 1, -1 do if list[i].id == x.id then table.remove(list, i) end end
+    list[#list + 1] = x
+    Adv.local_().log[me()] = Adv.pruneLog(list, t)
+    return x
+end
+
+-- Records that count as 成行 (done), for the counts people see: revoked ones do not.
+function Adv.logCount()
+    local n = 0
+    for _, r in ipairs(Adv.myLog()) do if r.st ~= "revoked" then n = n + 1 end end
+    return n
+end
+
+-- GF-002-I (R-17.7): take a record out of my log (a deleted ticket).
 function Adv.removeLog(id)
     local list = Adv.myLog()
     local n = 0
@@ -1548,6 +1604,7 @@ function Adv.deleteTicket(id)
     local v = Adv.get(id)
     local people = v and (#v.members + #v.waitlist + #v.pending + #v.invited) > 0
     Adv.removeLog(id)
+    Adv.markRemoved(id, "owner")
     Adv.local_().reopen[id] = nil
     if v and not v.closed and people then
         e.st, e.sa, e.rs = "x", now(), "manual"
@@ -1560,7 +1617,8 @@ end
 
 -- GF-002-J (owner: test records): clear every ended ticket of mine (expired, unfinished,
 -- cancelled, done), my signups on ended tickets, my closed worker ticket and my whole
--- completion log. They are gone from my next upload. Returns tickets, log records removed.
+-- completion log. They are gone from my next upload, but no removed is sent: the site
+-- keeps what it has (owner 2026-11-27). Returns tickets, log records removed.
 function Adv.clearEnded()
     local my = me()
     if not my then return 0, 0 end
@@ -1586,7 +1644,45 @@ function Adv.clearEnded()
     return n, logN
 end
 
+-- GF-016-T (T5, upload-api v1.6 §4a): my deleted tickets, sent as adventure.removed
+-- with every upload while they are kept (removed is cumulative on the site; leaving
+-- the list here does not undo it). Only 刪除 (deleteTicket) sends one, why = "owner".
+-- owner 2026-11-27: 清除已結束 (clearEnded) only tidies this computer and sends nothing,
+-- so what the site keeps stays; it does not clear these either. "test" is allowed by
+-- upload-api §4a but nothing in the AddOn sends it now.
+-- db.adventure.removed[<author>] = { [<id>] = { at, why } }, 30 days / 50 like the log.
+function Adv.myRemoved()
+    local o = Adv.local_()
+    local a = me()
+    if not a then return {} end
+    if type(o.removed) ~= "table" then o.removed = {} end
+    if type(o.removed[a]) ~= "table" then o.removed[a] = {} end
+    return o.removed[a]
+end
+function Adv.pruneRemoved(map, t)
+    t = t or now()
+    local list = {}
+    for id, r in pairs(map) do
+        if type(r) ~= "table" or type(r.at) ~= "number" or t - r.at >= Adv.LOG_DAYS * 86400 then map[id] = nil
+        else list[#list + 1] = { id = id, at = r.at } end
+    end
+    if #list > Adv.LOG_MAX then
+        table.sort(list, function(x, y) if x.at ~= y.at then return x.at > y.at end return x.id < y.id end)
+        for i = Adv.LOG_MAX + 1, #list do map[list[i].id] = nil end
+    end
+    return map
+end
+function Adv.markRemoved(id, why)
+    if type(id) ~= "string" or id:sub(1, 1) ~= "a" then return end
+    local map = Adv.myRemoved()
+    if not map[id] then map[id] = { at = now(), why = why == "test" and "test" or "owner" } end
+    Adv.pruneRemoved(map)
+end
+
 -- Another computer of mine wrote an older copy: merge by id (later sa / at wins).
+-- GF-016-T (T6): tickets compare their revision first (absent = 0), then sa. Two
+-- different copies at the same revision: the later sa (then the larger text) wins
+-- and takes the next revision, so one revision never means two contents.
 function Adv.mergeSelf(g, v)
     if g ~= "T" and g ~= "A" then return false end
     local incoming = Adv.decodeList(v)
@@ -1599,6 +1695,18 @@ function Adv.mergeSelf(g, v)
         local i = byId[e.id]
         local tIn, tMine = e.sa or e.at or 0, i and (mine[i].sa or mine[i].at or 0) or -1
         if not i then mine[#mine + 1] = e; changed = true
+        elseif g == "T" then
+            local m = mine[i]
+            local rIn, rMine = e.rv or 0, m.rv or 0
+            if rIn > rMine then mine[i] = e; changed = true
+            elseif rIn == rMine and (e.rv or m.rv) then
+                local sIn, sMine = Adv.encodeEntry(e), Adv.encodeEntry(m)
+                if sIn ~= sMine then
+                    local win = (tIn > tMine or (tIn == tMine and sIn > sMine)) and e or m
+                    win.rv = rIn + 1
+                    mine[i] = win; changed = true
+                end
+            elseif rIn == rMine and tIn > tMine then mine[i] = e; changed = true end
         elseif tIn > tMine then mine[i] = e; changed = true end
     end
     if changed then led:put(g, Adv.encodeList(mine)) end
@@ -1682,11 +1790,13 @@ function Adv.maintain()
                 -- R-16.24: a member saw it done while I was away: 成行 in my part too.
                 snapshot(e, v, t)
                 e.st, e.sa, e.dt = "c", v.closedAt, v.closedAt
+                bump(e)
                 Adv.addLog(e, "done")
                 dirty = true
             elseif v.state == "unfinished" then
                 snapshot(e, v, t)
                 e.st, e.sa, e.rs = "x", v.closedAt, "unfinished"
+                bump(e)
                 Adv.addLog(e, "unfinished")
                 dirty = true
             elseif v.state == "ended" then e.st, e.sa, e.rs = "x", v.closedAt, "time"; dirty = true end
@@ -2427,6 +2537,8 @@ function Adv.ticketUpload(e, view)
         quests = #quests > 0 and quests or nil, time = timeOf(e.tm, e.s, e.e),
         tags = #tags > 0 and tags or nil, note = (e.nt and e.nt ~= "") and Adv.cleanNote(e.nt) or nil,
         admit = e.md == "c" and "consent" or "direct", status = STATUS[e.st] or "open", statusAt = e.sa,
+        -- GF-016-T (T6): the same sequence as its log records; absent on older entries.
+        revision = (type(e.rv) == "number" and e.rv >= 1) and e.rv or nil,
     }
     -- GF-002-H: the slots, the finalized one and the phase (成團 / 成行 / 成團未成行).
     local slots = Adv.entrySlots(e)
@@ -2535,7 +2647,10 @@ function Adv.uploadFor(a)
     if trec then
         for _, e in ipairs(Adv.decodeList(trec.v) or {}) do
             local r = validId(e.id) and Adv.logRecord(e, Adv.get(e.id))
-            if r and not log[r.id] then log[r.id] = r; logAt = math.max(logAt, r.at or 0) end
+            -- GF-016-T: a later revision of the ticket (another computer of mine stepped
+            -- back) replaces what this computer kept.
+            local had = r and log[r.id]
+            if r and (not had or (r.rv and (had.rv or 0) < r.rv)) then log[r.id] = r; logAt = math.max(logAt, r.at or 0) end
         end
     end
     local value, n = {}, 0
@@ -2548,12 +2663,25 @@ function Adv.uploadFor(a)
         for _, who in ipairs(keys) do members[#members + 1] = { guid = S().guidOf(who), role = ROLE[roles[who]] or "member" } end
         local quests = {}
         for _, q in ipairs(splitDots(r.qs)) do if tonumber(q) then quests[#quests + 1] = tonumber(q) end end
+        -- GF-016-T: at (T1), by (T2), revision (T6): only what the record holds
+        -- (records from before 0.16.13 have no by / rv; nothing is made up).
         value[id] = { dungeon = r.ds, quests = #quests > 0 and quests or nil, slotStart = r.fs, formedAt = r.fm,
-            doneAt = r.dn, status = r.st, members = members, auto = r.auto or nil }
+            doneAt = r.dn, status = r.st, members = members, auto = r.auto or nil,
+            at = type(r.at) == "number" and r.at or nil, by = (r.by == "leader" or r.by == "seen") and r.by or nil,
+            revision = type(r.rv) == "number" and r.rv >= 1 and r.rv or nil }
         n = n + 1
     end
     if n > 0 then out.log = { recordedAt = logAt, value = value } end
-    if not out.tickets and not out.worker and not out.actions and not out.log then return nil end
+    -- GF-016-T (T5): my deleted tickets (only in my own upload: character.self).
+    if a == me() and ns.db and type(ns.db.adventure) == "table" and type(ns.db.adventure.removed) == "table" then
+        local map = Adv.pruneRemoved(Adv.myRemoved(), t)
+        local rv, rn, rAt = {}, 0, 0
+        for id, r in pairs(map) do
+            if validId(id) then rv[id] = { at = r.at, why = r.why }; rn = rn + 1; rAt = math.max(rAt, r.at) end
+        end
+        if rn > 0 then out.removed = { recordedAt = rAt, value = rv } end
+    end
+    if not out.tickets and not out.worker and not out.actions and not out.log and not out.removed then return nil end
     return out
 end
 
