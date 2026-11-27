@@ -52,7 +52,7 @@ Bank.STATE_NAME = {
 Bank.WHY_NAME = { guild = "不在目標公會", roster = "名冊未載入或找不到會長", self = "讀不到自己的角色",
     api = "遊戲沒回答是否為會長", conflict = "遊戲與名冊對會長不一致" }
 Bank.APPOINT_NAME = { ok = "成功", same = "沒有變更", full = "已達上限", invalid = "格式不對",
-    ["not-found"] = "找不到這位職工", ["no-authority"] = "沒有會長權限" }
+    ["not-found"] = "找不到這位職工", ["no-authority"] = "沒有會長權限", roster = "公會名冊尚未載入" }
 Bank.ROLE_NAME = { leader = "會長", custodian = "保管人", member = "職工", unknown = "權限未知" }
 
 local stats = { published = 0, refused = 0, healed = 0, rejectedOld = 0, rejectedForged = 0 }
@@ -372,6 +372,25 @@ local function memberA(who)
     if not m and not who:find("%-") then m = ns.Comm.memberFor(who .. "-" .. ns.realm()) end
     local a = m and m.guid and S().authorOf(m.guid)
     if a and S().memberFor(a) then return a, m end
+    -- GF-012-FIX (owner 0.16.9: 會長指定自己 →「找不到」): Comm.memberFor
+    -- always adds "-Realm" to the name, but the roster may give a same-realm
+    -- name (my own row at least) without it. Compare the short names too,
+    -- only when exactly one roster member matches.
+    local k = ns.keyName(who)
+    local ks = ns.keyName(ns.shortName(who))
+    local realm = who:match("%-(.+)$")
+    local myRealm = ns.keyName(ns.realm())
+    if realm and ns.keyName(realm) ~= myRealm and ns.keyName(realm) ~= (myRealm:gsub("%s", "")) then ks = "" end
+    local hit
+    for _, r in ipairs(Bank.candidates("")) do
+        -- typed short = roster short; typed full = a roster name that has no realm
+        local rs = ns.keyName(r.short)
+        if r.key == k or rs == k or (ks ~= "" and r.key == rs and rs == ks) then
+            if hit and hit.a ~= r.a then return nil end
+            hit = r
+        end
+    end
+    if hit then return hit.a, S().memberFor(hit.a) end
     return nil
 end
 Bank.memberA = memberA
@@ -398,6 +417,7 @@ appoint = function(who, kinds)
     kinds = kinds or "bk"
     if not Bank.KINDS[kinds] then return "invalid" end
     if not Bank.canManage() then stats.refused = stats.refused + 1; return "no-authority" end
+    if not (ns.Roster and ns.Roster.current()) then return "roster" end
     local a = memberA(who)
     if not a then return "not-found" end
     return change(function(own, epoch)

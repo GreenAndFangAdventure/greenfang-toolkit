@@ -123,6 +123,34 @@ return function(T)
         eq(UI.controls.rows[1].name:GetText(), "已不在公會", "left")
     end))
 
+    test("GF-012-FIX the guild master appoints himself (full name, short name, roster name without realm)", done(function()
+        local ns = login()
+        eq(ns.Bank.appoint("測試甲"), "ok", "my short name")
+        ok((ns.Bank.isCustodian(A)), "I am custodian")
+        ns = login()
+        eq(ns.Bank.appoint("測試甲-測試伺服器"), "ok", "my full name")
+        -- The client gives same-realm names without "-Realm" (seen for my own row).
+        wow.reset({ roster = roster(), myRankIndex = 0 })
+        for _, m in ipairs(wow.state.roster) do m.name = m.name:gsub("%-.*$", "") end
+        IsGuildLeader = function() return true end
+        ns = wow.loadAddon(ADDON_DIR)
+        wow.fire("PLAYER_LOGIN"); wow.fire("PLAYER_ENTERING_WORLD"); wow.advance(30); wow.advance(40)
+        ns.Bank.invalidate()
+        eq(ns.Bank.appoint("測試甲"), "ok", "roster name without realm, typed short")
+        eq(ns.Bank.appoint("測試丙-測試伺服器"), "ok", "roster name without realm, typed full")
+        eq(ns.Bank.appoint("測試丁-別的伺服器"), "not-found", "same name on another realm is not him")
+        local mine
+        for _, r in ipairs(ns.Bank.candidates("甲")) do if r.a == A then mine = r end end
+        ok(mine and mine.custodian, "I am in the picker, marked")
+    end))
+
+    test("GF-012-FIX roster snapshot not loaded: says so instead of 找不到", done(function()
+        local ns = login()
+        ns.db.roster.snapshots = {}
+        eq(ns.Bank.appoint("測試甲"), "roster", "not loaded")
+        ok(ns.Bank.diagText():find("上次指定：公會名冊尚未載入", 1, true), "diagnostics")
+    end))
+
     test("GF-012-FIX 1000 members: open the picker and type one letter", done(function()
         local ns = login({ n = 1000 })
         local UI = ns.BankUI
