@@ -7,7 +7,7 @@ return function(T)
     local test, eq, ok, wow, ADDON_DIR = T.test, T.eq, T.ok, T.wow, T.ADDON_DIR
 
     local NAMES = { [1413] = "貧瘠之地", [1434] = "荊棘谷", [1436] = "西部荒野", [1442] = "石爪山脈", [1432] = "洛克莫丹",
-        [1417] = "阿拉希高地", [1414] = "卡林多", [1415] = "東部王國" }
+        [1417] = "阿拉希高地", [1424] = "希爾斯布萊德丘陵", [1414] = "卡林多", [1415] = "東部王國" }
     local function fakeMap()
         local calls = { open = {} }
         local wm = CreateFrame("Frame", "WorldMapFrame", UIParent)
@@ -42,7 +42,7 @@ return function(T)
     test("GF-008-C every step has a map; the one the owner can check", function()
         local ns = login()
         local M = ns.SleepingBagMap
-        local want = { 1413, 1434, 1436, 1414, 1442, 1442, 1415, 1432, 1417 }
+        local want = { 1413, 1434, 1436, 1414, 1442, 1442, 1415, 1432, 1424 } -- GF-008-D: the wall opens on Hillsbrad (the cart)
         for i, st in ipairs(ns.SleepingBagRoutes.Horde.steps) do
             eq(M.mapFor(st), want[i], "step " .. i .. " " .. st.id .. ": its map")
             ok(M.canShow(st), "step " .. i .. ": 看地圖")
@@ -94,26 +94,15 @@ return function(T)
         for _ = 1, 7 do SB.complete() end
         eq(SB.currentStep().id, "thoradin-wall", "the last step")
         eq(SB.showMap(), "canvas", "pinned")
-        eq(wm:GetMapID(), 1417, "on 阿拉希高地")
-        ok(SB.pageText():find("阿拉希高地（20, 30）（大約：索拉丁之牆北段）", 1, true), "the wall's text")
+        -- GF-008-D: the cart on Hillsbrad, the bags on the Arathi map (sourced, no longer approximate).
+        eq(wm:GetMapID(), 1424, "on 希爾斯布萊德丘陵")
+        ok(SB.pageText():find("希爾斯布萊德丘陵（87, 49）（多來源一致）", 1, true), "the cart's text")
+        ok(SB.pageText():find("阿拉希高地（22, 24）（單一來源）", 1, true), "the bags' text")
     end)
 
-    test("GF-008-C the pin is the raid target star (no quest ! or ?); the star sheet when the file is missing", function()
-        local ns = login()
-        local SB, M = ns.SleepingBag, ns.SleepingBagMap
-        for _, bad in ipairs({ "Quest", "Gossip", "Exclamation", "Question", "TurnIn" }) do
-            ok(not M.PIN_TEXTURE:find(bad), "not a quest mark: " .. bad)
-            ok(not M.PIN_SHEET.file:find(bad), "sheet not a quest mark: " .. bad)
-        end
-        eq(M.PIN_TEXTURE, "Interface\\TargetingFrame\\UI-RaidTargetingIcon_1", "the star")
-        SB.showMap()
-        eq(M.pin().icon._texture, M.PIN_TEXTURE, "drawn with it")
-        -- A client without the single file: the same star from the sheet.
-        ns = login({ missingFiles = { ["Interface\\TargetingFrame\\UI-RaidTargetingIcon_1"] = true } })
-        SB, M = ns.SleepingBag, ns.SleepingBagMap
-        SB.showMap()
-        eq(M.pin().icon._texture, M.PIN_SHEET.file, "the sheet")
-        eq(table.concat(M.pin().icon._texCoord or {}, ","), "0,0.25,0,0.25", "its star")
+    -- GF-008-D replaced the star with a framed, glowing sleep icon (gf008d_tests.lua);
+    -- what stays from GF-008-C: no quest mark anywhere in the map code.
+    test("GF-008-C no quest ! or ? in the map code", function()
         local src = assert(io.open(ADDON_DIR .. "/SleepingBagMap.lua", "rb")):read("*a")
         ok(not src:find("AvailableQuestIcon", 1, true) and not src:find("ActiveQuestIcon", 1, true), "no quest icon left")
     end)
