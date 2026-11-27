@@ -289,8 +289,9 @@ local function createWindow()
     -- GF-FIX-B (owner: 4:3): the window fits the screen (Theme.fit, when it
     -- opens); a new resolution or UI scale fits it, and the open windows, again.
     f.gfFitMain = true
-    f:RegisterEvent("DISPLAY_SIZE_CHANGED")
-    f:RegisterEvent("UI_SCALE_CHANGED")
+    -- Guarded: an event name this client does not know must not stop the window from being built.
+    pcall(f.RegisterEvent, f, "DISPLAY_SIZE_CHANGED")
+    pcall(f.RegisterEvent, f, "UI_SCALE_CHANGED")
     f:SetScript("OnEvent", function(self, event)
         if event == "PLAYER_REGEN_ENABLED" then self:UnregisterEvent(event) end
         ns.Theme.refit()
