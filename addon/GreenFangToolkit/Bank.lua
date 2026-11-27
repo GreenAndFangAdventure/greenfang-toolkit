@@ -648,7 +648,10 @@ end
 function Bank.resetSignatures() kSig = {} end
 ns.Share.onUpdate(function(a)
     if a == S().selfAuthor() then Bank.heal() end
-    if Bank.kChanged(a) and Bank.onChanged then Bank.onChanged() end
+    if Bank.kChanged(a) then
+        if Bank.onChanged then Bank.onChanged() end
+        Bank.notifySoon() -- GF-014-04
+    end
 end)
 
 local events = CreateFrame("Frame")
@@ -657,4 +660,60 @@ events:SetScript("OnEvent", function()
     Bank.invalidate()
     Bank.checkStepDown()
     if Bank.onChanged then Bank.onChanged() end
+    if Bank.notifyPending then Bank.notifySoon() end -- GF-014-04: the roster came after the list
 end)
+
+---------------------------------------------------------------------------
+-- GF-014-04: 業務通知 bank_keeper: the guild master named me a custodian (or
+-- changed my kinds), or took it back. Only from the list in force (Bank.current:
+-- the current master's, checked); one event per list epoch, announced once
+-- ever (Notify.once): a relay or the replay after /reload says nothing again.
+-- The master's own list never notifies the master. In combat the check waits
+-- for the end of combat. Memory: Notify.memory("bank_keeper").last =
+-- "<kinds>" / "off" / nil (what I was on the last list I saw).
+---------------------------------------------------------------------------
+
+Bank.KINDS_TEXT = { b = "背包", k = "銀行", bk = "背包與銀行" }
+Bank.notifyStats = { scans = 0, pushed = 0, waited = 0 }
+
+function Bank.notifyScan()
+    local N = ns.Notify
+    if not N then return nil end
+    if ns.inCombat() then Bank.notifyStats.waited = Bank.notifyStats.waited + 1; Bank.notifyPending = true; return nil end
+    Bank.notifyPending = false
+    local me = S().selfAuthor()
+    if not me or ns.guildState() ~= "target" then return nil end
+    local cur = Bank.current()
+    if cur.state ~= "ok" then
+        -- Unknown (roster not read yet): look again when the roster comes.
+        if cur.state == "unknown" then Bank.notifyPending = true end
+        return nil
+    end
+    Bank.notifyStats.scans = Bank.notifyStats.scans + 1
+    if cur.leader == me then return nil end -- my own list
+    local mem = N.memory("bank_keeper")
+    local e = entryFor(cur.list, me)
+    local is = e and (e.enabled and e.kinds or "off") or nil
+    local was = mem.last
+    mem.last = is
+    if is == was or (is == nil and was == "off") then return nil end
+    local text
+    if is and is ~= "off" then
+        text = string.format("會長指定你為臨時黑箱保管人（%s）", Bank.KINDS_TEXT[is] or is)
+        if was and was ~= "off" then text = string.format("會長把你的保管範圍改成%s", Bank.KINDS_TEXT[is] or is) end
+    elseif was and was ~= "off" then
+        text = "會長撤銷了你的臨時黑箱保管人資格"
+    else
+        return nil
+    end
+    local epoch = cur.list.epoch
+    if not N.once("bank_keeper", "k|" .. tostring(epoch) .. "|" .. tostring(is), epoch) then return nil end
+    if not N.fresh("bank_keeper", epoch) then return nil end
+    local r = N.push({ module = "bank_keeper", key = "keeper", text = text, target = { page = "bank" }, overflow = true })
+    if r == "stored" or r == "merged" or r == "quiet" then Bank.notifyStats.pushed = Bank.notifyStats.pushed + 1 end
+    return r
+end
+function Bank.notifySoon() ns.coalesce("bank-notify", 0, Bank.notifyScan) end
+if ns.Notify and ns.Notify.onAfterCombat then
+    ns.Notify.onAfterCombat(function() if Bank.notifyPending then Bank.notifyScan() end end)
+end

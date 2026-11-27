@@ -2626,3 +2626,145 @@ function Adv.resetSession()
     Adv.resetEdges()
     led:resetSession()
 end
+
+---------------------------------------------------------------------------
+-- GF-014-04: 業務通知 for what others did on adventure tickets (Notify.lua).
+-- Three kinds, one switch each:
+--   adv_signup  my ticket: someone signed up (or took my invite)
+--   adv_result  a ticket I signed up for: the leader took me (錄取), invited
+--               me, sent me away, or I moved up from the waitlist (遞補)
+--   adv_final   a ticket I am in: its time was finalized, or it was cancelled
+-- One event = one fact with its own key ("<id>|refill|<time>"), announced once
+-- ever (Notify.once). 錄取 is seen as my own status going from 待審核 to
+-- 已錄取 (memory: Notify.memory("adv_result").st, my last status per ticket).
+-- My own steps (apply, withdraw, accept, my own ticket's changes) are never
+-- announced to me. In combat the scan waits for the end of combat. One scan
+-- per change (Adv.onChange, next frame) over the cached views (Adv.all).
+---------------------------------------------------------------------------
+
+Adv.notifyStats = { scans = 0, events = 0, pushed = 0, waited = 0 }
+local function Nt() return ns.Notify end
+
+local function plain(t) return (tostring(t or ""):gsub("|T.-|t", ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")) end
+local function personName(a)
+    local m = a and Adv.member(a)
+    return m and m.name and ns.shortName(m.name) or "有人"
+end
+function Adv.notifyDest(v)
+    local U = ns.AdventureUI
+    local d = (U and U.destText) and plain(U.destText(v)) or str(v.dungeon or v.zone or "")
+    return d ~= "" and ("「" .. d .. "」") or "冒險單"
+end
+local function slotText(v)
+    local U = ns.AdventureUI
+    if not (U and U.slotText and v.slot) then return "" end
+    return plain(U.slotText(v.slot))
+end
+
+local function statusOf(v, my)
+    for _, m in ipairs(v.members) do if m.a == my then return "m", m end end
+    for _, w in ipairs(v.waitlist) do if w.a == my then return "w", w end end
+    for _, p in ipairs(v.pending) do if p.a == my then return "p", p end end
+    return nil
+end
+
+-- The events of one ticket for me: { { module, key, at, text, group } }.
+-- prev = my status on it at the last scan ("m" / "w" / "p" / nil).
+function Adv.notifyEvents(v, my, prev, t)
+    local out = {}
+    if not (v and my) then return out end
+    local destText
+    local function dest() destText = destText or Adv.notifyDest(v); return destText end
+    local function add(module, key, at, text, group)
+        out[#out + 1] = { module = module, key = v.id .. "|" .. key, at = at, text = text, group = group }
+    end
+    if v.leader == my then
+        if v.closed then return out end
+        for _, list in ipairs({ v.members, v.waitlist, v.pending }) do
+            for _, x in ipairs(list) do
+                if x.a ~= my then
+                    add("adv_signup", "sign|" .. x.a .. "|" .. tostring(x.at or 0), x.at, nil,
+                        { a = x.a, pending = list == v.pending })
+                end
+            end
+        end
+        return out
+    end
+    local st, mine = statusOf(v, my)
+    local function leader() return personName(v.leader) end
+    if not v.closed then
+        for _, i in ipairs(v.invited) do
+            if i.a == my then add("adv_result", "invite|" .. tostring(i.at), i.at, leader() .. " 邀請你加入冒險單 " .. dest()) end
+        end
+        if st == "m" and mine.refilled then
+            add("adv_result", "refill|" .. tostring(mine.refilled), mine.refilled, "你從候補遞補上了冒險單 " .. dest())
+        elseif st == "m" and prev == "p" then
+            add("adv_result", "admit", t, leader() .. " 錄取了你：冒險單 " .. dest())
+        end
+        if not st and v.kicked[my] then
+            add("adv_result", "kick|" .. tostring(v.kicked[my]), v.kicked[my],
+                prev == "p" and (leader() .. " 沒有錄取你：冒險單 " .. dest()) or (leader() .. " 把你移出了冒險單 " .. dest()))
+        end
+        local signedAt = mine and mine.at
+        if st and v.finalAt and v.slotById and #v.slots > 1 and signedAt and v.finalAt > signedAt then
+            local when = slotText(v)
+            add("adv_final", "final|" .. tostring(v.finalAt), v.finalAt,
+                "冒險單 " .. dest() .. " 定案了" .. (when ~= "" and ("：" .. when) or "") .. (st == "w" and "（你在候補）" or ""))
+        end
+    elseif st and v.state == "cancel" then
+        local offline = v.closeReason == "offline"
+        add("adv_final", "cancel|" .. (offline and "offline" or tostring(v.closedAt or 0)), offline and t or v.closedAt,
+            offline and ("隊長離線太久，冒險單 " .. dest() .. " 已取消") or (leader() .. " 取消了冒險單 " .. dest()))
+    end
+    return out, st
+end
+
+function Adv.notifyScan()
+    local N = Nt()
+    if not N then return 0 end
+    if ns.inCombat() then Adv.notifyStats.waited = Adv.notifyStats.waited + 1; Adv.notifyPending = true; return 0 end
+    Adv.notifyPending = false
+    local my = me()
+    if not my or ns.guildState() ~= "target" then return 0 end
+    Adv.notifyStats.scans = Adv.notifyStats.scans + 1
+    local t = now()
+    local mem = N.memory("adv_result")
+    if type(mem.st) ~= "table" then mem.st = {} end
+    local views, pushed = Adv.all(), 0
+    local function push(n)
+        local r = N.push(n)
+        if r == "stored" or r == "merged" or r == "quiet" or r == "queued" then pushed = pushed + 1 end
+    end
+    for id, v in pairs(views) do
+        local list, st = Adv.notifyEvents(v, my, mem.st[id], t)
+        local signups = {}
+        for _, ev in ipairs(list) do
+            if N.once(ev.module, ev.key, ev.at) then
+                Adv.notifyStats.events = Adv.notifyStats.events + 1
+                if N.fresh(ev.module, ev.at) then
+                    if ev.group then signups[#signups + 1] = ev.group
+                    else push({ module = ev.module, key = ev.module .. "|" .. id, text = ev.text, target = { page = "adventure", id = id }, overflow = true }) end
+                end
+            end
+        end
+        if #signups > 0 then
+            local waiting = false
+            for _, g in ipairs(signups) do if g.pending then waiting = true end end
+            local who = personName(signups[1].a) .. (#signups > 1 and string.format(" 等 %d 人", #signups) or "")
+            push({ module = "adv_signup", key = "signup|" .. id,
+                text = who .. " 報名了你的冒險單 " .. Adv.notifyDest(v) .. (waiting and "，等你審核" or ""),
+                target = { page = "adventure", id = id }, overflow = true })
+        end
+        if v.leader ~= my then mem.st[id] = st end
+    end
+    Adv.notifyStats.pushed = Adv.notifyStats.pushed + pushed
+    for id in pairs(mem.st) do if not views[id] then mem.st[id] = nil end end
+    for _, module in ipairs({ "adv_signup", "adv_result", "adv_final" }) do
+        N.forget(module, function(k) local id = k:match("^(.-)|"); return id ~= nil and views[id] ~= nil end)
+    end
+    return pushed
+end
+function Adv.notifySoon() ns.coalesce("adventure-notify", 0, Adv.notifyScan) end
+Adv.onChange(Adv.notifySoon)
+ns.notifyHooks = ns.notifyHooks or {}
+table.insert(ns.notifyHooks, function() if Adv.notifyPending then Adv.notifyScan() end end)
