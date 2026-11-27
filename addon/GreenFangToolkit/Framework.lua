@@ -392,6 +392,139 @@ local function settingsButton()
     return b
 end
 
+---------------------------------------------------------------------------
+-- GF-UI-L (owner, 2026-11-27: 「看得出當前版本、有沒有安裝 GF Sync」): the
+-- version and what this computer shows of GF Sync, at the right end of the
+-- sub-tab row, so every page has it. Secondary colour, no frame; a click
+-- opens 同步與診斷. The signal is read when the window opens and when the
+-- mouse is on it, never on a timer or OnUpdate; the text is set only when it
+-- changed. The AddOn cannot see programs: the one sign of GF Sync it can see
+-- is GreenFangToolkit_Inbox (WebOrders.gfSyncSignal), which GF Sync writes
+-- only with web orders on (off by default), so 沒偵測到 never means 沒安裝.
+---------------------------------------------------------------------------
+F.INFO_GAP = 16      -- at least this much between the last sub-tab and the text
+F.INFO_RIGHT = 10    -- from the row's right end (where the line under it ends)
+F.infoReads = 0      -- signal reads (tests: only on open / hover / 同步與診斷)
+F.GFSYNC_WORD = { seen = "已偵測到", none = "沒偵測到", unknown = "無法判斷" }
+F.GFSYNC_TIP = {
+    inbox = { "依據：這次登入讀到 GF Sync 寫的「GreenFangToolkit_Inbox」（網站訂單）。",
+        "括號裡是網站產生這份清單的時間，GF Sync 在那之後才寫進來。" },
+    folder = { "依據：找到 GF Sync 建立的「GreenFangToolkit_Inbox」，但這次登入還沒讀到清單（還沒讀取、被停用，或 GF Sync 還沒拿到清單）。" },
+    ["no-inbox"] = { "依據：找不到「GreenFangToolkit_Inbox」。",
+        "沒偵測到不代表沒安裝：GF Sync 平常只讀存檔，不寫回遊戲資料夾；只有開啟網站訂單（Inbox）功能時才會建立這個 AddOn，而這個功能目前預設關閉。" },
+    ["no-api"] = { "依據：這個遊戲版本查不到 AddOn 清單，看不出有沒有「GreenFangToolkit_Inbox」。" },
+}
+F.GFSYNC_SEEN_NOTE = "這只表示這台電腦裝過會寫網站訂單的 GF Sync，不代表它現在正在執行。"
+F.GFSYNC_CHECK = "GF Sync 有沒有在上傳，請看工作列右下角的 GF Sync 圖示。"
+F.GFSYNC_CLICK = "點一下打開「同步與診斷」"
+
+function F.versionText()
+    local v = str(ns.VERSION)
+    if v == "" then v = "dev" end
+    return v:match("^%d") and ("v" .. v) or v
+end
+
+function F.gfSyncSignal()
+    F.infoReads = F.infoReads + 1
+    local ok, sig = pcall(function() return ns.WebOrders and ns.WebOrders.gfSyncSignal() end)
+    if ok and type(sig) == "table" and F.GFSYNC_WORD[sig.state] then return sig end
+    return { state = "unknown", why = "no-api" }
+end
+
+-- "11-27 14:05" (local time), or nil.
+function F.shortTime(t)
+    if not (date and ns.num(t)) then return nil end
+    local ok, r = pcall(date, "%m-%d %H:%M", t)
+    return ok and type(r) == "string" and r ~= "" and r or nil
+end
+
+-- 「GF Sync：已偵測到（清單 11-27 14:05）」; short: without the bracket.
+function F.gfSyncText(sig, short)
+    local text = "GF Sync：" .. (F.GFSYNC_WORD[sig and sig.state] or F.GFSYNC_WORD.unknown)
+    if short or not sig or sig.state ~= "seen" then return text end
+    local t = sig.why == "inbox" and F.shortTime(sig.at)
+    if t then return text .. "（清單 " .. t .. "）" end
+    if sig.why == "folder" then return text .. "（尚無清單）" end
+    return text
+end
+
+-- The tooltip lines after the status line.
+function F.gfSyncTip(sig)
+    local out = {}
+    for _, line in ipairs(F.GFSYNC_TIP[sig and sig.why] or F.GFSYNC_TIP["no-api"]) do out[#out + 1] = line end
+    out[#out + 1] = (sig and sig.state == "seen") and F.GFSYNC_SEEN_NOTE or F.GFSYNC_CHECK
+    return out
+end
+
+-- One line for 同步與診斷.
+function F.gfSyncDiagText()
+    local sig = F.gfSyncSignal()
+    return F.gfSyncText(sig) .. "｜" .. table.concat(F.gfSyncTip(sig), "")
+end
+
+-- The text that fits between the last sub-tab and the row's right end: the
+-- whole line, else without the bracket, else the version alone.
+local function placeInfo()
+    local b = window and window.info
+    if not (b and b.sig) then return nil end
+    local room = F.PANEL_WIDTH - F.INFO_RIGHT - (window.subTabsRight or 0) - F.INFO_GAP
+    local v = F.versionText()
+    local text = ""
+    for _, t in ipairs({ v .. "｜" .. F.gfSyncText(b.sig), v .. "｜" .. F.gfSyncText(b.sig, true), v }) do
+        if ns.labelWidth(t) <= room then text = t; break end
+    end
+    if text ~= b.gfText then
+        b.gfText = text
+        b:SetText(text)
+        b:SetWidth(math.max(1, ns.labelWidth(text)))
+    end
+    if text == "" then b:Hide() else b:Show() end
+    return text
+end
+F.placeInfo = placeInfo
+
+local function showInfoTip(self)
+    F.refreshInfo()
+    GameTooltip:SetOwner(self, "ANCHOR_BOTTOMLEFT")
+    GameTooltip:AddLine("綠皮冒險工具箱 " .. F.versionText())
+    GameTooltip:AddLine(F.gfSyncText(self.sig))
+    local c = ns.Theme.C.sub
+    for _, line in ipairs(F.gfSyncTip(self.sig)) do GameTooltip:AddLine(line, c[1], c[2], c[3], true) end
+    GameTooltip:AddLine(F.GFSYNC_CLICK)
+    GameTooltip:Show()
+end
+
+local function infoButton()
+    if window.info then return window.info end
+    local b = CreateFrame("Button", nil, window.subBar)
+    b:SetHeight(ns.BUTTON_H)
+    b:SetPoint("TOPRIGHT", window.subBar, "TOPRIGHT", -F.INFO_RIGHT, 0)
+    if b.SetNormalFontObject then pcall(b.SetNormalFontObject, b, ns.Theme.FONT.sub) end
+    if b.SetHighlightFontObject then pcall(b.SetHighlightFontObject, b, ns.Theme.FONT.hover) end
+    b:SetText(F.versionText())
+    local fs = b.GetFontString and b:GetFontString()
+    if fs and fs.ClearAllPoints then
+        fs:ClearAllPoints()
+        fs:SetPoint("RIGHT", b, "RIGHT", 0, 0)
+        if fs.SetJustifyH then fs:SetJustifyH("RIGHT") end
+        if fs.SetWordWrap then fs:SetWordWrap(false) end
+    end
+    b:SetScript("OnClick", function() if ns.Diag then ns.Diag.open() end end)
+    b:SetScript("OnEnter", showInfoTip)
+    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    window.info = b
+    return b
+end
+
+-- Read the signal again and redraw if it changed (window open, hover).
+function F.refreshInfo()
+    if not window then return nil end
+    local b = infoButton()
+    b.sig = F.gfSyncSignal()
+    return placeInfo()
+end
+function F.infoButton() return window and window.info or nil end
+
 -- The sub-tab row: one tab per page of the open entry; the open page is the
 -- chosen one (gold) and cannot be pressed (it does not light up either).
 local function rebuildSubTabs(key)
@@ -420,6 +553,8 @@ local function rebuildSubTabs(key)
         ns.Theme.setSelected(b, def.id == currentId)
         b:Show()
     end
+    window.subTabsRight = x - 8 -- GF-UI-L: the version text keeps clear of the tabs
+    placeInfo()
     return pages
 end
 
@@ -488,6 +623,7 @@ end
 function F.open(id)
     local def = F.select(id)
     window:Show()
+    F.refreshInfo() -- GF-UI-L: the GF Sync signal, once per opening
     return def
 end
 
