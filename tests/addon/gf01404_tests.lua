@@ -174,9 +174,12 @@ return function(T)
         local parent = CreateFrame("Frame", nil, UIParent)
         local boxes = ns.NotifyUI.buildSettings(parent, 16, ns.NotifyUI.TOP)
         local UI = ns.NotifyUI
-        local step = UI.settingStep(#boxes)
-        ok(-UI.TOP + (#boxes - 1) * step + 28 <= UI.ROWS * UI.ROW_H + 76 - 8, string.format("%d switches fit (step %d)", #boxes, step))
-        eq(#boxes, 14, "14 rows (9 modules, WorkerMatch's 4 rows, 聊天框提示)")
+        -- GF-014-05: 19 rows now, in two columns; every box inside the list.
+        for _, c in ipairs(boxes) do
+            ok(-UI.TOP + c.line * c.step + 28 <= UI.ROWS * UI.ROW_H + 76 - 8, string.format("switch %s fits (line %d, step %d)", c.key, c.line, c.step))
+            ok(c.step >= UI.SETTING_MIN, "step at least " .. UI.SETTING_MIN)
+        end
+        eq(#boxes, 19, "19 rows (14 modules, WorkerMatch's 4 rows, 聊天框提示)")
     end)
 
     test("GF-014-04 combat: the scan waits, the notice comes after combat", function()

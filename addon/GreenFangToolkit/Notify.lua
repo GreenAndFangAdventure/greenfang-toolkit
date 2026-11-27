@@ -55,14 +55,24 @@ N.MODULES = {
     { key = "adventure", text = "職工單配對", tip = "我的職工單符合別人的冒險單（WorkerMatch.lua；各角色自己的設定）" }, -- GF-014-02
     -- GF-014-04: what 委託業務 / 冒險業務 / 臨時黑箱 tell me when others act (one switch each).
     { key = "order_new", text = "有人對我下單", tip = "有人指定我做的委託（含網站下單）" },
+    { key = "order_guild", text = "我會做的公會委託", tip = "預設關：公會裡有人發了我會做的公會委託（量可能很多）", default = false }, -- GF-014-05
     { key = "order_status", text = "委託狀態改變", tip = "對方接單、交貨、放棄、退回、成交或取消我的委託" },
+    { key = "order_remind", text = "委託逾期／可結案", tip = "委託太久沒有進展，或交貨滿 14 天可以結案" }, -- GF-014-05
     { key = "adv_signup", text = "有人報名我的冒險單", tip = "我開的冒險單有人報名或接受邀請" },
     { key = "adv_result", text = "錄取／遞補／邀請", tip = "隊長錄取、邀請或移出我，或我從候補遞補上" },
     { key = "adv_final", text = "冒險單定案或取消", tip = "我報名的冒險單定案了時間，或被取消" },
+    -- GF-014-05: the time and leader reminders the ❗ already shows.
+    { key = "adv_update", text = "冒險單改內容或結束", tip = "隊長改了我報名的冒險單，或冒險單過期、未成行（成行不通知）" },
+    { key = "adv_remind", text = "冒險單開打提醒", tip = "我參加的冒險單開打前 60 分鐘與 15 分鐘" },
+    { key = "adv_leader", text = "我的冒險單待處理", tip = "我開的冒險單快開打還沒定案、成員遞補，或候補的職工單過期離開" },
     { key = "bank_keeper", text = "黑箱保管人", tip = "會長指定我為保管人，或撤銷我的保管人資格" },
 }
 N.MODULE_TEXT = {}
-for _, m in ipairs(N.MODULES) do N.MODULE_TEXT[m.key] = m.text end
+N.DEFAULT_OFF = {} -- GF-014-05: modules that start switched off (default = false)
+for _, m in ipairs(N.MODULES) do
+    N.MODULE_TEXT[m.key] = m.text
+    if m.default == false then N.DEFAULT_OFF[m.key] = true end
+end
 
 local stats = { pushed = 0, stored = 0, merged = 0, quiet = 0, queued = 0, off = 0, bad = 0, burst = 0,
     expired = 0, alerts = 0, opened = 0 }
@@ -129,15 +139,19 @@ local function settings()
     return ms
 end
 
+-- off[module]: true = off, nil = its default (on; off for N.DEFAULT_OFF),
+-- false = switched on (only kept for a module that starts off; GF-014-05).
 function N.enabled(module)
     local off = settings().off
-    return not (off and off[module])
+    local v = off and off[module]
+    if v == nil then return not N.DEFAULT_OFF[module] end
+    return not v
 end
 
 function N.setEnabled(module, on)
     local ms = settings()
     if not ms.off then return end
-    ms.off[module] = (not on) or nil
+    if N.DEFAULT_OFF[module] then ms.off[module] = not on else ms.off[module] = (not on) or nil end
     if not on then
         -- Drop what is waiting for that module; the kept ones stay hidden.
         for k, e in pairs(queue) do if e.module == module then queue[k] = nil end end

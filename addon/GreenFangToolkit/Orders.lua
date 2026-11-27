@@ -767,6 +767,9 @@ function Orders.maintain()
             end
         end
     end
+    -- GF-014-05: the time reminders (逾期, 可結案) are seen here, on the existing
+    -- once-a-minute maintenance (Init.lua), not on a timer of their own.
+    Orders.notifySoon()
 end
 
 -- Local data: GreenFangToolkitDB.orders (history, seen, trades, unsure).
@@ -1394,19 +1397,49 @@ Orders.NOTIFY_TEXT = {
     ["deal-customer"] = "%s 確認成交 %s",
     ["cancel-customer"] = "%s 取消了委託 %s",
     ["cancel-web"] = "%s 在網站取消了委託 %s",
+    -- GF-014-05
+    guild = "%s 發了你會做的公會委託 %s",
+    ["stale-waiting"] = "你的委託 %s 已經 %d 天沒有人接單",
+    ["stale-making"] = "委託 %s 製作中已超過 %d 天",
+    close = "委託 %s 交貨已滿 14 天，可以結案",
 }
+-- GF-014-05: texts without a person (item name, days).
+Orders.NOTIFY_NO_NAME = { ["stale-waiting"] = true, ["stale-making"] = true, close = true }
 Orders.notifyStats = { scans = 0, events = 0, pushed = 0, waited = 0 }
 
 local function N() return ns.Notify end
 
--- The events of one order for me: { { module, key, code, at, who } }.
-function Orders.notifyEvents(v, me)
+-- The events of one order for me: { { module, key, code, at, who, n } }.
+-- GF-014-05: myGuid / t / days add the reminders of Orders.attention: a
+-- guild order I can make (order_guild), stale (order_remind, each period
+-- once, like the ❗) and the crafter's 14-day close (order_remind).
+function Orders.notifyEvents(v, me, myGuid, t, days)
     local out = {}
     if not (v and me) or v.test or Orders.isTestId(v.id) then return out end
     local isCustomer, isCrafter = v.customer == me, v.crafter == me
+    local function add(module, kind, code, at, who, n)
+        out[#out + 1] = { module = module, key = v.id .. "|" .. kind .. "|" .. tostring(at or 0), code = code, at = at, who = who, n = n }
+    end
+    -- GF-014-05 order_guild: someone else's open guild order I know the recipe of.
+    if not isCustomer and v.state == "waiting" and v.guild and myGuid and v.customer
+        and not (v.declined and v.declined[me]) and Orders.canMake(v, myGuid) then
+        add("order_guild", "guild", "guild", v.created, v.customer)
+    end
     if isCustomer == isCrafter then return out end -- not mine, or my own order to myself
-    local function add(module, kind, code, at, who)
-        out[#out + 1] = { module = module, key = v.id .. "|" .. kind .. "|" .. tostring(at or 0), code = code, at = at, who = who }
+    -- GF-014-05 order_remind (time only; t / days as in Orders.attention).
+    if t then
+        days = days or Orders.staleDays()
+        local function stale(kind)
+            local d = (days[kind] or 1) * Orders.DAY
+            local since = v.since or t
+            local n = t - since >= d and math.floor((t - since) / d) or nil
+            if n then add("order_remind", "stale|" .. kind .. "|" .. n, "stale-" .. kind, since + n * d, nil, n * (days[kind] or 1)) end
+        end
+        if v.state == "waiting" and isCustomer and not (v.guild and v.droppedAt) then stale("waiting") end
+        if v.state == "making" and not (isCrafter and v.returned) then stale("making") end
+        if v.state == "checking" and isCrafter and t - (v.since or t) >= Orders.CRAFTER_CLOSE then
+            add("order_remind", "close", "close", (v.since or t) + Orders.CRAFTER_CLOSE)
+        end
     end
     local closed = v.state == "deal" or v.state == "cancel"
     if isCrafter then
@@ -1439,8 +1472,11 @@ function Orders.notifyItemName(v)
 end
 function Orders.notifyText(v, ev)
     local fmt = Orders.NOTIFY_TEXT[ev.code] or "%s 更新了委託 %s"
+    if Orders.NOTIFY_NO_NAME[ev.code] then return string.format(fmt, Orders.notifyItemName(v), ev.n or 0) end
     return string.format(fmt, nameOf(ev.who, ev.code), Orders.notifyItemName(v))
 end
+-- GF-014-05: the notice an event merges into (one per order and kind).
+local NOTIFY_KEY = { order_new = "new|", order_guild = "guild|", order_remind = "remind|" }
 
 function Orders.notifyScan()
     local Nt = N()
@@ -1451,12 +1487,13 @@ function Orders.notifyScan()
     if not me or ns.guildState() ~= "target" then return 0 end
     Orders.notifyStats.scans = Orders.notifyStats.scans + 1
     local views, pushed = Orders.all(), 0
+    local myGuid, t, days = ns.Data.player().guid, now(), Orders.staleDays()
     for _, v in pairs(views) do
-        for _, ev in ipairs(Orders.notifyEvents(v, me)) do
+        for _, ev in ipairs(Orders.notifyEvents(v, me, myGuid, t, days)) do
             if Nt.once(ev.module, ev.key, ev.at) then
                 Orders.notifyStats.events = Orders.notifyStats.events + 1
                 if Nt.fresh(ev.module, ev.at) then
-                    local r = Nt.push({ module = ev.module, key = (ev.module == "order_new" and "new|" or "order|") .. v.id,
+                    local r = Nt.push({ module = ev.module, key = (NOTIFY_KEY[ev.module] or "order|") .. v.id,
                         text = Orders.notifyText(v, ev), target = { page = "orders", id = v.id }, overflow = true })
                     if r == "stored" or r == "merged" or r == "quiet" or r == "queued" then pushed = pushed + 1 end
                 end
@@ -1465,7 +1502,7 @@ function Orders.notifyScan()
     end
     Orders.notifyStats.pushed = Orders.notifyStats.pushed + pushed
     -- Events of orders that left the ledger are forgotten (their keys start with the id).
-    for _, module in ipairs({ "order_new", "order_status" }) do
+    for _, module in ipairs({ "order_new", "order_status", "order_guild", "order_remind" }) do
         Nt.forget(module, function(k) local id = k:match("^(.-)|"); return id ~= nil and views[id] ~= nil end)
     end
     return pushed

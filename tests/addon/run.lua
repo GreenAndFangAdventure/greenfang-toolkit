@@ -4786,6 +4786,10 @@ assert(loadfile(ROOT .. "/tests/addon/digest01_tests.lua"))()({ test = test, eq 
 -- GF-009-10: 「尋找圖紙」 on the 配方 page and what a recipe item teaches in 綠皮調貨所 (tests/addon/gf00910_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gf00910_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+
+-- GF-014-05: 委託 / 冒險 reminders as 業務通知; the confirm box after learning a 徵求's recipe (tests/addon/gf01405_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf01405_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0
