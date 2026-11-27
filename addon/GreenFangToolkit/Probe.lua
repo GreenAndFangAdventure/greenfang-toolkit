@@ -89,6 +89,8 @@ Probe.APIS = {
     "InCombatLockdown", "issecretvalue", "GetBuildInfo",
     -- GF-UI-K: the personnel file's race head (Icons.setPortrait)
     "UnitSex", "C_Texture.GetAtlasInfo", "C_CreatureInfo.GetRaceInfo",
+    -- GF-UI-M: the character's own portrait (Icons.setUnitPortrait)
+    "SetPortraitTexture", "UnitExists",
 }
 
 Probe.EVENTS = {
@@ -104,6 +106,7 @@ Probe.EVENTS = {
     "MAIL_SHOW", "MAIL_CLOSED", "MAIL_INBOX_UPDATE", "MAIL_SEND_SUCCESS", "MAIL_FAILED", "MAIL_SUCCESS",
     "TRADE_SHOW", "TRADE_CLOSED", "TRADE_ACCEPT_UPDATE", "TRADE_PLAYER_ITEM_CHANGED", "TRADE_TARGET_ITEM_CHANGED",
     "TRADE_SKILL_SHOW", "TRADE_SKILL_CLOSE", "TRADE_SKILL_LIST_UPDATE", "TRADE_SKILL_DATA_SOURCE_CHANGED",
+    "UNIT_PORTRAIT_UPDATE", "PORTRAITS_UPDATED", -- GF-UI-M
 }
 
 -- Global frames whose existence / visibility is recorded.
@@ -601,7 +604,16 @@ end
 -- 95; public game data) and yes / no for every atlas name tried.
 local function portraits()
     local I = ns.Icons
-    local out = { sex = tostring(ns.call(rawget(_G, "UnitSex"), "player")) }
+    local out = { sex = tostring((ns.call(rawget(_G, "UnitSex"), "player"))) } -- GF-UI-M: nil, not an error
+    -- GF-UI-M: the own portrait: does the API exist, what the page shows
+    -- (unit = the own portrait, atlas = race head, class = class icon; nil =
+    -- the page was not opened yet), how often the game asked for a redraw.
+    out.unitPortrait = type(rawget(_G, "SetPortraitTexture")) == "function" and "yes" or "no"
+    local Ch = ns.Character
+    out.shown = Ch and tostring(Ch.portrait) or "nil"
+    out.redraws = Ch and tostring(Ch.portraitRedraws or 0) or "0"
+    -- GF-UI-M: the left bar's 職工檔案 icon (nil: the file icon).
+    out.nav = tostring(I.navPortraitAtlas())
     for _, id in ipairs(I.PORTRAIT_FEMALE_RACES) do out["race" .. id] = I.raceFile(id) or "nil" end
     for _, sex in ipairs({ I.SEX_MALE, I.SEX_FEMALE }) do
         for _, name in ipairs(I.portraitAtlases(sex)) do out[name] = I.atlasExists(name) and "yes" or "no" end

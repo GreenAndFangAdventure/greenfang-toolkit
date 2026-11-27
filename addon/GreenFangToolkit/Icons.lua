@@ -166,6 +166,44 @@ function Icons.portraitAtlases(sex)
     return out
 end
 
+-- GF-UI-M (owner: 「我個人頭像請用個人頭像」): the unit's own portrait, the
+-- one the game draws on the player frame (SetPortraitTexture). Returns
+-- "unit" when the game took it, nil when there is no such API or no unit
+-- (the caller then uses setPortrait). The game draws the portrait later when
+-- the model is not loaded yet; UNIT_PORTRAIT_UPDATE says when to set it again.
+function Icons.setUnitPortrait(tex, unit)
+    if not tex then return nil end
+    local set = rawget(_G, "SetPortraitTexture")
+    if type(set) ~= "function" then return nil end
+    local exists = rawget(_G, "UnitExists")
+    if type(exists) == "function" then
+        local okE, e = pcall(exists, unit)
+        if okE and not e then return nil end
+    end
+    if tex.SetTexCoord then tex:SetTexCoord(0, 1, 0, 1) end
+    if not pcall(set, tex, unit) then return nil end
+    tex:Show()
+    return "unit"
+end
+
+-- GF-UI-M (owner 2026-11-27): the left bar's 職工檔案 icon is the race head
+-- for the character's sex (男 orc / goblin, 女 PORTRAIT_FEMALE_RACES). Worked
+-- out once a session (the sex does not change); nil until UnitSex answers,
+-- false when the client has none of the atlases (the file icons then).
+local navAtlas
+function Icons.navPortraitAtlas()
+    if navAtlas ~= nil then return navAtlas or nil end
+    local sex = ns.call(rawget(_G, "UnitSex"), "player")
+    if sex ~= Icons.SEX_MALE and sex ~= Icons.SEX_FEMALE then return nil end
+    navAtlas = false
+    for _, name in ipairs(Icons.portraitAtlases(sex)) do
+        if Icons.atlasExists(name) then navAtlas = name; break end
+    end
+    Icons.navPortraitChecks = (Icons.navPortraitChecks or 0) + 1
+    return navAtlas or nil
+end
+function Icons.resetNavPortrait() navAtlas = nil end -- tests
+
 -- The race head for sex, else the class icon. Returns "atlas", name / "class".
 function Icons.setPortrait(tex, sex, classToken)
     if not tex then return nil end

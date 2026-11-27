@@ -4793,6 +4793,9 @@ assert(loadfile(ROOT .. "/tests/addon/gf01405_tests.lua"))()({ test = test, eq =
 -- GF-DEV-02: /gftkdev preview, made-up rows on the windows, never saved or sent (tests/addon/gfdev02_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gfdev02_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-UI-M: 調貨看板's notes in full, the roster's bottom bar, the own portrait (tests/addon/gfuim_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gfuim_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0
