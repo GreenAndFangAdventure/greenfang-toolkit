@@ -29,6 +29,9 @@ UI.ROW_H = 66
 UI.TOP = -44
 UI.MODULE_SHORT = { supply = "調貨", radar = "雷達", adventure = "冒險", orders = "委託",
     order_new = "委託", order_status = "委託", adv_signup = "冒險", adv_result = "冒險", adv_final = "冒險", bank_keeper = "黑箱", recipe = "調貨" } -- GF-014-04
+for k, v in pairs({ order_guild = "委託", order_remind = "委託", adv_update = "冒險", adv_remind = "冒險", adv_leader = "冒險" }) do
+    UI.MODULE_SHORT[k] = v -- GF-014-05
+end
 
 local button, list
 local state = { offset = 0, items = {}, settings = false }
@@ -191,14 +194,35 @@ function UI.settingStep(n)
     return math.max(UI.SETTING_MIN, math.min(UI.SETTING_STEP, math.floor(room / math.max(1, n))))
 end
 
+-- GF-014-05: more switches than one column holds at SETTING_MIN: two columns
+-- (the second starts at a main row, never between a module and its sub rows).
+-- Returns { [i] = { col = 0/1, line = 0.. } }, the step, the column width.
+UI.SETTING_COL_W = math.floor((UI.W - 16) / 2)
+function UI.settingLayout(rows)
+    local n = #rows
+    local room = UI.ROWS * UI.ROW_H + 76 + UI.TOP - 16
+    local split = n + 1
+    if math.floor(room / math.max(1, n)) < UI.SETTING_MIN then
+        split = math.floor((n + 1) / 2) + 1
+        while split <= n and rows[split].sub do split = split + 1 end
+    end
+    local out = {}
+    for i = 1, n do
+        if i < split then out[i] = { col = 0, line = i - 1 } else out[i] = { col = 1, line = i - split } end
+    end
+    return out, UI.settingStep(math.max(split - 1, n - split + 1)), split <= n and UI.SETTING_COL_W or UI.W
+end
+
 function UI.buildSettings(parent, x, y)
     local boxes = {}
     local sync
     local rows = settingsRows()
-    local step = UI.settingStep(#rows)
+    local layout, step, colW = UI.settingLayout(rows)
     for i, m in ipairs(rows) do
         local c = Th.checkBox(parent, 28)
-        c:SetPoint("TOPLEFT", parent, "TOPLEFT", (x or 12) + (m.sub and 28 or 0), (y or UI.TOP) - (i - 1) * step)
+        local at = layout[i]
+        c:SetPoint("TOPLEFT", parent, "TOPLEFT", (x or 12) + at.col * colW + (m.sub and 28 or 0), (y or UI.TOP) - at.line * step)
+        c.col, c.line, c.step = at.col, at.line, step
         c.text = label(parent, m.text, ns.LABEL_FONT)
         c.text:SetPoint("LEFT", c, "RIGHT", 6, 0)
         c.tip = m.tip

@@ -1734,6 +1734,9 @@ function Adv.maintain()
     -- GF-013: the background event record looks at every ticket I lead or joined
     -- (成團 / 過期 / 未成行 happen by themselves, not by a click).
     events("observeAll", Adv.all(), t)
+    -- GF-014-05: the time notices (開打提醒, 待定案, 過期 / 未成行) are seen here,
+    -- on the existing once-a-minute maintenance (Init.lua), not on a timer of their own.
+    Adv.notifySoon()
 end
 
 ---------------------------------------------------------------------------
@@ -1801,6 +1804,22 @@ function Adv.attention(v, my, t, myWorker, questLog)
         return { key = v.id .. "|match", decide = false, code = "match" }
     end
     return nil
+end
+
+-- GF-014-05: the start Adv.reminder counts down to (nil: none).
+function Adv.reminderStart(v)
+    local sl = v.final and v.slotById and v.slotById[v.final]
+    if v.slotById and not sl then return nil end
+    return sl and (not sl.now) and sl.s or (not v.slotById and v.timeMode ~= "n" and v.start) or nil
+end
+-- GF-014-05: the earliest slot Adv.finalDue looks at.
+function Adv.firstSlotStart(v)
+    local first
+    for _, sl in ipairs(v.slots or {}) do
+        local s = sl.now and (sl.s or v.created) or sl.s
+        if s and (not first or s < first) then first = s end
+    end
+    return first
 end
 
 -- R-7.1: 60 and 15 minutes before the start. GF-002-H (R-16.10): only the finalized slot.
@@ -2678,6 +2697,16 @@ function Adv.notifyEvents(v, my, prev, t)
     local function add(module, key, at, text, group)
         out[#out + 1] = { module = module, key = v.id .. "|" .. key, at = at, text = text, group = group }
     end
+    -- GF-014-05 adv_remind: 60 / 15 minutes before the start (Adv.reminder, the ❗'s rule).
+    local function remind()
+        local r = Adv.reminder(v, t)
+        local before = r and tonumber(r.key:match("|remind|(%d+)$"))
+        local start = before and Adv.reminderStart(v)
+        if start then
+            add("adv_remind", "remind|" .. before .. "|" .. start, start - before,
+                "冒險單 " .. dest() .. string.format(" 再 %d 分鐘開打", math.floor(before / 60)))
+        end
+    end
     if v.leader == my then
         if v.closed then return out end
         for _, list in ipairs({ v.members, v.waitlist, v.pending }) do
@@ -2688,11 +2717,38 @@ function Adv.notifyEvents(v, my, prev, t)
                 end
             end
         end
+        -- GF-014-05 adv_leader: 待定案, 成員遞補, 候補的職工單過期離開 (重開 is not announced).
+        if Adv.finalDue(v, t) then
+            local first = Adv.firstSlotStart(v)
+            if first then
+                add("adv_leader", "due|" .. first, first - Adv.FINAL_DUE,
+                    "冒險單 " .. dest() .. " 快開打了，還沒定案時間")
+            end
+        end
+        for _, m in ipairs(v.members) do
+            if m.refilled and m.a ~= my then
+                add("adv_leader", "refill|" .. m.a .. "|" .. tostring(m.refilled), m.refilled,
+                    personName(m.a) .. " 從候補遞補進了你的冒險單 " .. dest())
+            end
+        end
+        for _, g in ipairs(v.workerGone or {}) do
+            if g.at and t - g.at < Adv.KEEP_CLOSED then
+                add("adv_leader", "gone|" .. tostring(g.a) .. "|" .. g.at, g.at,
+                    personName(g.a) .. " 的職工單過期，離開了你的冒險單 " .. dest() .. " 的候補")
+            end
+        end
+        remind()
         return out
     end
     local st, mine = statusOf(v, my)
     local function leader() return personName(v.leader) end
     if not v.closed then
+        -- GF-014-05 adv_update: the leader changed it after I was in or waiting.
+        local involvedAt = (st == "m" or st == "w") and mine and mine.at or nil
+        if v.edited and involvedAt and v.edited > involvedAt then
+            add("adv_update", "edited|" .. tostring(v.edited), v.edited, leader() .. " 改了冒險單 " .. dest() .. " 的內容，請確認")
+        end
+        if st == "m" then remind() end
         for _, i in ipairs(v.invited) do
             if i.a == my then add("adv_result", "invite|" .. tostring(i.at), i.at, leader() .. " 邀請你加入冒險單 " .. dest()) end
         end
@@ -2715,6 +2771,11 @@ function Adv.notifyEvents(v, my, prev, t)
         local offline = v.closeReason == "offline"
         add("adv_final", "cancel|" .. (offline and "offline" or tostring(v.closedAt or 0)), offline and t or v.closedAt,
             offline and ("隊長離線太久，冒險單 " .. dest() .. " 已取消") or (leader() .. " 取消了冒險單 " .. dest()))
+    elseif (st == "m" or st == "w") and (v.state == "ended" or v.state == "unfinished")
+        and v.closedAt and t - v.closedAt < Adv.KEEP_CLOSED then
+        -- GF-014-05 adv_update: 過期 / 未成行 (成行 is not announced).
+        add("adv_update", "end|" .. v.state, v.closedAt, v.state == "ended"
+            and ("冒險單 " .. dest() .. " 已過期，沒有成團") or ("冒險單 " .. dest() .. " 成團但未成行，已結束"))
     end
     return out, st
 end
@@ -2759,7 +2820,7 @@ function Adv.notifyScan()
     end
     Adv.notifyStats.pushed = Adv.notifyStats.pushed + pushed
     for id in pairs(mem.st) do if not views[id] then mem.st[id] = nil end end
-    for _, module in ipairs({ "adv_signup", "adv_result", "adv_final" }) do
+    for _, module in ipairs({ "adv_signup", "adv_result", "adv_final", "adv_update", "adv_remind", "adv_leader" }) do
         N.forget(module, function(k) local id = k:match("^(.-)|"); return id ~= nil and views[id] ~= nil end)
     end
     return pushed

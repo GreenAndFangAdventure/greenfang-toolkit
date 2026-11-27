@@ -22,8 +22,10 @@
 -- Own state: a recipe counts as learned when this character's own shared list
 -- (R<skillLineID>, Recipes.scan) has it; with no list yet for that profession
 -- (window never opened) or no profession data, nothing is decided and no
--- button is shown. Learning the recipe of my own 圖紙 徵求 later only leaves
--- a notice (通知中心, module "recipe"): 「結束徵求」 is the player's click.
+-- button is shown. Learning the recipe of my own 圖紙 徵求 later leaves a
+-- notice (通知中心, module "recipe") and asks once with the game's confirm box
+-- (GF-014-05: 「結束徵求」／「先留著」, one box at a time, never in combat):
+-- only the player's click ends the 徵求.
 -- Nothing here is sent anywhere; no new event, timer or OnUpdate.
 
 local _, ns = ...
@@ -321,11 +323,87 @@ local function memory()
     return mem
 end
 
+-- GF-014-05 (owner 2026-11-27: 「學過應該要自動結束，但會先跳一個確認」):
+-- the confirm box. One at a time: the others wait in ask.queue and come one
+-- after another (each names its 圖紙 and its 徵求). In combat nothing shows;
+-- the queue goes on after combat (Notify.onAfterCombat). 「先留著」 (or ESC)
+-- keeps the 徵求; the notice and its 「結束徵求」 stay for later.
+RL.POPUP = "GREENFANGTOOLKIT_RECIPE_LEARNED"
+RL.ASK_TEXT = "這個角色已學會「%s」。\n要結束這筆圖紙徵求嗎？\n\n我的徵求：%s x%d"
+local ask = { queue = {}, showing = nil }
+RL.askState = ask
+
+local function listingOf(id)
+    local L = ns.SupplyListings
+    for _, l in ipairs(L and L.ownActive() or {}) do if l.id == id then return l end end
+    return nil
+end
+
+-- End one 徵求 (the box's 「結束徵求」 or the notice's button).
+function RL.endListing(id)
+    if not id or not ns.SupplyListings.finish(id, "closed") then return false end
+    if ns.SupplyUI and ns.SupplyUI.refresh then pcall(ns.SupplyUI.refresh) end
+    local N = ns.Notify
+    local e = N and N.find and N.find(RL.NOTIFY_MODULE, "learned:" .. id)
+    if e and N.dismiss then N.dismiss(e) end
+    if ask.showing == id and type(StaticPopup_Hide) == "function" then
+        ask.showing = nil
+        pcall(StaticPopup_Hide, RL.POPUP)
+        ns.after(0, RL.askNext)
+    end
+    return true
+end
+
+-- The box answered (true: 結束徵求, false: 先留著, nil: closed some other way).
+function RL.answer(id, yes)
+    if id == nil or ask.showing ~= id then return end
+    ask.showing = nil
+    if yes then RL.endListing(id); stats.ended = (stats.ended or 0) + 1 end
+    ns.after(0, RL.askNext)
+end
+
+local function askDialog()
+    if type(StaticPopupDialogs) ~= "table" or type(StaticPopup_Show) ~= "function" then return false end
+    if not StaticPopupDialogs[RL.POPUP] then
+        StaticPopupDialogs[RL.POPUP] = {
+            text = "%s", button1 = RL.END_ACTION.text, button2 = "先留著",
+            OnAccept = function(_, data) RL.answer(data and data.id, true) end,
+            OnCancel = function(_, data) RL.answer(data and data.id, false) end,
+            OnHide = function(self) local d = self and self.data; RL.answer(d and d.id, nil) end,
+            timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
+        }
+    end
+    return true
+end
+
+-- Show the next waiting box (nothing while one is open, in combat, or with
+-- the 圖紙學會提示 switch off; a 徵求 that ended meanwhile is skipped).
+function RL.askNext()
+    if ask.showing or #ask.queue == 0 or ns.inCombat() then return false end
+    local N = ns.Notify
+    while #ask.queue > 0 do
+        local q = table.remove(ask.queue, 1)
+        local l = listingOf(q.id)
+        if l and N and N.enabled(RL.NOTIFY_MODULE) and askDialog() then
+            local item = ns.itemInfo(l.itemID)
+            if type(item) ~= "string" or item == "" then item = "圖紙 #" .. tostring(l.itemID) end
+            local text = string.format(RL.ASK_TEXT, q.name, item, tonumber(l.quantity) or 1)
+            ask.showing = q.id
+            local f = StaticPopup_Show(RL.POPUP, text, nil, { id = q.id })
+            if f then stats.asked = (stats.asked or 0) + 1; return true end
+            ask.showing = nil
+        end
+    end
+    return false
+end
+
 -- My active 圖紙 徵求 whose recipe I have now learned: one notice each
--- (once per listing). Returns how many were pushed.
+-- (once per listing), and the confirm box (GF-014-05). Returns how many were pushed.
 function RL.checkLearned()
     local N, L = ns.Notify, ns.SupplyListings
-    if not (N and L) or ns.inCombat() then return 0 end
+    if not (N and L) then return 0 end
+    if ns.inCombat() then RL.learnPending = true; return 0 end -- GF-014-05: after combat
+    RL.learnPending = false
     local mem = memory()
     local pushed = 0
     if mem then -- forget listings that are gone from 我的刊登
@@ -346,11 +424,19 @@ function RL.checkLearned()
                     if mem then mem.prompted[l.id] = true end
                     pushed = pushed + 1
                     stats.prompts = stats.prompts + 1
+                    ask.queue[#ask.queue + 1] = { id = l.id, name = t.name } -- GF-014-05
                 end
             end
         end
     end
+    if pushed > 0 then RL.askNext() end
     return pushed
+end
+if ns.Notify and ns.Notify.onAfterCombat then
+    ns.Notify.onAfterCombat(function()
+        if RL.learnPending then RL.checkLearned() end
+        RL.askNext()
+    end)
 end
 
 if ns.Notify and ns.Notify.register then
@@ -358,9 +444,7 @@ if ns.Notify and ns.Notify.register then
         onAction = function(e, key)
             if key ~= RL.END_ACTION.key then return nil end
             local id = tonumber(tostring(e.key):match("^learned:(%d+)$"))
-            if not id or not ns.SupplyListings.finish(id, "closed") then return "none" end
-            if ns.SupplyUI and ns.SupplyUI.refresh then pcall(ns.SupplyUI.refresh) end
-            if ns.Notify.dismiss then ns.Notify.dismiss(e) end
+            if not RL.endListing(id) then return "none" end
             return "ended"
         end,
     })
@@ -381,4 +465,5 @@ function RL.resetSession()
     map = nil
     learnedMemo, nameMemo, classMemo = {}, {}, {}
     for k in pairs(stats) do stats[k] = 0 end
+    ask.queue, ask.showing, RL.learnPending = {}, nil, false
 end
