@@ -4803,6 +4803,9 @@ assert(loadfile(ROOT .. "/tests/addon/gfuim_tests.lua"))()({ test = test, eq = e
 -- unread / read notices, the dev notice preview in the real words (tests/addon/gfuin_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gfuin_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-011-C: which talent tab a node counts in (sub-groups, positions; tests/addon/gf011c_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf011c_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0

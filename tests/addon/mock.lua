@@ -944,4 +944,37 @@ if wow.forever then
     })
 end
 
+-- GF-011-C (appended): nodes may also give groupIDs = { ... } (every group of
+-- the node, as the game does), x / y (posX / posY), and groups order
+-- (orderIndex). Without them the nodes look as before.
+do
+    local plainInstall = wow.installTalents
+    function wow.installTalents()
+        plainInstall()
+        local t = state.talents
+        if not (t and C_Traits) then return end
+        local byId = {}
+        for _, n in ipairs(t.nodes or {}) do byId[n.id] = n end
+        local plainNode = C_Traits.GetNodeInfo
+        C_Traits.GetNodeInfo = function(cfg, id)
+            local ni = plainNode(cfg, id)
+            local n = byId[id]
+            if not (ni and n) then return ni end
+            if n.groupIDs and not t.noGroupIDs then ni.groupIDs = n.groupIDs end
+            ni.posX, ni.posY = n.x or ni.posX, n.y or ni.posY
+            if t.noPos then ni.posX, ni.posY = nil, nil end
+            return ni
+        end
+        local plainGroups = C_Traits.GetGroupDisplayInfoByTreeID
+        C_Traits.GetGroupDisplayInfoByTreeID = function(tree)
+            local out = plainGroups(tree)
+            local trees = t.trees or { [t.treeID] = t.groups }
+            for i, g in ipairs(trees[tree] or {}) do
+                if out[i] then out[i].orderIndex, out[i].treeID = g.order, tree end
+            end
+            return out
+        end
+    end
+end
+
 return wow
