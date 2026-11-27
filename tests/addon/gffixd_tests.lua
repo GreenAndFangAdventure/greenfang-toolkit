@@ -494,7 +494,10 @@ return function(T)
         eq(edit.text, U.tex("edit") .. " 編輯", "through tex()")
         local origHas = ns.GameIcons.has
         ns.GameIcons.has = function() return false end
-        eq(U.tex("edit"), "", "no file: no markup")
+        -- GF-UI-N: 編輯 is GameIcons art now: none of its files known → the last
+        -- candidate (a plain note every client ships), never a green box.
+        ok(U.tex("edit"):find("INV_Misc_Note_01", 1, true), "no file: the last candidate")
+        eq(U.tex("not-a-key"), "", "an unknown file: no markup")
         ns.GameIcons.has = origHas
     end)
 end

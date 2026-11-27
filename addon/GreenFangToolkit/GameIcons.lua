@@ -96,6 +96,11 @@ G.ART = {
     -- first frame), never a book (冒險指南 is the book) nor people (職工名冊).
     calendar = { { "Interface\\Calendar\\UI-Calendar-Button", box = { 0, 25, 0, 50 } }, { "Interface\\Icons\\INV_Misc_Note_04" },
         { "Interface\\Icons\\INV_Misc_PocketWatch_02" } },
+    -- GF-UI-N (owner 0.16.12: 「冒險單的修改圖標之前說過要修改」, not the quill):
+    -- 編輯 / 修改 everywhere is the friends list's pencil-and-note (the game's own
+    -- "edit the note" mark), then the guild roster's note button, then a plain note.
+    edit = { { "Interface\\FriendsFrame\\UI-FriendsFrame-Note" }, { "Interface\\Buttons\\UI-GuildButton-PublicNote-Up" },
+        { "Interface\\Icons\\INV_Misc_Note_01" } },
     -- 我的服務 (crafter settings): the smith's hammer.
     services = { { "Interface\\Icons\\Trade_BlackSmithing" }, { "Interface\\Icons\\INV_Hammer_20" } },
     -- ＋下單 (place an order): a letter (an order sent to a crafter).

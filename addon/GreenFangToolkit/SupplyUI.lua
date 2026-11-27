@@ -64,17 +64,14 @@ UI.CARD_SUB = {
     manual = "想要什麼就開口，想給什麼就喊價；事務所只負責把話傳出去。",
 }
 UI.CARD_LINES = {
+    -- GF-UI-N (owner 0.16.12: 「說明頁過度複雜」): five short lines, one thing each, in
+    -- the player's words; the items below say what 「這些項目」 are.
     auto = {
-        "它會做什麼：依白名單裡的收集任務，對照你的任務進度和身上各處的數量，自動算出你還缺的物品和可能多出來的物品。",
-        -- GF-009-15: four sources; 銀行 / 信箱 as last seen.
-        "資料從哪來：這個角色的任務狀態、行囊（背包 0～4）、材料袋、自己的銀行，和信箱裡還沒收下的附件。"
-            .. "銀行和信箱只有打開時讀得到，所以用上次看到的數量；還沒打開過就當作沒有，畫面寫「還沒看過」。",
-        "分享給公會什麼：只有白名單物品的「缺幾個／可能多幾個」。缺幾個把上面四處都算進去；可能多幾個依上面「分享的餘料」："
-            .. "全部＝四處都算，只算身上＝只算行囊和材料袋（現在算{share}）。銀行和信箱的數量是上次打開時看到的，"
-            .. "之後拿走或放進去要再打開一次才會更新。東西放在哪裡只有你自己看得到，不會分享。",
-        "不會做什麼：不公開整個背包或銀行、不自動收信、不自動交易或郵寄；要不要聯絡、怎麼交換都由你決定。",
-        "關掉後：不再計算，已分享的缺件和餘料會清空；你也看不到別人的自動集料資料。",
-        "為什麼預設關：這是實驗功能，白名單的任務和書頁規則還沒在 Forever 實機確認，確認前由你自己決定要不要開。",
+        "會做什麼：照下面這些項目的任務進度，算出你還缺幾個、可能多幾個。",
+        "資料從哪來：行囊、材料袋、銀行、信箱；銀行和信箱用你上次打開時看到的數量。",
+        "分享什麼：只分享這些項目缺幾個、多幾個，不分享東西放在哪裡。",
+        "不會做什麼：不公開背包和銀行，不自動收信、交易或郵寄。",
+        "為什麼預設關：這是實驗功能，還沒在 Forever 實機確認；關掉就不算也不分享。",
     },
     manual = {
         "它會做什麼：讓你自己發布徵求或供應（物品、數量、交易條件、備註），分享給公會。",
@@ -1108,7 +1105,9 @@ function UI.drawCard(key)
                     if col == 0 and i > 1 then y = y - UI.CARD_ROW_H end
                     row:ClearAllPoints()
                     row:SetPoint("TOPLEFT", f, "TOPLEFT", pad + col * colW, y)
-                    row.set(it.itemID, it.label)
+                    -- GF-UI-N (owner: 「荊棘谷…」 said nothing): the page itself is the name (the
+                    -- group and chapter above say whose pages); the item stays in the tooltip.
+                    row.set(it.itemID, nil, { name = it.label })
                 end
                 y = y - UI.CARD_ROW_H - 4
             end

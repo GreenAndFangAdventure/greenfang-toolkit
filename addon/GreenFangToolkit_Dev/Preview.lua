@@ -3,7 +3,7 @@
 -- the lists) and tell us what to change. Dev AddOn only; members never see it.
 --
 --   /gftkdev preview              what can be shown (one line each)
---   /gftkdev preview notify       one made-up notice of every kind, the list opened
+--   /gftkdev preview notify       made-up notices of every kind in the real words, half unread, the list opened
 --   /gftkdev preview settings     the notice switches (the list's 設定)
 --   /gftkdev preview confirm      every confirm box, one at a time
 --   /gftkdev preview lists [少|多] 委託 / 冒險單 / 調貨所 / 名冊 with ~5 or ~100 made-up rows
@@ -28,7 +28,7 @@ P.POPUP_EDIT = "GREENFANGTOOLKITDEV_PREVIEW_EDIT"
 P.FEW, P.MANY = 5, 100
 P.NAMES = { "測試甲", "測試乙", "測試丙", "測試丁", "測試戊", "測試己", "測試庚", "測試辛", "測試壬", "測試癸" }
 P.HELP = {
-    "/gftkdev preview notify：通知中心放進每一種假通知各一則並打開",
+    "/gftkdev preview notify：通知中心放進每一種假通知（文字和正式通知一樣，一半未讀）並打開",
     "/gftkdev preview settings：打開通知設定（開關清單）",
     "/gftkdev preview confirm：確認視窗一個一個跳出來（按什麼都不會執行）",
     "/gftkdev preview lists 少（或 多）：委託、冒險單、調貨所、名冊顯示假資料（約 5 或 100 筆）",
@@ -205,49 +205,149 @@ local function swapPeople(ns)
 end
 
 ---------------------------------------------------------------------------
--- notify: one made-up notice of every kind
+-- notify: made-up notices of every kind, in the toolkit's own words
 ---------------------------------------------------------------------------
 
-P.NOTICE_TEXT = {
-    supply = "調貨所：測試甲 可能有你缺的「亞麻布」x20",
-    radar = "背包有「銅錠」x12，3 位職工正在徵求",
-    recipe = "已學會「亞麻斗篷」，要不要結束這筆圖紙徵求？",
-    adventure = "你的職工單符合 測試乙 的冒險單「死亡礦坑」",
-    order_new = "測試丙 指定你做「厚亞麻繃帶」x10",
-    order_guild = "公會委託：測試丁 想要「銅錠」x40（你會做）",
-    order_status = "測試戊 接下了你的委託「強效治療藥水」x5",
-    order_remind = "委託「亞麻布」已等接單 4 天，還沒有人接",
-    adv_signup = "測試己 報名了你的冒險單「影牙城堡」",
-    adv_result = "隊長 測試庚 錄取你參加「哀嚎洞穴」",
-    adv_final = "冒險單「死亡礦坑」定案：今天 21:00",
-    adv_update = "隊長改了冒險單「監獄」的內容（時間與備註）",
-    adv_remind = "冒險單「血色修道院：墓地」15 分鐘後開打",
-    adv_leader = "你的冒險單「黑暗深淵」快開打了，還沒有定案時間",
-    bank_keeper = "會長 測試辛 指定你為臨時黑箱的保管人",
-}
+-- GF-UI-N (owner 0.16.12: 「各種通知有比對到、有顯示驚嘆號時的訊息」): the words
+-- come from the toolkit's own text functions with made-up records (the same ones
+-- that write the real notices), every kind and every variant of a reminder (the
+-- ones the ❗ on a page also shows), half of them unread. Two texts are written
+-- inside files this task may not touch (Adventure.lua's signup line, Bank.lua);
+-- they are copied here word for word and a test checks them against those files.
+P.ATTENTION = { adv_remind = true, adv_leader = true, order_remind = true } -- the ❗'s reminders
+P.PEOPLE = { ["pv:a"] = "測試甲", ["pv:b"] = "測試乙", ["pv:c"] = "測試丙", ["pv:d"] = "測試丁" }
+P.ITEM = { cloth = 2589, bar = 2840, potion = 929 }
 P.LONG_TEXT = "這是一則特別長的假通知，用來看文字太長時會不會被切掉、按鈕會不會被擠到，請看這一行最後面有沒有出現三個點"
+-- Copies (see above): Adventure.notifyScan's 報名 line, Bank.notifyKeeper's three lines.
+P.SIGNUP_TEXT = "%s 報名了你的冒險單 %s%s"
+P.SIGNUP_WAIT = "，等你審核"
+P.BANK_TEXT = { on = "會長指定你為臨時黑箱保管人（%s）", change = "會長把你的保管範圍改成%s", off = "會長撤銷了你的臨時黑箱保管人資格" }
+
+local function fakeDungeon(ns, i)
+    local ids = { "dm", "sfk", "wc", "bfd", "stk", "rfk", "gnr", "rfc" }
+    local id = ids[(i - 1) % #ids + 1]
+    if ns.AdventureData and ns.AdventureData.byId and ns.AdventureData.byId[id] then return id end
+    return nil
+end
+-- A made-up ticket the way Adventure.all() gives one (only what the text functions read).
+local function fakeView(ns, i, f)
+    local v = { id = "pv" .. i, dungeon = fakeDungeon(ns, i), zone = "預覽區域", quests = {}, members = {}, waitlist = {},
+        pending = {}, invited = {}, kicked = {}, created = ns.now() - 3600 }
+    for k, x in pairs(f or {}) do v[k] = x end
+    if v.slots and not v.slotById then
+        v.slotById = {}
+        for _, sl in ipairs(v.slots) do v.slotById[sl.id] = sl end
+    end
+    return v
+end
+
+-- { { module, text, actions } } in the toolkit's own words.
+function P.realNotices(ns)
+    local out = {}
+    local function add(module, text, actions)
+        if type(text) == "string" and text ~= "" then out[#out + 1] = { module = module, text = text, actions = actions } end
+    end
+    local t = ns.now()
+    local my = "pv:me"
+    local Adv, O, S = ns.Adventure, ns.Orders, ns.Share
+    -- Made-up people for the name lookups, only while the words are made.
+    local member, memberFor = Adv and Adv.member, S and S.memberFor
+    local function person(a) local n = P.PEOPLE[a]; return n and { name = n .. "-預覽伺服器" } or nil end
+    if Adv and member then Adv.member = function(a, ...) return person(a) or member(a, ...) end end
+    if S and memberFor then S.memberFor = function(a, ...) return person(a) or memberFor(a, ...) end end
+    local okRun, err = pcall(function()
+        local function item(id)
+            local name = ns.itemInfo and ns.itemInfo(id)
+            return (type(name) == "string" and name ~= "") and name or ("物品 #" .. id)
+        end
+        -- 調貨所 / 雷達 / 圖紙 (SupplyRadar, RecipeLink).
+        local R = ns.SupplyRadar
+        if R then
+            add("supply", R.MATCH_TEXT.need(item(P.ITEM.cloth), 3, 1), { { key = "view", text = "查看需求" }, { key = "ignore", text = "忽略" } })
+            add("supply", R.MATCH_TEXT.offer(item(P.ITEM.bar), 2, 2))
+            add("supply", R.moreText("need", 4))
+            add("radar", R.radarText(item(P.ITEM.bar), 12, 3), R.ACTIONS)
+        end
+        if ns.RecipeLink then add("recipe", ns.RecipeLink.learnedText("亞麻斗篷"), { ns.RecipeLink.END_ACTION }) end
+        -- 職工單配對 (WorkerMatch).
+        if ns.WorkerMatch and ns.WorkerMatch.text then
+            local sl = { id = 1, s = t + 7200, d = 7200 }
+            add("adventure", ns.WorkerMatch.text({ view = fakeView(ns, 1, { leader = "pv:b", slots = { sl } }), slot = sl, role = "h" }))
+        end
+        -- 委託 (Orders.notifyText): every code of each switch.
+        if O and O.notifyText then
+            local v = { id = "pvo", item = P.ITEM.potion, qty = 5 }
+            local codes = {
+                { "order_new", "new" }, { "order_guild", "guild" },
+                { "order_status", "taken" }, { "order_status", "delivered" }, { "order_status", "returned" },
+                { "order_status", "dropped" }, { "order_status", "deal-customer" }, { "order_status", "cancel-web" },
+                { "order_remind", "stale-waiting", 4 }, { "order_remind", "stale-making", 7 }, { "order_remind", "close" },
+            }
+            for _, c in ipairs(codes) do add(c[1], O.notifyText(v, { code = c[2], who = "pv:c", n = c[3] })) end
+        end
+        -- 冒險 (Adventure.notifyEvents on made-up tickets).
+        if Adv and Adv.notifyEvents then
+            local function events(v, prev)
+                local okE, list = pcall(Adv.notifyEvents, v, my, prev, t)
+                for _, ev in ipairs(okE and list or {}) do add(ev.module, ev.text) end
+            end
+            local s1, s2 = { id = 1, s = t + 20 * 60, d = 7200 }, { id = 2, s = t + 3 * 3600, d = 7200 }
+            -- My ticket: 待定案, 遞補, 候補的職工單離開 (adv_leader).
+            events(fakeView(ns, 2, { leader = my, slots = { s1, s2 }, members = { { a = "pv:a", at = t - 900, refilled = t - 300 } },
+                workerGone = { { a = "pv:b", at = t - 200 } } }))
+            -- My ticket, 定案, in 15 minutes (adv_remind).
+            local s3 = { id = 1, s = t + 14 * 60, d = 7200 }
+            events(fakeView(ns, 3, { leader = my, slots = { s3 }, final = 1, slot = s3 }))
+            -- I am in: 改內容, 遞補上, 定案, 60 分鐘 (adv_update, adv_result, adv_final, adv_remind).
+            local s4, s5 = { id = 1, s = t + 50 * 60, d = 7200 }, { id = 2, s = t + 5 * 3600, d = 7200 }
+            events(fakeView(ns, 4, { leader = "pv:c", slots = { s4, s5 }, final = 1, slot = s4, finalAt = t - 60, edited = t - 30,
+                members = { { a = my, at = t - 3000, refilled = t - 100 } } }), "w")
+            -- Invited; 錄取; not taken (adv_result).
+            events(fakeView(ns, 5, { leader = "pv:d", slots = { s5 }, invited = { { a = my, at = t - 20 } } }))
+            events(fakeView(ns, 6, { leader = "pv:d", slots = { s5 }, members = { { a = my, at = t - 50 } } }), "p")
+            events(fakeView(ns, 7, { leader = "pv:d", slots = { s5 }, kicked = { [my] = t - 40 } }), "p")
+            -- Cancelled, 過期 (adv_final, adv_update).
+            events(fakeView(ns, 8, { leader = "pv:c", slots = { s5 }, closed = true, state = "cancel", closedAt = t - 30,
+                members = { { a = my, at = t - 600 } } }))
+            events(fakeView(ns, 1, { leader = "pv:c", slots = { s5 }, closed = true, state = "ended", closedAt = t - 40,
+                waitlist = { { a = my, at = t - 600 } } }))
+            -- 報名 (adv_signup; see P.SIGNUP_TEXT).
+            local dest = Adv.notifyDest and Adv.notifyDest(fakeView(ns, 2, {})) or "冒險單"
+            add("adv_signup", string.format(P.SIGNUP_TEXT, "測試甲 等 2 人", dest, P.SIGNUP_WAIT))
+            add("adv_signup", string.format(P.SIGNUP_TEXT, "測試乙", dest, ""))
+        end
+        -- 臨時黑箱 (see P.BANK_TEXT).
+        local kinds = ns.Bank and ns.Bank.KINDS_TEXT or {}
+        local k1 = kinds.b or "背包"
+        add("bank_keeper", string.format(P.BANK_TEXT.on, k1))
+        add("bank_keeper", string.format(P.BANK_TEXT.change, k1))
+        add("bank_keeper", P.BANK_TEXT.off)
+    end)
+    if Adv and member then Adv.member = member end
+    if S and memberFor then S.memberFor = memberFor end
+    if not okRun then say("預覽：有一種通知的文字做不出來（" .. tostring(err) .. "）") end
+    return out
+end
 
 local notices = {}
 P.notices = notices
-local function noticeActions(ns, module)
-    if module == "radar" then
-        return { { key = "view", text = "查看需求" }, { key = "ignore", text = "忽略" }, { key = "post", text = "刊登" } }
-    elseif module == "supply" then
-        return { { key = "view", text = "查看需求" }, { key = "ignore", text = "忽略" } }
-    elseif module == "recipe" then
-        local a = ns.RecipeLink and ns.RecipeLink.END_ACTION
-        return { { key = a and a.key or "end", text = a and a.text or "結束徵求" } }
-    end
-    return nil
-end
 function P.buildNotices(ns)
     local N = ns.Notify
     local t = ns.now()
     for i = #notices, 1, -1 do notices[i] = nil end
+    local have = {}
+    for i, r in ipairs(P.realNotices(ns)) do
+        have[r.module] = true
+        notices[#notices + 1] = { id = -i, gfPreview = true, module = r.module, key = "preview:" .. r.module .. ":" .. i,
+            text = r.text, t = t - i * 300, unread = i % 2 == 1, count = 1, actions = r.actions, expires = t + 86400,
+            attention = P.ATTENTION[r.module] or nil }
+    end
+    -- A switch with no text function above (a new one): its name, so nothing is missing.
     for i, m in ipairs(N.MODULES) do
-        notices[#notices + 1] = { id = -i, gfPreview = true, module = m.key, key = "preview:" .. m.key,
-            text = P.NOTICE_TEXT[m.key] or (m.text .. "（預覽）"), t = t - i * 420, unread = i % 2 == 1, count = 1,
-            actions = noticeActions(ns, m.key), expires = t + 86400 }
+        if not have[m.key] then
+            notices[#notices + 1] = { id = -200 - i, gfPreview = true, module = m.key, key = "preview:" .. m.key,
+                text = m.text .. "（預覽：還沒有對應的文字）", t = t - i * 60, unread = i % 2 == 0, count = 1, expires = t + 86400 }
+        end
     end
     -- 「另有 N 則」: what N.push makes past N.BURST a minute (GF-014-04).
     notices[#notices + 1] = { id = -100, gfPreview = true, module = "supply", key = N.MORE_KEY, more = 12, count = 12,
@@ -308,7 +408,10 @@ function P.notify(ns)
     UI.open()
     P.updateBanner()
     UI.draw()
-    say(string.format("通知中心：%d 則假通知（%d 種各一則，另有「另有 N 則」與一則很長的）。用滾輪看下面；忽略、全部已讀只動假通知", #notices, #ns.Notify.MODULES))
+    local unread = 0
+    for _, e in ipairs(notices) do if e.unread then unread = unread + 1 end end
+    say(string.format("通知中心：%d 則假通知（%d 種都有，文字和正式通知同一個來源；%d 則未讀、%d 則已讀，另有「另有 N 則」與一則很長的）。用滾輪看下面；忽略、全部已讀只動假通知",
+        #notices, #ns.Notify.MODULES, unread, #notices - unread))
     return true
 end
 
