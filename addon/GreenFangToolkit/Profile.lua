@@ -319,7 +319,10 @@ end
 -- id, state, stateName, title, closed, sort }.
 ---------------------------------------------------------------------------
 
-Profile.ORDER_STATE = { waiting = "等接單", making = "製作中", checking = "待驗收", deal = "成交", cancel = "取消" }
+Profile.ORDER_STATE = { waiting = "等接單", making = "製作中", checking = "待驗收", deal = "已成交", cancel = "已取消" }
+
+-- GF-UI-K: adventure states that are over (listed after the open ones, greyed).
+Profile.ADV_ENDED = { done = true, ended = true, unfinished = true, cancel = true, closed = true }
 
 local function orderTitle(v)
     local name = v.recipe and ns.Recipes and ns.Recipes.name and ns.Recipes.name(v.recipe)
@@ -377,7 +380,8 @@ function Profile.myBusiness()
                     out[#out + 1] = { kind = "adventure", id = v.id, state = v.state,
                         stateName = (Adv.STATE_NAME and Adv.STATE_NAME[v.state]) or str(v.state),
                         role = how == "leader" and "開單" or "報名",
-                        title = adventureTitle(v), closed = v.closed == true, sort = v.created or 0 }
+                        title = adventureTitle(v), closed = v.closed == true or Profile.ADV_ENDED[v.state] == true,
+                        sort = v.created or 0 }
                 end
             end
         end

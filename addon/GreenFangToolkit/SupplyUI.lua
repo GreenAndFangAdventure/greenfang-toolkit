@@ -29,11 +29,18 @@ UI.DETAIL_ROWS = 9
 -- 「手動刊登」貼右邊界): no page title of its own (the window title and the
 -- sub-tab already name it); under the sub-tab row (its line ends 29 px into
 -- the page) come two rows: BAR_Y the tabs + the two check boxes over the
--- detail column; TOOL_Y 收集組 on the left and 刊登 at the list's right edge.
+-- detail column; TOOL_Y 刊登 then 收集組 on the left (GF-UI-K; was 刊登 at the list's right edge).
 UI.BAR_Y, UI.TOOL_Y = -40, -84
-UI.CHECK_X = { auto = 586, manual = 786 }
+-- GF-UI-K: 「啟用：」 names what the two boxes are; the boxes follow it.
+UI.CHECK_X = { label = 586, auto = 650, manual = 786 }
+UI.CHECK_LABEL = "啟用："
+UI.AUTO_TEXT, UI.MANUAL_TEXT = "自動集料", "手動刊登" -- switches, not filters (GF-UI-I): names kept
+-- GF-UI-K: an ended listing of mine sits after the live ones, faded.
+UI.ENDED_ALPHA = 0.55
+-- GF-UI-K: 交易條件 / 備註 lines of my listing: label 4..80, value from 84.
+UI.LISTING_VALUE_X, UI.LISTING_VALUE_W = 84, 400
 UI.POST_W = 96
-UI.POST_TEXT = "＋刊登"
+UI.POST_TEXT = "刊登" -- GF-UI-K (owner): no 「＋」
 UI.HEAD_Y, UI.HEAD_H = -128, 28
 UI.TOP = UI.HEAD_Y - UI.HEAD_H - 4
 UI.EXPAND = 16
@@ -67,14 +74,17 @@ UI.HEADINGS = {
     need = { "物品", "數量", "可能提供", "時效" },
     offer = { "物品", "數量", "需要", "時效" },
     guild = { "物品", "徵求／供應", "在線", "時效" },
-    mine = { "物品", "數量", "狀態", "時效" },
+    mine = { "物品", "類型／數量", "狀態", "時效" }, -- GF-UI-K: the cell reads 「徵求 1」
 }
-UI.DETAIL_HEADINGS = { "成員", "數量", "在線", "時效", "條件" } -- GF-009-14 B: 來源 → 交易條件 (自動 rows say 自動)
+UI.DETAIL_HEADINGS = { "職工", "數量", "在線", "時效", "條件" } -- GF-009-14 B: 來源 → 交易條件 (自動 rows say 自動)
 UI.NOTE_ICON = "Interface\\Buttons\\UI-GuildButton-PublicNote-Up" -- shown only when there is a note
 UI.NOTE_ICON_SIZE = 14
 -- 收集組 only where the lists come from the collection rules.
 UI.GROUP_TABS = { need = true, offer = true }
-UI.GROUP_X, UI.GROUP_W = 22, 170
+-- GF-UI-K (owner: 刊登 stood alone mid-page): 刊登 at the list's left edge on
+-- every tab, right over the column header; 收集組 follows it.
+UI.POST_X = 22
+UI.GROUP_X, UI.GROUP_W = 142, 170
 UI.EXPAND_CLOSED = "Interface\\Buttons\\UI-PlusButton-Up"
 UI.EXPAND_OPEN = "Interface\\Buttons\\UI-MinusButton-Up"
 
@@ -290,7 +300,13 @@ end
 function UI.listFor(kind)
     local out = {}
     if kind == "mine" then
-        for _, l in ipairs(L.own()) do
+        -- GF-UI-K: live listings first, ended ones after (each group keeps L.own()'s order).
+        local own, live, ended = L.own(), {}, {}
+        for _, l in ipairs(own) do
+            if l.status == "active" then live[#live + 1] = l else ended[#ended + 1] = l end
+        end
+        for _, l in ipairs(ended) do live[#live + 1] = l end
+        for _, l in ipairs(live) do
             local left = (l.expiresAt or 0) - ns.Share.serverNow()
             local days = left > 0 and math.max(1, math.ceil(left / 86400)) or 0
             local q = L.DIRECTION_TEXT[l.direction] .. " " .. l.quantity
@@ -298,7 +314,7 @@ function UI.listFor(kind)
             local tip = { L.categoryText(l.category), "交易條件：" .. L.termsText(l.terms, l.price) }
             if (l.note or "") ~= "" then tip[#tip + 1] = "備註：" .. l.note end
             out[#out + 1] = { itemID = l.itemID, listing = l, qty = q, qtyShort = q, match = st, matchShort = st,
-                fresh = l.status == "active" and ("剩 " .. days .. " 天") or "", expandable = true,
+                fresh = l.status == "active" and ("剩 " .. days .. " 天") or "", ended = l.status ~= "active",
                 tip = tip, hasNote = (l.note or "") ~= "" }
         end
         return out
@@ -318,7 +334,7 @@ function UI.listFor(kind)
             end
             out[#out + 1] = { itemID = it.itemID, item = it, qty = UI.qtyText(kind, it), match = UI.matchText(kind, it),
                 qtyShort = UI.qtyShort(kind, it), matchShort = UI.matchShort(kind, it), fresh = UI.freshShort(it),
-                expandable = #it.others > 0, tip = tip, hasNote = hasNote }
+                tip = tip, hasNote = hasNote }
         end
     end
     return out
@@ -348,16 +364,12 @@ function UI.drawList()
             r.noteIcon:ClearAllPoints()
             r.noteIcon:SetPoint("BOTTOMRIGHT", r.icon, "BOTTOMRIGHT", 4, -4)
             if data.hasNote then r.noteIcon:Show() else r.noteIcon:Hide() end
-            local open = state.selected == state.offset + i
-            r.sel.set(open)
-            if data.expandable then
-                r.expandFile = open and UI.EXPAND_OPEN or UI.EXPAND_CLOSED
-                ns.Icons.set(r.expand, r.expandFile)
-                r.expand:Show()
-            else
-                r.expandFile = nil
-                r.expand:Hide()
-            end
+            r.sel.set(state.selected == state.offset + i)
+            -- GF-UI-K (owner): no + / - in front: the detail on the right is the one way to open it.
+            r.expandFile = nil
+            r.expand:Hide()
+            r.ended = data.ended == true
+            if r.SetAlpha then r:SetAlpha(r.ended and UI.ENDED_ALPHA or 1) end
             r:Show()
         elseif r then
             r:Hide()
@@ -439,6 +451,18 @@ end
 -- Detail (the selected item)
 ---------------------------------------------------------------------------
 
+-- GF-UI-K: a detail row's place: person rows under the detail header; my
+-- listing's lines (no header) start where the header would be, the value
+-- right after its label.
+function UI.placeDetailRow(r, i, listing)
+    local top = listing and UI.DETAIL_HEAD_Y or UI.DETAIL_TOP
+    r:ClearAllPoints()
+    r:SetPoint("TOPLEFT", panel, "TOPLEFT", UI.DETAIL_X, top - (i - 1) * 44)
+    r.what:ClearAllPoints()
+    r.what:SetPoint("LEFT", r, "LEFT", listing and UI.LISTING_VALUE_X or UI.DCOL.what.x, 0)
+    r.gfListing = listing
+end
+
 local function newDetailRow(i)
     local r = CreateFrame("Frame", nil, panel)
     r:SetSize(UI.DETAIL_W, 40)
@@ -517,7 +541,7 @@ function UI.applyLayout()
     if statePanel then statePanel:SetWidth(w) end
     if postButton then
         postButton:ClearAllPoints()
-        postButton:SetPoint("TOPLEFT", panel, "TOPLEFT", UI.LIST_X + w - UI.POST_W, UI.TOOL_Y)
+        postButton:SetPoint("TOPLEFT", panel, "TOPLEFT", UI.POST_X, UI.TOOL_Y)
     end
     if UI.divider then if state.wide then UI.divider:Hide() else UI.divider:Show() end end
     return state.wide
@@ -548,14 +572,16 @@ function UI.drawDetail()
         if detailHeader then detailHeader:Hide() end
         hideDetailRows(1)
         -- GF-009-14 B: 交易條件, then the full note (when there is one).
+        -- GF-UI-K: in the header's place (it is hidden here), the value right after its label.
         local lines = { { "交易條件", L.termsText(l.terms, l.price) } }
         if l.note and l.note ~= "" then lines[#lines + 1] = { "備註", l.note } end
         for i, ln in ipairs(lines) do
             local r = detailRows[i] or newDetailRow(i)
+            UI.placeDetailRow(r, i, true)
             r.name:SetText(ln[1])
             r.on:SetText(""); r.fresh:SetText(""); r.src:SetText("")
             r.noteIcon:Hide()
-            r.what:SetWidth(330)
+            r.what:SetWidth(UI.LISTING_VALUE_W)
             r.what:SetText(ln[2])
             r.tipLines = { ln[1], ln[2] }
             r.contact:Hide()
@@ -573,9 +599,10 @@ function UI.drawDetail()
         local r = detailRows[i]
         if e then
             r = r or newDetailRow(i)
+            UI.placeDetailRow(r, i, false)
             local name, what, on, fresh = UI.personText(e)
             r.name:SetText(name)
-            r.what:SetWidth(96)
+            r.what:SetWidth(UI.DCOL.what.w)
             r.what:SetText(what)
             r.on:SetText(on)
             r.fresh:SetText(fresh)
@@ -676,9 +703,12 @@ end
 local function build(p)
     panel = p
     -- GF-UI-H: no title line (it sat under the sub-tab row); see UI.BAR_Y.
-    autoBox = checkWithLabel(p, "自動集料", UI.CHECK_X.auto, UI.BAR_Y, function(on) Supply.setAuto(on); UI.refresh() end)
+    -- GF-UI-K: 「啟用：」 in front, so the two boxes read as switches, not buttons.
+    autoBox = checkWithLabel(p, UI.AUTO_TEXT, UI.CHECK_X.auto, UI.BAR_Y, function(on) Supply.setAuto(on); UI.refresh() end)
+    UI.checkLabel = label(p, UI.CHECK_LABEL, ns.FIELD_FONT)
+    UI.checkLabel:SetPoint("LEFT", autoBox, "LEFT", UI.CHECK_X.label - UI.CHECK_X.auto, 0) -- on the boxes' line
     autoBox.tip = "試用：荊棘谷書頁，依任務與背包自動算出缺的和可能多的（規則尚未實機確認）"
-    manualBox = checkWithLabel(p, "手動刊登", UI.CHECK_X.manual, UI.BAR_Y, function(on) Supply.setManual(on); UI.refresh() end)
+    manualBox = checkWithLabel(p, UI.MANUAL_TEXT, UI.CHECK_X.manual, UI.BAR_Y, function(on) Supply.setManual(on); UI.refresh() end)
     manualBox.tip = "關掉後不再分享我的刊登，也不顯示別人的刊登"
     withTip(autoBox); withTip(manualBox)
     tabs = Th.tabStrip(p, (function()
@@ -689,7 +719,7 @@ local function build(p)
     tabs.select(state.tab)
     UI.tabs = tabs
     postButton = Th.button(p, UI.POST_TEXT, UI.POST_W, ns.BUTTON_H)
-    postButton:SetPoint("TOPLEFT", p, "TOPLEFT", UI.LIST_X + UI.LIST_W - UI.POST_W, UI.TOOL_Y)
+    postButton:SetPoint("TOPLEFT", p, "TOPLEFT", UI.POST_X, UI.TOOL_Y)
     UI.postButton = postButton
     postButton:SetScript("OnClick", function() UI.openForm() end)
     -- GF-UI-F: 收集組, shown on 我缺的 / 我可能有多的 only (GF-UI-H: on the tool row).
@@ -778,7 +808,7 @@ local function build(p)
     detail.finish:SetScript("OnClick", function(self)
         local l = self.listing
         if not l then return end
-        W.confirm("結束這筆" .. L.DIRECTION_TEXT[l.direction] .. "？公會成員之後不會再看到它。", function()
+        W.confirm("結束這筆" .. L.DIRECTION_TEXT[l.direction] .. "？其他職工之後不會再看到它。", function()
             L.finish(l.id, "closed"); UI.refresh()
         end)
     end)
@@ -1151,10 +1181,11 @@ local function buildForm()
     f.msg:SetPoint("TOPLEFT", f, "TOPLEFT", 24, y)
     f.msg:SetWidth(552)
     f.save = Th.button(f, "刊登", 110, ns.BUTTON_H)
-    f.save:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -138, 16)
+    -- GF-UI-K: the primary button on the right, 取消 left of it (as 確定 / 儲存 elsewhere).
+    f.save:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -18, 16)
     f.save:SetScript("OnClick", function() UI.submitForm() end)
     f.cancel = Th.button(f, "取消", 110, ns.BUTTON_H)
-    f.cancel:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -18, 16)
+    f.cancel:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -138, 16)
     f.cancel:SetScript("OnClick", function() UI.closeForm() end)
     f:Hide()
     -- X and ESC (ns.escape) both call f:Hide(): ask first when something changed.

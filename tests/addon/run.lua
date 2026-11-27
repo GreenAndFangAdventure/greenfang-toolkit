@@ -536,7 +536,7 @@ test("framework: roster is the first module; no settings page", function()
     SlashCmdList.GREENFANGTOOLKIT("")
     eq(ns.Framework.current(), "roster", "opens roster by default")
     -- GF-UI-B: the guild name in the title (it left the page).
-    eq(_G.GreenFangToolkit_MainWindow.TitleText:GetText(), "綠皮冒險工具箱｜綠皮與獠牙冒險事務所", "title")
+    eq(_G.GreenFangToolkit_MainWindow.TitleText:GetText(), "綠皮冒險工具箱｜職工名冊｜綠皮與獠牙冒險事務所", "title")
     ok(ns.Framework.panel("roster"):IsShown(), "roster panel shown")
 end)
 
@@ -725,7 +725,7 @@ test("sleepingbag: window page builds and refreshes", function()
     local ns = wow.login(ADDON_DIR)
     SlashCmdList.GREENFANGTOOLKIT("sleepingbag")
     eq(ns.Framework.current(), "sleepingbag", "opened")
-    eq(_G.GreenFangToolkit_MainWindow.TitleText:GetText(), "綠皮冒險工具箱｜睡袋路線", "title")
+    eq(_G.GreenFangToolkit_MainWindow.TitleText:GetText(), "綠皮冒險工具箱｜冒險指南", "title")
     ns.SleepingBag.toggleMode()
     eq(ns.SleepingBag.state().mode, "normal", "toggle")
 end)
@@ -1254,7 +1254,7 @@ test("roster window: another guild shows a message, no roster, controls disabled
     eq(wow.state.rosterInfoCalls or 0, 0, "still no GetGuildRosterInfo call")
     eq(ns.Roster.current(), nil, "no snapshot")
     local UI = rosterPage(ns)
-    eq(UI.unavailableText(), "這個角色不在綠皮與獠牙冒險事務所，無法使用公會名冊。", "message")
+    eq(UI.unavailableText(), "這個角色不在綠皮與獠牙冒險事務所，無法使用職工名冊。", "message")
     -- GF-UI-B: an icon and 「非本會」 in the middle, no sentence.
     eq(UI.emptyKey, "other", "other guild shown")
     ok(pageHas("非本會"), "short name on the page")
@@ -1263,7 +1263,7 @@ test("roster window: another guild shows a message, no roster, controls disabled
     local on, off = controlsEnabled(UI)
     eq(on, 0, "none enabled"); eq(off, 3, "all disabled")
     ns.UI.startExport("json")
-    ok(printedContains("無法使用公會名冊"), "export refuses")
+    ok(printedContains("無法使用職工名冊"), "export refuses")
     ok(ns.Framework.get("sleepingbag"), "sleeping bag still available")
     ns.Framework.open("sleepingbag")
     eq(ns.Framework.isModuleShown("sleepingbag"), true, "sleeping bag opens")
@@ -4712,6 +4712,10 @@ assert(loadfile(ROOT .. "/tests/addon/gf008c_tests.lua"))()({ test = test, eq = 
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 -- GF-FIX-C: roster scan keeps an unchanged snapshot, Roster.version, recipe index, searches (tests/addon/gffixc_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gffixc_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+
+-- GF-UI-K: interface tidy-up: personnel file, 我的刊登, window titles, quest pickers (tests/addon/uik_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/uik_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 -- GF-008-D: framed glowing pins by colour, the short Horde guide, the faction field (tests/addon/gf008d_tests.lua).

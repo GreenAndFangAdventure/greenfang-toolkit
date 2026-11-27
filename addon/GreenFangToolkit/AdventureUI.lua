@@ -1420,7 +1420,7 @@ local function build(p)
         ns.NativeLFG.search()
     end)
     -- GF-002-H (R-16.12): the adventure calendar.
-    UI.calendarButton = ns.OrdersUI.textButton(p, tex("calendar", 20) .. " 行事曆", function() UI.openCalendar() end)
+    UI.calendarButton = ns.OrdersUI.textButton(p, tex("calendar", 20) .. " 業務排程", function() UI.openCalendar() end)
     UI.calendarButton:SetPoint("LEFT", UI.workerButton, "RIGHT", 12, 0)
     UI.lfgButton:SetPoint("LEFT", UI.calendarButton, "RIGHT", 12, 0)
     -- GF-UI-A §2.4 item 4: the unnamed summary (dungeon, people, missing roles) is gone;
@@ -2644,6 +2644,7 @@ end
 
 UI.QUEST_PICKER_NAME = "GreenFangToolkit_QuestPicker"
 UI.QP_ROW, UI.QP_HEAD, UI.QP_COL_W, UI.QP_MAX_Y = 30, 32, 420, 480
+UI.QP_ZONE_WHOLE_X = UI.QP_COL_W - 50 -- GF-UI-K: 全區 at a zone row's right end (after the count)
 local qpicker
 function UI.questList()
     local log = A().questLog() or {}
@@ -2840,7 +2841,19 @@ function UI.questPicker(owner, opts)
                         r.name:SetText(e.z.zone)
                         r.count:SetText(tostring(e.z.count))
                         if e.z.groups > 0 then ns.GameIcons.set(r.elite, "elite") else r.elite:Hide() end
+                        -- GF-UI-K: worker tickets take a whole zone right after its row (全區);
+                        -- the row stops before the check so the two never overlap.
+                        r:SetSize(o.whole and (UI.QP_ZONE_WHOLE_X - 10) or (UI.QP_COL_W - 20), UI.QP_ROW - 2)
                         r:ClearAllPoints(); r:SetPoint("TOPLEFT", qpicker, "TOPLEFT", x, yy); r:Show()
+                        if o.whole and e.z.zone ~= "其他" and e.z.count > 0 then
+                            nw = nw + 1
+                            local b = whole(nw)
+                            b.zone = e.z.zone
+                            local on = o.whole.isOn(e.z.zone)
+                            b.selected = on
+                            ns.GameIcons.set(b.tex, on and "check_on" or "check_off")
+                            b:ClearAllPoints(); b:SetPoint("TOPLEFT", qpicker, "TOPLEFT", x + UI.QP_ZONE_WHOLE_X, yy - 2); b:Show()
+                        end
                     elseif e.kind == "head" then
                         nh = nh + 1
                         local h = head(nh)
@@ -3166,7 +3179,14 @@ end
 
 function UI.pickWorkerQuests(owner)
     -- R-16.29: 日誌全部 (with the count) or the quests one by one; ❗ = an open ticket wants it.
-    return UI.questPicker(owner, { title = "選擇任務",
+    -- GF-UI-K (owner: 「操作盡量統一」): the same first view as the adventure
+    -- ticket, the zones; a zone opens its quests. The rules stay the worker
+    -- ticket's: any number, from any zones, 全區 on each zone, 日誌全部 on top.
+    -- The open zone is only the picker's (nothing is saved for it).
+    local zone = nil
+    return UI.questPicker(owner, { title = "選擇任務", zoneFirst = true,
+        getZone = function() return zone end,
+        onZone = function(z) zone = z end,
         all = { count = A().questCount(), on = function() return wdraft.allQuests == true end,
             toggle = function() wdraft.allQuests = not wdraft.allQuests; drawWorker() end },
         -- GF-002-J (R-17.21): 全區 = every quest of that zone in my log.
@@ -3440,7 +3460,7 @@ function UI.openCalendar()
         f:SetPoint("CENTER", 0, 40)
         f:EnableMouse(true)
         ns.exclusivePopup(f)
-        if f.TitleText then f.TitleText:SetText("行事曆") end
+        if f.TitleText then f.TitleText:SetText("業務排程") end
         f.prev = iconButton(f, ns.ROW_ICON, "prev", "上一週", function() f.page = math.max(0, f.page - 1); UI.drawCalendar() end)
         ns.GameIcons.set(f.prev.tex, "prev")
         f.prev:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -36)
@@ -3608,7 +3628,7 @@ table.insert(ns.Framework.tooltipLines, function(tip)
     local a = UI.badgeCount or 0
     local o = ns.OrdersUI and ns.OrdersUI.badgeCount or 0
     if a > 0 then tip:AddLine(tex("dungeon") .. " 冒險 " .. a, 1, 0.5, 0.45) end
-    if o > 0 then tip:AddLine(ns.OrdersUI.tex("making") .. " 訂單 " .. o, 1, 0.82, 0) end
+    if o > 0 then tip:AddLine(ns.OrdersUI.tex("making") .. " 委託 " .. o, 1, 0.82, 0) end
 end)
 
 A().onChanged = function()

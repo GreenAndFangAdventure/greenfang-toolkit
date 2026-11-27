@@ -2114,8 +2114,8 @@ end
 -- value = a number like "2/3", at / span = times the UI writes as a clock }.
 ---------------------------------------------------------------------------
 
-Adv.STATE_NAME = { open = "招募中", final = "已定案", formed = "成團", done = "成行",
-    ended = "過期", unfinished = "未成行", cancel = "取消", worker = "上架", closed = "已結案" }
+Adv.STATE_NAME = { open = "招募中", final = "已定案", formed = "已成團", done = "已成行",
+    ended = "已過期", unfinished = "未成行", cancel = "已取消", worker = "上架", closed = "已結案" }
 Adv.STATE_NEXT = { open = "final", final = "formed", formed = "done" }
 
 -- opts: { now, me, party (a set of authors; default my party) }.

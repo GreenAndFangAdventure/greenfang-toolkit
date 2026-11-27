@@ -70,17 +70,17 @@ return function(env)
         SlashCmdList.GREENFANGTOOLKIT("recipes")
         eq(F.current(), "recipes", "/gftk recipes")
         ok(F.isShown(), "window open")
-        eq(_G[F.WINDOW_NAME].TitleText:GetText(), "綠皮冒險工具箱｜配方", "window title unchanged")
+        eq(_G[F.WINDOW_NAME].TitleText:GetText(), "綠皮冒險工具箱｜委託業務", "GF-UI-K: the entry name")
     end)
 
-    test("GF-UI-E single-page entries show one chosen tab; 事務設定 opens 同步與診斷", function()
+    test("GF-UI-E single-page entries show no tab (GF-UI-K); 事務設定 opens 同步與診斷", function()
         local ns = login()
         local F = ns.Framework
         SlashCmdList.GREENFANGTOOLKIT("adventure")
         local tabs = {}
         for _, b in ipairs(F.subTabButtons()) do if b:IsShown() then tabs[#tabs + 1] = b end end
-        eq(#tabs, 1, "one tab")
-        eq(tabs[1]:GetText(), "業務大廳", "its name")
+        eq(#tabs, 0, "GF-UI-K: one page, no tab row")
+        eq(_G[F.WINDOW_NAME].TitleText:GetText(), "綠皮冒險工具箱｜冒險業務", "the title names the entry")
         local s = F.settingsButton()
         ok(not ns.Diag.isShown(), "closed")
         click(s)
@@ -111,7 +111,7 @@ return function(env)
         eq(navTexts(ns), "職工檔案,職工名冊,委託業務,物資調度,冒險業務,冒險指南,奇怪,舊頁", "物資調度 shows up; others after the six")
         local pages = {}
         for _, d in ipairs(F.pagesOf("logistics")) do pages[#pages + 1] = F.pageTitle(d) end
-        eq(table.concat(pages, ","), "我的物資,調貨所,臨時黑箱", "subOrder first, subTitle used") -- GF-012 adds 臨時黑箱 (was 公會黑庫)
+        eq(table.concat(pages, ","), "我的物資,綠皮調貨所,臨時黑箱", "subOrder first; the real supply page (registered first) keeps F.NAMES.page (GF-UI-K: 綠皮調貨所)") -- GF-012 adds 臨時黑箱 (was 公會黑庫)
         pages = {}
         for _, d in ipairs(F.pagesOf("profile")) do pages[#pages + 1] = d.id end
         eq(table.concat(pages, ","), "profile,character", "profile and character share 職工檔案")

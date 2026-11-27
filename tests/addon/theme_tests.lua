@@ -278,7 +278,7 @@ return function(T)
         r = row()
         ok(r, "the row is still listed")
         for _, b in ipairs(r.buttons) do ok(not b:IsShown(), "no action button on a closed order") end
-        eq(r.state.label._text, "取消", "the state says 取消")
+        eq(r.state.label._text, "已取消", "the state says 取消")
         ok(not hover(r.state), "the 取消 state icon does not light")
         ok(not Th.hoverable(r.item), "nor the item icon (tooltip only)")
         for _, o in ipairs(wow.allObjects()) do

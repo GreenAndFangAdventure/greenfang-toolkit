@@ -258,7 +258,7 @@ return function(T)
         local row
         for _, r in ipairs(U.rowFrames()) do if r:IsShown() and r.view and r.view.id == id then row = r end end
         ok(row, "still listed")
-        eq(plain(row.badge.text._text), "過期", "the 過期 badge"); ok(row.badge.icon._desaturated, "grey")
+        eq(plain(row.badge.text._text), "已過期", "the 過期 badge"); ok(row.badge.icon._desaturated, "grey")
         eq(table.concat(row.name._color, ","), "0.5,0.5,0.5", "grey name")
         eq(row.buttons[1].action, "reopen", "重開"); ok(row.buttons[1]:IsShown(), "shown")
         wow.click(row.buttons[1])
@@ -434,7 +434,7 @@ return function(T)
         end
         eq(kinds.worker and kinds.worker.badge, "上架", "another worker: 上架")
         ok(kinds.ticket and kinds.mine and kinds.worker, "a ticket, my worker ticket, another worker")
-        eq(plain(kinds.ticket.badge.text._text), "成團", "成團")
+        eq(plain(kinds.ticket.badge.text._text), "已成團", "成團")
         eq(plain(kinds.mine.badge.text._text), "上架", "上架")
         -- The tooltip: ReadyCheck marks, the two groups, the button to press.
         kinds.ticket.badge:GetScript("OnEnter")(kinds.ticket.badge)
