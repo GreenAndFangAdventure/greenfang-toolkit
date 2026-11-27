@@ -4743,6 +4743,9 @@ assert(loadfile(ROOT .. "/tests/addon/gffixb_tests.lua"))()({ test = test, eq = 
 -- GF-FIX-F: 0.16.6 review batch F: item events, finder reload, radar, 臨時黑箱; the supply switches (tests/addon/gffixf_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gffixf_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-TEST-01: 0.12.6 and 0.15.1 saves loaded by this version (tests/addon/gftest01_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gftest01_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0
