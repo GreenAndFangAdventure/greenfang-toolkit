@@ -4776,6 +4776,9 @@ assert(loadfile(ROOT .. "/tests/addon/gfuil_tests.lua"))()({ test = test, eq = e
 -- GF-012-FIX: 臨時黑箱 指定保管人 from the guild roster picker (tests/addon/gf012fix_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gf012fix_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-DIGEST-01: /gftkdev traits, the talent tree's IDs as copyable text (tests/addon/digest01_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/digest01_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0
