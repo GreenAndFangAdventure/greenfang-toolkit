@@ -2692,11 +2692,31 @@ test("D10 simple pages: no pending counts, scan details or GF Sync text on the r
     ns.Framework.open("settings")
     ns.Framework.open("recipes")
     ns.Framework.open("character")
-    for _, t in ipairs(wow.allTexts()) do
-        ok(not t:find("待上傳", 1, true), "pending count on a page: " .. t)
-        ok(not t:find("GF Sync", 1, true), "GF Sync text on a page: " .. t)
-        ok(not t:find("伺服器：", 1, true), "realm detail on a page: " .. t)
+    -- GF-UI-L (owner 2026-11-27: 主視窗看得出 GF Sync 狀態; claude-pm): the one
+    -- exception to D-014 point 6 is Framework.infoButton() (its text and tooltip),
+    -- and since GF-UI-L-2 (owner 2026-11-27: 0.16.10 只顯示版本) only while
+    -- Framework.SHOW_SYNC_STATUS is on. By default no widget has GF Sync text.
+    local info = ns.Framework.infoButton()
+    ok(info and not info:GetText():find("GF Sync", 1, true), "default: the version alone")
+    local function check(skip)
+        local others = 0
+        for _, o in ipairs(wow.allObjects()) do
+            local t = o._text
+            if o ~= skip and type(t) == "string" and t ~= "" then
+                others = others + 1
+                ok(not t:find("待上傳", 1, true), "pending count on a page: " .. t)
+                ok(not t:find("GF Sync", 1, true), "GF Sync text on a page: " .. t)
+                ok(not t:find("伺服器：", 1, true), "realm detail on a page: " .. t)
+            end
+        end
+        return others
     end
+    ok(check(nil) > 0, "every widget was checked")
+    ns.Framework.SHOW_SYNC_STATUS = true
+    ns.Framework.open("roster")
+    ok(info:GetText():find("GF Sync", 1, true), "switch on: the exception is that one widget")
+    local others = check(info)
+    ok(others > 0, "the other widgets were checked")
 end)
 
 ---------------------------------------------------------------------------
@@ -4749,6 +4769,9 @@ assert(loadfile(ROOT .. "/tests/addon/gf00915_tests.lua"))()({ test = test, eq =
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 -- GF-TEST-01: 0.12.6 and 0.15.1 saves loaded by this version (tests/addon/gftest01_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gftest01_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-UI-L: the version and the GF Sync signal on the main window (tests/addon/gfuil_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gfuil_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 

@@ -300,6 +300,50 @@ function Web.readInbox()
     return res.code
 end
 
+---------------------------------------------------------------------------
+-- GF-UI-L: what this computer shows of GF Sync. Read only: nothing is
+-- loaded, imported or saved here. GF Sync never writes the SavedVariables;
+-- GreenFangToolkit_Inbox is the only thing it writes in the game folder, and
+-- only in a build with the web-order switch on (off in every normal build).
+---------------------------------------------------------------------------
+
+-- Is the AddOn folder there? true / false, or nil when the client cannot say.
+function Web.addonExists(name)
+    local C = type(C_AddOns) == "table" and C_AddOns or nil
+    local does = C and C.DoesAddOnExist
+    if type(does) == "function" then
+        local ok, r = pcall(does, name)
+        if ok and type(r) == "boolean" then return r end
+    end
+    local info = (C and C.GetAddOnInfo) or rawget(_G, "GetAddOnInfo")
+    if type(info) == "function" then
+        local ok, n, _, _, _, reason = pcall(info, name)
+        if ok then
+            if str(reason) == "MISSING" then return false end
+            if str(n) ~= "" then return true end
+        end
+    end
+    return nil
+end
+
+-- H.at of an Inbox string (the time the site made the list), or nil. Only
+-- the header is looked at; the whole check is Web.parse (on import).
+function Web.inboxAt(s)
+    if type(s) ~= "string" or #s > Web.MAX_BYTES then return nil end
+    local head = s:match("^[^~]*~[^~]*~[^~]*~H;([^~]*)")
+    return head and intIn((";" .. head .. ";"):match(";at=(%d+);"), 1, 4102444800) or nil
+end
+
+-- { state = "seen" | "none" | "unknown", why = "inbox" | "folder" | "no-inbox" | "no-api", at }
+function Web.gfSyncSignal()
+    local value = rawget(_G, Web.GLOBAL)
+    if type(value) == "string" then return { state = "seen", why = "inbox", at = Web.inboxAt(value) } end
+    local exists = Web.addonExists(Web.ADDON)
+    if exists == true then return { state = "seen", why = "folder" } end
+    if exists == false then return { state = "none", why = "no-inbox" } end
+    return { state = "unknown", why = "no-api" }
+end
+
 -- One line for 同步與診斷.
 function Web.diagText()
     local st = Web.state()
