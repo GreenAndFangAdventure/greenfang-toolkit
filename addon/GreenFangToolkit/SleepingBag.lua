@@ -11,6 +11,8 @@
 -- simply sees normal mode. 看地圖 opens the world map on the step's zone with
 -- a pin (SleepingBagMap.lua). GF-008-C (owner: 「每一步都應該要有地圖處」):
 -- every step has a map; a step without x / y opens its map without a pin.
+-- GF-008-D: a short guide (位置 first, one action, one tip), the map colour
+-- legend, and the route chosen by its faction field.
 
 local _, ns = ...
 local str = ns.str
@@ -28,9 +30,15 @@ local scroll, scrollChild
 -- State (pure; covered by offline tests)
 ---------------------------------------------------------------------------
 
-function SB.route()
-    local faction = ns.Data.player().faction
-    return ns.SleepingBagRoutes[faction ~= "" and faction or "Horde"]
+-- GF-008-D: the route whose `faction` field is the player's (Horde when the
+-- faction is not known yet). An Alliance route is only data (SleepingBagData).
+function SB.route(faction)
+    faction = faction or ns.Data.player().faction
+    if faction == nil or faction == "" then faction = "Horde" end
+    for _, route in pairs(ns.SleepingBagRoutes or {}) do
+        if type(route) == "table" and route.faction == faction then return route end
+    end
+    return nil
 end
 
 function SB.state()
@@ -103,21 +111,37 @@ function SB.reveal()
     SB.refresh()
 end
 
--- GF-008-C: the map's zone (a continent, the wall on the Arathi map), an
--- approximate pin on a landmark, or why the map has no pin.
-local function coords(step)
-    local zone = step.mapZone or step.zone
-    if step.x and step.y then
-        return string.format("%s（%d, %d）", zone, step.x, step.y) .. (step.approx and ("（大約：" .. step.approx .. "）") or "")
+-- GF-008-C / D: the step's position line, always first. Integers on the page
+-- (as the guides write them); the map's zone (a continent, a point on another
+-- map), how sure the numbers are, or why the map has no point.
+local function int(v) return math.floor(v) end
+local CONF = { multi = "多來源一致", single = "單一來源" }
+local function pointText(st, p)
+    local zone = p.zone or st.mapZone or st.zone
+    local t = string.format("%s（%d, %d）", zone, int(p.x), int(p.y))
+    if p.conf == "approx" then return t .. "（大約：" .. str(p.approx or p.label) .. "）" end
+    return t .. "（" .. (CONF[p.conf] or "單一來源") .. "）"
+end
+local function coords(step, all)
+    local pts = step.points or {}
+    if #pts > 0 then
+        local out = {}
+        for i, p in ipairs(pts) do
+            if i == 1 or all then out[#out + 1] = pointText(step, p) .. (all and p.label and ("：" .. p.label) or "") end
+        end
+        return table.concat(out, "；")
     end
+    local zone = step.mapZone or step.zone
     if step.noPin then return zone .. "（地圖不標位置：" .. step.noPin .. "）" end
     return step.zone .. "（座標待實地確認）"
 end
+SB.coords = coords
 
 local VERIFY = "｜待實地驗證"
 
 -- Lines describing one step for a mode. RPG hides coordinates and travel
--- details until revealed.
+-- details until revealed. GF-008-D: normal mode is short and fixed: 位置 first,
+-- one line to do, one tip, then how to get there.
 function SB.stepLines(step, mode, revealed)
     local lines = {}
     local function add(label, value) if value and value ~= "" then lines[#lines + 1] = label .. value end end
@@ -129,12 +153,11 @@ function SB.stepLines(step, mode, revealed)
         lines[#lines + 1] = "（座標與詳細走法已隱藏，按「顯示座標與走法」揭示）" .. VERIFY
         return lines
     end
-    add("位置：", coords(step))
-    add("地標：", step.landmark)
-    if step.object then add("目標：", step.object .. (step.objectEN and ("（" .. step.objectEN .. "）") or "")) end
+    add("位置：", coords(step, true))
     add("要做的事：", step.action)
+    add("提示：", step.tip)
     add("前往方式：", step.travel)
-    add("轉乘點：", step.transfer)
+    if step.object then add("目標：", step.object .. (step.objectEN and ("（" .. step.objectEN .. "）") or "")) end
     add("守衛與危險：", step.guards)
     add("沒有飛行點時：", step.noFlightPath)
     lines[#lines + 1] = "狀態：待實地驗證"
@@ -157,6 +180,8 @@ function SB.pageText(mode)
     out[#out + 1] = string.format("【第 %d 步】%s", s.step, step.zone)
     for _, line in ipairs(SB.stepLines(step, mode, s.revealed[step.id])) do out[#out + 1] = line end
     if mode == "normal" then
+        -- GF-008-D: what the map colours mean (the text says 大約 too).
+        if ns.SleepingBagMap and ns.SleepingBagMap.LEGEND then out[#out + 1] = ns.SleepingBagMap.LEGEND end
         out[#out + 1] = ""
         out[#out + 1] = "【全部步驟】"
         for i, st in ipairs(route.steps) do
@@ -249,8 +274,9 @@ ns.Framework.register({
     id = SB.ID,
     title = "睡袋路線",
     order = 20,
-    -- Only the Horde route exists so far; Alliance players do not see the entry.
-    available = function() return SB.route() ~= nil and ns.Data.player().faction ~= "Alliance" end,
+    -- Only the Horde route exists so far; Alliance players do not see the entry
+    -- (GF-008-D: SB.route() finds no route with faction = "Alliance").
+    available = function() return SB.route() ~= nil end,
     create = build,
     show = SB.refresh,
 })

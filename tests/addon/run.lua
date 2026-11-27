@@ -637,7 +637,7 @@ test("sleepingbag: Horde route data is complete and marked unverified", function
         ok(st.questID == nil, "no quest IDs yet")
         if st.round == 1 and st.x and not st.approx then first3[#first3 + 1] = st.zone end -- GF-008-C: the guide's coordinates
     end
-    eq(table.concat(first3, ">"), "貧瘠之地>西部荒野", "round-1 stops with coordinates start Barrens then Westfall")
+    ok(table.concat(first3, ">"):find("^貧瘠之地>西部荒野"), "round-1 stops with coordinates start Barrens then Westfall") -- GF-008-D: Stonetalon has sourced coordinates now
     eq(route.steps[5].zone, "石爪山脈", "third stop is Stonetalon")
 end)
 
@@ -4708,6 +4708,9 @@ assert(loadfile(ROOT .. "/tests/addon/sleepingbag_map_tests.lua"))()({ test = te
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 -- GF-008-C: a map for every step, the raid target star (tests/addon/gf008c_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gf008c_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-008-D: framed glowing pins by colour, the short Horde guide, the faction field (tests/addon/gf008d_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf008d_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------
