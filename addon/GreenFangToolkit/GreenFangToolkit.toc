@@ -60,3 +60,4 @@ WorkerMatch.lua
 Talents.lua
 SleepingBagMap.lua
 RecipeLink.lua
+BankStock.lua

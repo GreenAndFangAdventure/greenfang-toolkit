@@ -158,6 +158,9 @@ end
 -- be read.
 -- GF-009-15: the same read for any list of containers; also returns the
 -- number of slots seen (0 for a bank that is not open).
+-- GF-012-B: wanted = true reads every item (the custodian's 公產 scope only;
+-- BankStock passes nothing else); free counts what is not bound
+-- (isBound == false), locked or not: a stack being moved is still there.
 function Supply.readContainers(wanted, bags)
     local C = type(C_Container) == "table" and C_Container or nil
     if not C or type(C.GetContainerNumSlots) ~= "function" or type(C.GetContainerItemInfo) ~= "function" then
@@ -173,11 +176,12 @@ function Supply.readContainers(wanted, bags)
             local okI, info = try(C.GetContainerItemInfo, bag, slot)
             if not okI then return nil, "bag-error" end
             local id = type(info) == "table" and tonumber(info.itemID) or nil
-            if id and wanted[id] then
-                local c = out[id] or { count = 0, eligible = 0 }
+            if id and (wanted == true or wanted[id]) then
+                local c = out[id] or { count = 0, eligible = 0, free = 0 }
                 local k = tonumber(info.stackCount) or 1
                 c.count = c.count + k
                 if info.isBound == false and not info.isLocked then c.eligible = c.eligible + k end
+                if info.isBound == false then c.free = c.free + k end
                 out[id] = c
             end
         end
@@ -354,7 +358,22 @@ local readPending = {}
 function Supply.readSoon(kind)
     if readPending[kind] or not Supply.open[kind] then return end
     readPending[kind] = true
-    ns.after(0, function() readPending[kind] = nil; Supply.readSource(kind) end)
+    ns.after(0, function() readPending[kind] = nil; Supply.readSource(kind); Supply.tell(kind) end)
+end
+
+-- GF-012-B: the same events tell other readers (BankStock) on the same next
+-- frame: "bank" (the bank is open and changed), "bags" (BAG_UPDATE_DELAYED),
+-- "combat" (combat ended), "start" (after the share login). No new event.
+Supply.watchers = {}
+function Supply.watch(fn) Supply.watchers[#Supply.watchers + 1] = fn end
+function Supply.tell(kind)
+    for _, fn in ipairs(Supply.watchers) do pcall(fn, kind) end
+end
+local bagsPending = false
+function Supply.bagsSoon()
+    if bagsPending then return end
+    bagsPending = true
+    ns.after(0, function() bagsPending = false; Supply.tell("bags") end)
 end
 
 -- GF-009-15: a short text of every count by source (the page redraws when it changes).
@@ -632,6 +651,7 @@ function Supply.start()
     if Supply.started then return end
     Supply.started = true
     Supply.dirty = true
+    Supply.tell("start") -- GF-012-B
     ns.after(Supply.rand(Supply.LOGIN_JITTER[1], Supply.LOGIN_JITTER[2]), function()
         if Supply.dirty then Supply.markDirty() end
     end)
@@ -672,13 +692,16 @@ for _, e in ipairs(Supply.EVENTS) do pcall(events.RegisterEvent, events, e) end
 -- GF-009-15: the bank and the mailbox, read only while open. Each event is
 -- registered under pcall; one the client does not know is listed in
 -- Supply.missingEvents and that source stays 還沒看過.
+-- GF-012-B (owner's 同步與診斷: 不支援的事件 PLAYERREAGENTBANKSLOTS_CHANGED):
+-- Forever has no reagent bank (Enum.BagIndex has no Reagentbank), so that
+-- event is no longer asked for; the others are as before.
 Supply.SOURCE_EVENTS = { "BANKFRAME_OPENED", "BANKFRAME_CLOSED", "PLAYERBANKSLOTS_CHANGED",
-    "PLAYERREAGENTBANKSLOTS_CHANGED", "BANK_TABS_CHANGED", "MAIL_SHOW", "MAIL_INBOX_UPDATE", "MAIL_CLOSED" }
+    "BANK_TABS_CHANGED", "MAIL_SHOW", "MAIL_INBOX_UPDATE", "MAIL_CLOSED" }
 Supply.missingEvents = {}
 for _, e in ipairs(Supply.SOURCE_EVENTS) do
     if not pcall(events.RegisterEvent, events, e) then Supply.missingEvents[#Supply.missingEvents + 1] = e end
 end
-local BANK_CHANGE = { PLAYERBANKSLOTS_CHANGED = true, PLAYERREAGENTBANKSLOTS_CHANGED = true, BANK_TABS_CHANGED = true }
+local BANK_CHANGE = { PLAYERBANKSLOTS_CHANGED = true, BANK_TABS_CHANGED = true }
 function Supply.onSourceEvent(event)
     if event == "BANKFRAME_OPENED" then Supply.open.bank = true; Supply.readSoon("bank")
     elseif event == "BANKFRAME_CLOSED" then Supply.open.bank = false
@@ -701,12 +724,14 @@ events:SetScript("OnEvent", function(_, event, a, b)
         ns.after(0, function()
             if Supply.dirty then Supply.markDirty() end
             if ns.SupplyListings then ns.SupplyListings.afterCombat() end
+            Supply.tell("combat") -- GF-012-B
         end)
     else
         -- GF-FIX-F (中-18): the finder's bag list is read again after a change.
         if event == "BAG_UPDATE_DELAYED" then
             Supply.bagVersion = Supply.bagVersion + 1
             Supply.readSoon("bank") -- GF-009-15: the bank's own bags (only while it is open)
+            Supply.bagsSoon() -- GF-012-B
         end
         Supply.markDirty()
     end
@@ -1002,6 +1027,10 @@ end
 -- The neutral text a contact button puts into the whisper box (附錄 A §7.5).
 function Supply.contactText(e)
     local what = Supply.itemLink(e.itemID) or Supply.itemName(e.itemID) or "這個物品"
+    -- GF-012-B: 臨時黑箱's 聯絡 (the same whisper box, the same rules).
+    if e.direction == "stock" then
+        return "你好，我在臨時黑箱看到你保管的" .. what .. "，方便談談嗎？"
+    end
     if e.direction == "offer" then
         return "你好，我在綠皮調貨所看到你可能有多的" .. what .. "，請問方便談談交換方式嗎？"
     end
@@ -1089,4 +1118,5 @@ function Supply.resetSession()
     Supply.sourceReads.bank, Supply.sourceReads.mail = 0, 0
     last.sources, last.whereSig = nil, nil
     for k in pairs(readPending) do readPending[k] = nil end
+    bagsPending = false -- GF-012-B
 end

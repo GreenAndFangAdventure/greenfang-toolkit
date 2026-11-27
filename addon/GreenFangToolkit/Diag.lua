@@ -167,7 +167,7 @@ local SECTIONS = {
     -- GF-014: 業務通知 and the local radar (this computer only; nothing is sent).
     { title = "業務通知與需求雷達（GF-014）", text = function()
         return (ns.Notify and ns.Notify.diagText() or "") .. (ns.SupplyRadar and ("｜" .. ns.SupplyRadar.diagText()) or "") end },
-    -- GF-012: 公會黑庫 phase 1 (who is guild master, the custodian list; no stock yet).
+    -- GF-012: 公會黑庫 (who is guild master, the custodian list; GF-012-B: the stock).
     { title = "臨時黑箱（GF-012）", text = function() return ns.Bank and ns.Bank.diagText() or "" end },
     -- GF-009-12: the 找物品 item catalog (SupplyCatalogData.lua; GF-009-13: requests, list time).
     { title = "物品目錄（GF-009-12）", text = function() return ns.SupplyCatalog and ns.SupplyCatalog.diagText() or "" end },
@@ -224,6 +224,9 @@ local function create()
     if window then return window end
     -- GF-001-D20: opaque and above the toolkit window (was see-through).
     local f = ns.popupWindow(Diag.WINDOW_NAME, Diag.WIDTH, Diag.HEIGHT)
+    -- GF-012-B (owner's screenshot: the page behind showed through): the
+    -- opaque form colour, as the forms and drop-down lists (Theme.formPanel).
+    ns.Theme.formPanel(f)
     f:SetPoint("CENTER", 0, 20)
     f:SetMovable(true)
     f:EnableMouse(true)

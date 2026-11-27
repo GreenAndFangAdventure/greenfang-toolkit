@@ -4095,7 +4095,8 @@ test("D20 popups: 同步與診斷 and export are opaque, framed and above the to
     ns.Diag.open()
     local d = _G[ns.Diag.WINDOW_NAME]
     ok(d.gfOpaque, "diag: own opaque background")
-    eq(d.gfOpaque._color and d.gfOpaque._color[4] or d.gfOpaque._colorTexture[4], 0.97, "diag: nearly solid")
+    -- GF-012-B (owner's screenshot: the page behind showed through): fully opaque now (Theme.formPanel).
+    eq(d.gfOpaque._color and d.gfOpaque._color[4] or d.gfOpaque._colorTexture[4], 1, "diag: solid")
     eq(d._strata, "FULLSCREEN_DIALOG", "diag above the toolkit window (DIALOG)")
     ns.UI.startExport("tsv")
     local e = _G.GreenFangToolkit_ExportWindow
@@ -4805,6 +4806,9 @@ assert(loadfile(ROOT .. "/tests/addon/gfuin_tests.lua"))()({ test = test, eq = e
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 -- GF-011-C: which talent tab a node counts in (sub-groups, positions; tests/addon/gf011c_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gf011c_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-012-B: 臨時黑箱 stock: scope only, never-seen bank, bound items, two custodians, limits, confirm (tests/addon/gf012b_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf012b_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
