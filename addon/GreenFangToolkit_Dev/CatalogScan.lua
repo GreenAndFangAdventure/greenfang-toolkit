@@ -469,7 +469,8 @@ if type(SlashCmdList) == "table" then
         local cmd, rest = tostring(msg or ""):match("^%s*(%S*)%s*(.-)%s*$")
         if cmd:lower() == "catalogscan" then S.command(rest)
         elseif cmd:lower() == "traits" and D.TraitDump then D.TraitDump.command(rest) -- GF-DIGEST-01 (TraitDump.lua)
-        else S.say("/gftkdev catalogscan [sample｜report｜stop｜reset]｜/gftkdev traits [段]") end
+        elseif cmd:lower() == "preview" and D.Preview then D.Preview.command(rest) -- GF-DEV-02 (Preview.lua)
+        else S.say("/gftkdev catalogscan [sample｜report｜stop｜reset]｜/gftkdev traits [段]｜/gftkdev preview") end
     end
 end
 
