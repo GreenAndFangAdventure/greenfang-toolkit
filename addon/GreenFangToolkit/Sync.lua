@@ -760,3 +760,31 @@ function Sync.command()
     ns.say(Sync.statusText())
     if ns.Diag then ns.Diag.open() end
 end
+
+-- GF-FIX-A (D-019, claude-pm): /gftk location on|off. The /gftk handler lives
+-- in Init.lua; like SupplyUI, it is wrapped once the AddOn has loaded.
+function Sync.locationCommand(rest)
+    local arg = str(rest):lower():match("^%s*(%S*)")
+    if arg == "on" or arg == "off" then Sync.setShareLocation(arg == "on") end
+    if arg ~= "on" and arg ~= "off" and arg ~= "" then ns.say("/gftk location on｜off") end
+    ns.say(Sync.shareLocation() and "分享位置：開（公會內與網站看得到你的所在地）"
+        or "分享位置：關（已撤回，不再送出你的所在地）")
+    if ns.Diag and ns.Diag.refresh then pcall(ns.Diag.refresh) end
+    return true
+end
+local slashWrapped = false
+local slashFrame = CreateFrame and CreateFrame("Frame") or nil
+if slashFrame then
+    slashFrame:RegisterEvent("ADDON_LOADED")
+    slashFrame:SetScript("OnEvent", function(_, _, name)
+        if name ~= ns.ADDON or slashWrapped then return end
+        if type(SlashCmdList) ~= "table" or type(SlashCmdList.GREENFANGTOOLKIT) ~= "function" then return end
+        slashWrapped = true
+        local orig = SlashCmdList.GREENFANGTOOLKIT
+        SlashCmdList.GREENFANGTOOLKIT = function(msg, ...)
+            local rest = str(msg):gsub("^%s+", ""):match("^[Ll][Oo][Cc][Aa][Tt][Ii][Oo][Nn](.*)$")
+            if rest and (rest == "" or rest:match("^%s")) then return Sync.locationCommand(rest) end
+            return orig(msg, ...)
+        end
+    end)
+end
