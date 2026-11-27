@@ -164,12 +164,19 @@ return function(T)
         jobs(ns, C, { { id = id, st = "a", ac = t, sa = t } }, t)
         settle()
         eq(#of(ns, "order_status"), 1, "the other switch is its own")
+        -- GF-009-10's recipe notices have their switch here too.
+        ok(keys.recipe, "a switch: recipe"); eq(ns.NotifyUI.MODULE_SHORT.recipe, "調貨", "recipe tag")
+        N.setEnabled("recipe", false)
+        eq(N.push({ module = "recipe", key = "learned|1", text = "已學會" }), "off", "recipe off: push says off")
+        N.setEnabled("recipe", true)
+        eq(N.push({ module = "recipe", key = "learned|1", text = "已學會" }), "stored", "recipe on again")
         -- The settings list draws every switch inside the list.
         local parent = CreateFrame("Frame", nil, UIParent)
         local boxes = ns.NotifyUI.buildSettings(parent, 16, ns.NotifyUI.TOP)
         local UI = ns.NotifyUI
         local step = UI.settingStep(#boxes)
         ok(-UI.TOP + (#boxes - 1) * step + 28 <= UI.ROWS * UI.ROW_H + 76 - 8, string.format("%d switches fit (step %d)", #boxes, step))
+        eq(#boxes, 14, "14 rows (9 modules, WorkerMatch's 4 rows, 聊天框提示)")
     end)
 
     test("GF-014-04 combat: the scan waits, the notice comes after combat", function()
@@ -406,5 +413,68 @@ return function(T)
         -- A second burst of the same: nothing new.
         local again = ns.Orders.notifyScan()
         eq(again, 0, "replayed: nothing")
+    end)
+    ---------------------------------------------------------------------------
+    -- The cost every ledger change pays: one scan with nothing new
+    ---------------------------------------------------------------------------
+
+    -- 25 more members (authors 0000-000010NN), each with n / 25 orders (half to
+    -- me by name) and n / 25 adventure tickets (I signed up for every third).
+    local function bigGuild(n)
+        local roster = wow.defaultRoster()
+        local authors = {}
+        for k = 1, 25 do
+            local a = string.format("0000-%08d", 1000 + k)
+            authors[k] = a
+            roster[#roster + 1] = { name = "測試員" .. k .. "-測試伺服器", rank = "會員", level = 40, class = "戰士",
+                classToken = "WARRIOR", zone = "奧格瑪", online = k % 2 == 0, guid = "Player-" .. a }
+        end
+        wow.reset({ roster = roster })
+        local ns = wow.login(ADDON_DIR)
+        ns.Orders.resetSession(); ns.Adventure.resetSession(); ns.Notify.resetSession()
+        local t = ns.Share.serverNow()
+        local per = n / 25
+        local mine = {}
+        for k, a in ipairs(authors) do
+            local ws, ts = {}, {}
+            for j = 1, per do
+                ws[#ws + 1] = w(ns, "g" .. k .. "." .. j, { cf = (j % 2 == 0) and A or "*" })
+                local id = "a" .. k .. "." .. j
+                ts[#ts + 1] = { id = id, src = "g", ver = 1, cr = t, ds = "smg", qs = "", tm = "n",
+                    ts = ns.Adventure.encodeTimes({ { id = 1, s = t + 2 * H, d = 2 * H }, { id = 2, s = t + 26 * H, d = 2 * H } }),
+                    rt = 1, rh = 1, rd = 3, lr = "d", tg = 0, md = "a", st = "o", sa = t }
+                if j % 3 == 0 then mine[#mine + 1] = { id = id, ac = "ap", at = t + 1, ap = t + 1, ak = "ap", ro = "d", rb = "" } end
+            end
+            orders(ns, a, ws, t)
+            advOffer(ns, a, "T", ts, t)
+        end
+        advOffer(ns, A, "A", mine, t + 1)
+        settle()
+        return ns, #mine
+    end
+    local function perScan(fn, rounds)
+        fn() -- what is new goes now; the rounds below find nothing new
+        local clock = os.clock()
+        local pushed = 0
+        for _ = 1, rounds do pushed = pushed + fn() end
+        return (os.clock() - clock) * 1000 / rounds, pushed
+    end
+
+    test("GF-014-04 one scan with nothing new: Orders / Adventure at 100 and 300 records (printed)", function()
+        for _, n in ipairs({ 100, 300 }) do
+            local ns, signed = bigGuild(n)
+            local nOrders, nTickets = 0, 0
+            for _ in pairs(ns.Orders.all()) do nOrders = nOrders + 1 end
+            for _ in pairs(ns.Adventure.all()) do nTickets = nTickets + 1 end
+            eq(nOrders, n, n .. " orders in the ledger")
+            eq(nTickets, n, n .. " tickets in the ledger")
+            local oMs, oPushed = perScan(ns.Orders.notifyScan, 20)
+            local aMs, aPushed = perScan(ns.Adventure.notifyScan, 20)
+            eq(oPushed + aPushed, 0, "nothing new: nothing pushed")
+            T.realPrint(string.format("     GF-014-04 idle scan, %d records: Orders.notifyScan %.2f ms, Adv.notifyScan %.2f ms (I signed up for %d)",
+                n, oMs, aMs, signed))
+            ok(oMs < 5, string.format("Orders.notifyScan at %d: %.2f ms < 5 ms", n, oMs))
+            ok(aMs < 5, string.format("Adv.notifyScan at %d: %.2f ms < 5 ms", n, aMs))
+        end
     end)
 end

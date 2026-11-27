@@ -51,6 +51,7 @@ N.MORE_TEXT = "另有 %d 則「%s」，請到頁面查看"
 N.MODULES = {
     { key = "supply", text = "調貨所配對", tip = "有人可能有你缺的，或需要你可能有多的" },
     { key = "radar", text = "需求雷達", tip = "背包裡有公會正在徵求的物品（只有你看得到）" },
+    { key = "recipe", text = "圖紙學會提示", tip = "我徵求的圖紙，自己已經學會了" }, -- GF-009-10 (switch added in GF-014-04)
     { key = "adventure", text = "職工單配對", tip = "我的職工單符合別人的冒險單（WorkerMatch.lua；各角色自己的設定）" }, -- GF-014-02
     -- GF-014-04: what 委託業務 / 冒險業務 / 臨時黑箱 tell me when others act (one switch each).
     { key = "order_new", text = "有人對我下單", tip = "有人指定我做的委託（含網站下單）" },

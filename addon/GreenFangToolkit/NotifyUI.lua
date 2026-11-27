@@ -28,7 +28,7 @@ UI.ROWS = 6
 UI.ROW_H = 66
 UI.TOP = -44
 UI.MODULE_SHORT = { supply = "調貨", radar = "雷達", adventure = "冒險", orders = "委託",
-    order_new = "委託", order_status = "委託", adv_signup = "冒險", adv_result = "冒險", adv_final = "冒險", bank_keeper = "黑箱" } -- GF-014-04
+    order_new = "委託", order_status = "委託", adv_signup = "冒險", adv_result = "冒險", adv_final = "冒險", bank_keeper = "黑箱", recipe = "調貨" } -- GF-014-04
 
 local button, list
 local state = { offset = 0, items = {}, settings = false }
@@ -183,7 +183,7 @@ local function settingsRows()
     return out
 end
 
--- GF-014-04: 13 switches: the rows close up (36 px down to 30) so they stay
+-- GF-014-04: 14 switches: the rows close up (36 px down to 30) so they stay
 -- inside the list (UI.ROWS * UI.ROW_H + 76 high).
 UI.SETTING_STEP, UI.SETTING_MIN = 36, 30
 function UI.settingStep(n)
