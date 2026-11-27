@@ -239,6 +239,28 @@ function Sync.player()
     return p
 end
 
+-- GF-FIX-A (review 高-1): the store key "<realm>|<guild>" of the session's
+-- guild, or nil (what Sync.player gives). Share.store() and Ledger:store()
+-- ask for it thousands of times in a row (a roster sort), so the last key is
+-- reused while the client still reports the same guild name and realm: two
+-- cheap reads, checked on every call, so it can never be stale. Anything
+-- else (no name, another guild, a new realm) takes the full Sync.player path.
+local keyGuild, keyRealm, keyValue
+function Sync.guildKey()
+    local live = str((ns.call(GetGuildInfo, "player")))
+    local realm = ns.realm()
+    if live ~= "" and live == keyGuild and realm == keyRealm then return keyValue end
+    local p = Sync.player()
+    if not p.guild then keyGuild = nil; return nil end
+    local key = ns.guildKey(p.realm, p.guild)
+    if live ~= "" and p.guild == live then
+        keyGuild, keyRealm, keyValue = live, p.realm, key
+    else
+        keyGuild = nil
+    end
+    return key
+end
+
 -- Nothing is written unless the character is in TARGET_GUILD.
 -- Without opts.allowNoGuild an unknown guild is "waiting-guild" (guild info may
 -- still be loading, Init retries); with it (end of the login wait, logout,
@@ -268,8 +290,8 @@ function Sync.recordSelf(force, opts)
         class = p.class, classToken = p.classToken,
         race = p.race, raceID = p.raceID,
         professions = professions,
-        -- Always shared (D-015). Named location, never zone: GF Sync strips
-        -- every zone field.
+        -- Shared unless turned off (D-019). Named location, never zone: GF
+        -- Sync strips every zone field.
         location = Sync.shareLocation() and ns.Data.location() or nil,
         recipes = Sync.ownRecipes(),
         -- GF-006-B (savedvariables §crafting): my own services and order halves.
@@ -421,7 +443,9 @@ local function sharePayload(m, a, recs, tombs, realm, idsFor)
 end
 
 -- What this subject's records look like now: [g] = { t, h } (tombstones h = "x").
-local function fieldState(recs, tombs, a)
+-- GF-FIX-A (review 低-6): orderState / advState are passed in when the caller
+-- already read them (recordShares), so each is read once per member.
+local function fieldState(recs, tombs, a, orderState, advState)
     local out = {}
     -- 0.16.0: groups that stay in the game (Share.isLocalGroup: GF-009 C<n>/L,
     -- GF-010 J) are not part of member.share, so they never cause a rewrite.
@@ -429,8 +453,8 @@ local function fieldState(recs, tombs, a)
     for g, r in pairs(recs) do if not isLocal(g) then out[g] = { t = r.t, h = r.h } end end
     for g, t in pairs(tombs) do if not isLocal(g) then out[g] = { t = t, h = "x" } end end
     -- GF-006-B: the subject's order records count as fields too.
-    if a and ns.Orders then for g, f in pairs(ns.Orders.uploadState(a)) do out[g] = f end end
-    if a and ns.Adventure then for g, f in pairs(ns.Adventure.uploadState(a)) do out[g] = f end end
+    if a and ns.Orders then for g, f in pairs(orderState or ns.Orders.uploadState(a)) do out[g] = f end end
+    if a and ns.Adventure then for g, f in pairs(advState or ns.Adventure.uploadState(a)) do out[g] = f end end
     return out
 end
 
@@ -501,7 +525,7 @@ function Sync.recordShares()
         local orderState = a and ns.Orders and ns.Orders.uploadState(a) or {}
         local advState = a and ns.Adventure and ns.Adventure.uploadState(a) or {}
         local current = a and a ~= selfA and (next(recs) or next(tombs) or next(orderState) or next(advState))
-            and fieldState(recs, tombs, a) or nil
+            and fieldState(recs, tombs, a, orderState, advState) or nil
         if current and next(current) then
             local diff = compareState(current, s.queued[a])
             local old = existing[m.guid]
@@ -659,8 +683,32 @@ function Sync.guildNote()
     return Sync.otherGuildNote()
 end
 
--- Location is always shared (D-015).
-function Sync.shareLocation() return true end
+-- D-019 (GF-FIX-A): the location is shared unless the player turned it off.
+-- settings.shareLocation: nil (old saves, the default) or true = shared,
+-- false = not shared. GF Sync never reads settings; the old
+-- sync.shareLocation (D-015) stays cleared and unused.
+function Sync.shareLocation()
+    local s = ns.db and ns.db.settings
+    return not (type(s) == "table" and s.shareLocation == false)
+end
+
+-- Turn location sharing on or off. Off: my location is no longer sent (GFTKS
+-- Z, the 0.8.x broadcast, character.self.payload.location) and the one
+-- already shared is withdrawn (a Z tombstone on GUILD); the outbox entry is
+-- written again without it. On: shared again at once.
+function Sync.setShareLocation(on)
+    local s = ns.db and ns.db.settings
+    if type(s) ~= "table" then return false end
+    on = on and true or false
+    if Sync.shareLocation() == on then return false end
+    if on then s.shareLocation = nil else s.shareLocation = false end
+    if ns.Share then
+        if on then ns.Share.publishLocation() else ns.Share.withdrawLocation() end
+    end
+    Sync.recordSelf(true, { allowNoGuild = true })
+    Sync.notify()
+    return true
+end
 
 -- Number of entries waiting for GF Sync.
 function Sync.pending()

@@ -56,11 +56,8 @@ local function fixed3(s)
 end
 Ledger.hashNum = hashNum
 
-local function guildKey()
-    local p = ns.Sync.player()
-    if not p.guild then return nil end
-    return ns.guildKey(p.realm, p.guild)
-end
+-- GF-FIX-A: Sync.guildKey reuses the last key while the guild is unchanged.
+local function guildKey() return ns.Sync.guildKey() end
 
 -- Split s into pieces of at most n bytes without cutting a UTF-8 character.
 local function splitBytes(s, n)

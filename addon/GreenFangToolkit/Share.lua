@@ -46,11 +46,25 @@ ns.Share = Share
 Share.PREFIX = "GFTKS"
 Share.VERSION = "S1"
 Share.MAX_BYTES = 250
-Share.FUTURE = 600                -- seconds a t may be ahead of our server time
+-- GF-FIX-A (review 中-2): 600 let a forged record sit ten minutes ahead of the
+-- author's own. Every t is the author's GetServerTime() (one clock for the
+-- whole realm), so two minutes is plenty.
+Share.FUTURE = 120                -- seconds a t may be ahead of our server time
 Share.EPOCH = 1700000000          -- 2023-11; anything older is a broken clock
 Share.ALLOWANCE = 8               -- messages we may send in a burst
 Share.REFILL = 0.9                -- messages per second
 Share.STALE = 300                 -- queued data older than this is dropped
+-- GF-FIX-A (review 中-1): GUILD indexes, catalog parts and claims sent as
+-- replies to someone else's request are dropped after this long in the
+-- queue, and at most this many wait at once; with that many GUILD non-data
+-- items waiting a catalog request (Q) is left to the others. Our own data,
+-- our own index and our own requests are never dropped or capped.
+Share.CONTROL_STALE = 120
+Share.MAX_GUILD_CONTROL = 120
+Share.BUSY_CONTROL = 60
+Share.SESSION_PRUNE = 60          -- seconds between clean-ups of the session tables
+Share.HEAL_DELAY = 2              -- GF-FIX-A: re-publish my own data this long after a forgery
+Share.ZONE_BYTES = 64             -- GF-FIX-A (review 中-3): longest zone / subzone kept
 Share.RESEND = 60                 -- a record goes out at most once a minute
 Share.PART_TIMEOUT = 60
 Share.TOMB_KEEP = 60 * 86400
@@ -81,7 +95,8 @@ Share.BUCKET_WIDTH = 3
 
 Share.rand = function(a, b) return a + math.random() * (b - a) end -- tests replace it
 
-local stats = { sent = 0, received = 0, throttled = 0, dropped = 0, relayed = 0, whispered = 0, evicted = 0 }
+local stats = { sent = 0, received = 0, throttled = 0, dropped = 0, relayed = 0, whispered = 0, evicted = 0,
+    cancelled = 0, healed = 0 } -- GF-FIX-A: replies dropped after someone else answered; own data re-published
 Share.stats = stats
 
 ---------------------------------------------------------------------------
@@ -249,6 +264,8 @@ function Share.decodeValue(g, v)
         level = tonumber(level)
         if not level or level < 1 or level > 200 then return nil end
         class = unesc(class)
+        -- GF-FIX-A (review 中-3): a class token is A-Z only (DRUID, DEATHKNIGHT).
+        if #class > 16 or not class:match("^[A-Z]*$") then class = "" end
         return { level = level, classToken = class ~= "" and class or nil }
     elseif g == "P" then
         local list = {}
@@ -262,7 +279,10 @@ function Share.decodeValue(g, v)
     elseif g == "Z" then
         local zone, sub = v:match("^([^/]*)/([^/]*)$")
         if not zone or zone == "" then return nil end
-        zone, sub = unesc(zone), unesc(sub)
+        -- GF-FIX-A (review 中-3): shown on the roster and uploaded: no |T / |H /
+        -- |c escapes, no control characters, at most Share.ZONE_BYTES bytes.
+        zone, sub = ns.cleanText(unesc(zone), Share.ZONE_BYTES), ns.cleanText(unesc(sub), Share.ZONE_BYTES)
+        if zone == "" then return nil end
         return { zone = zone, subZone = (sub ~= "" and sub ~= zone) and sub or nil }
     elseif g:match("^R%d+$") then
         return Share.decodeIDs(v)
@@ -304,10 +324,12 @@ end
 local function guildKey()
     -- Sync.player keeps the session's guild when the client briefly reports
     -- none (logout, /reload): the logout writes need the store (GF-001-D14).
-    local p = ns.Sync.player()
-    if not p.guild then return nil end
-    return ns.guildKey(p.realm, p.guild)
+    -- GF-FIX-A: Sync.guildKey reuses the last key while the guild is unchanged.
+    return ns.Sync.guildKey()
 end
+
+-- GF-FIX-A: the per-guild tables, one list for every store() call.
+local STORE_TABLES = { "rec", "tomb", "gone", "queued", "idsSent", "named" }
 
 -- GF-001-D23: records kept under "|<guild>" while the realm was empty,
 -- merged into the realm's store g (newer wins).
@@ -342,7 +364,8 @@ local function store()
     local g = db.share.guilds[key]
     if type(g) ~= "table" then g = {}; db.share.guilds[key] = g end
     -- queued/idsSent/named: what this client last wrote to the outbox (phase 4).
-    for _, k in ipairs({ "rec", "tomb", "gone", "queued", "idsSent", "named" }) do
+    for i = 1, #STORE_TABLES do
+        local k = STORE_TABLES[i]
         if type(g[k]) ~= "table" then g[k] = {} end
     end
     -- GF-001-D23: while GetRealmName() gave "", 0.9.5/0.9.6 kept this guild's
@@ -523,8 +546,13 @@ function Share.memberFor(a)
     return byA and byA[a] or nil
 end
 
+-- GF-FIX-A: one game call (the GUID, read live); the author id is only
+-- worked out again when the GUID changes.
+local authorGuid, authorId
 function Share.selfAuthor()
-    return Share.authorOf(ns.Data.player().guid)
+    local guid = ns.selfGUID()
+    if guid ~= authorGuid then authorGuid, authorId = guid, Share.authorOf(guid) end
+    return authorId
 end
 
 ---------------------------------------------------------------------------
@@ -571,7 +599,8 @@ local function changed(a, direct)
     digestCache[a] = nil
     Share.version = Share.version + 1
     updatePeer(a, direct)
-    for _, fn in ipairs(listeners) do fn(a) end
+    -- GF-FIX-A (review 低-1): a page's error must not stop the message handling.
+    for _, fn in ipairs(listeners) do pcall(fn, a) end
 end
 
 -- Offer one record. Returns a result string:
@@ -617,8 +646,9 @@ function Share.applyTomb(a, g, t)
     if not s or type(a) ~= "string" or type(t) ~= "number" then return false end
     -- D-015: only "a profession was given up" (R<id>); no privacy withdrawals.
     -- GF-010 (v2.0 §5.2, §11): a registered group with tomb = true may be withdrawn.
+    -- GF-FIX-A (D-019): the location (Z) may be withdrawn once its owner turns sharing off.
     local codec = type(g) == "string" and not g:match("^R%d+$") and Share.codecFor(g) or nil
-    if type(g) ~= "string" or not (g:match("^R%d+$") or (codec and codec.tomb)) then return false end
+    if type(g) ~= "string" or not (g == "Z" or g:match("^R%d+$") or (codec and codec.tomb)) then return false end
     if t > Share.serverNow() + Share.FUTURE or t < Share.EPOCH then return false end
     s.tomb[a] = s.tomb[a] or {}
     local old = s.tomb[a][g]
@@ -654,6 +684,9 @@ function Share.observeOwn()
         local tomb = tombFor(s, a, g)
         local t = now
         if tomb and tomb >= t then t = tomb + 1 end
+        -- GF-FIX-A (review 中-2): like ownRecord, a changed value goes after the
+        -- record we hold (which may carry a forged, later t).
+        if before and before.h ~= h and before.t >= t then t = before.t + 1 end
         local r = Share.offer(a, g, t, h, v, true, a)
         if r == "new" and not (before and before.h == h) then out[#out + 1] = g end
     end
@@ -729,7 +762,9 @@ end
 -- Sending
 ---------------------------------------------------------------------------
 
-local queue = {}       -- { msg, at, kind, to = { a, name } or nil }
+local queue = {}       -- { msg, at, kind, to = { a, name } or nil, tag }
+local controlQueued = 0 -- GF-FIX-A: GUILD items in the queue that are not data
+local tagged = {}       -- GF-FIX-A: [tag] = queued items with that tag
 local allowance = Share.ALLOWANCE
 local lastTick
 local draining = false
@@ -784,14 +819,27 @@ drain = function()
     local now = ns.now()
     if lastTick then allowance = math.min(Share.ALLOWANCE, allowance + (now - lastTick) * Share.REFILL) end
     lastTick = now
+    local control = 0
     for i = #queue, 1, -1 do
         local item = queue[i]
         local stale = item.kind == "data" and now - item.at > Share.STALE
+        -- GF-FIX-A (review 中-1): an index / catalog part / claim for someone
+        -- else's request is no use once that request is two minutes old.
+        local guildControl = not item.to and item.kind ~= "data"
+        -- Our own index and requests (no tag) never expire here.
+        local reply = guildControl and (item.tag ~= nil or item.kind == "claim")
+        if reply and now - item.at > Share.CONTROL_STALE then stale = true end
         -- Whisper only someone who asked just now and is still online.
         local unwanted = item.to and (gone[item.to.a]
             or now - (lastHeard[item.to.a] or 0) > Share.TARGET_FRESH)
-        if stale or unwanted then table.remove(queue, i); stats.dropped = stats.dropped + 1 end
+        if stale or unwanted then
+            table.remove(queue, i); stats.dropped = stats.dropped + 1
+            if item.tag then tagged[item.tag] = (tagged[item.tag] or 1) - 1 end
+        elseif guildControl then
+            control = control + 1
+        end
     end
+    controlQueued = control
     if #queue == 0 then return end
     if canSend() then
         while #queue > 0 and allowance >= 1 do
@@ -807,6 +855,8 @@ drain = function()
                 break
             end
             table.remove(queue, 1)
+            if not item.to and item.kind ~= "data" then controlQueued = math.max(0, controlQueued - 1) end
+            if item.tag then tagged[item.tag] = (tagged[item.tag] or 1) - 1 end
             allowance = allowance - 1
             stats.sent = stats.sent + 1
             if item.to then
@@ -828,15 +878,25 @@ end
 Share.queuedFor = queuedFor
 
 -- to = { a = author, name = "Name-Realm" } sends by WHISPER; nil by GUILD.
-local function enqueue(msg, kind, to)
+-- GF-FIX-A (review 中-1): tag names the delayed reply a GUILD message belongs
+-- to ("catalog|<q>", "index|<a>"); when someone else answers first
+-- (cancel(tag)), what is still queued under it is dropped as well.
+local function enqueue(msg, kind, to, tag)
     if #msg > Share.MAX_BYTES then return false end
+    kind = kind or "data"
     -- Replies must never pile up: drop them beyond the caps (own changes,
     -- requests and summaries always go in; they are few).
     if to and (#queue >= Share.MAX_QUEUE or queuedFor(to.a) >= Share.MAX_PER_TARGET) then
         stats.dropped = stats.dropped + 1
         return false
     end
-    queue[#queue + 1] = { msg = msg, at = ns.now(), kind = kind or "data", to = to }
+    if not to and (tag or kind == "claim") and controlQueued >= Share.MAX_GUILD_CONTROL then
+        stats.dropped = stats.dropped + 1
+        return false
+    end
+    queue[#queue + 1] = { msg = msg, at = ns.now(), kind = kind, to = to, tag = tag }
+    if not to and kind ~= "data" then controlQueued = controlQueued + 1 end
+    if tag then tagged[tag] = (tagged[tag] or 0) + 1 end
     schedule(0)
     return true
 end
@@ -845,17 +905,17 @@ Share.enqueue = enqueue
 local function msg(...) return Share.VERSION .. "~" .. table.concat({ ... }, "~") end
 
 -- Pack items into as few messages as fit: header .. item ~ item ~ ...
-local function packed(header, items, kind)
+local function packed(header, items, kind, tag)
     local chunk
     for _, item in ipairs(items) do
         if chunk and #chunk + 1 + #item <= Share.MAX_BYTES then
             chunk = chunk .. "~" .. item
         else
-            if chunk then enqueue(chunk, kind) end
+            if chunk then enqueue(chunk, kind, nil, tag) end
             chunk = header .. "~" .. item
         end
     end
-    if chunk then enqueue(chunk, kind) end
+    if chunk then enqueue(chunk, kind, nil, tag) end
 end
 
 -- Split s into pieces of at most n bytes without cutting a UTF-8 character.
@@ -916,11 +976,12 @@ function Share.indexItems(a)
     return items
 end
 
-function Share.sendIndex(a)
+-- tag (GF-FIX-A): set when this is a delayed reply someone else may answer first.
+function Share.sendIndex(a, tag)
     if not mayShare() then return false end
     local items = Share.indexItems(a)
     if #items == 0 then return false end
-    packed(msg("I", a, Share.b36(#items), Share.MARK), items, "index")
+    packed(msg("I", a, Share.b36(#items), Share.MARK), items, "index", tag)
     return true
 end
 
@@ -934,7 +995,21 @@ local function later(key, minDelay, maxDelay, fn)
         fn()
     end)
 end
-local function cancel(key) if pending[key] then pending[key] = "cancel" end end
+local function cancel(key)
+    if pending[key] then pending[key] = "cancel" end
+    -- GF-FIX-A (review 中-1): our reply may already sit in the queue.
+    if (tagged[key] or 0) > 0 then
+        for i = #queue, 1, -1 do
+            local item = queue[i]
+            if item.tag == key and not item.to then
+                table.remove(queue, i)
+                if item.kind ~= "data" then controlQueued = math.max(0, controlQueued - 1) end
+                stats.cancelled = stats.cancelled + 1
+            end
+        end
+        tagged[key] = nil
+    end
+end
 Share.pendingReplies = pending
 
 -- The member to whisper a reply to, or nil (an older client: GUILD as before).
@@ -998,6 +1073,110 @@ local function push(to, a, g)
     if not mayShare() then return end
     if to then pushTo(to, a, g)
     else later("push|" .. recordKey(a, g), 2, 6, function() Share.sendRecord(a, g) end) end
+end
+
+---------------------------------------------------------------------------
+-- GF-FIX-A (review 中-2): my own data, sent by someone else
+---------------------------------------------------------------------------
+-- The addon channel cannot prove who wrote a record, so anyone can send a
+-- record or a withdrawal (X) under my author id. While I am online I know
+-- my level, class, professions and location myself: a different, newer
+-- value or a withdrawal from someone else is not stored, and my own data
+-- goes out again Share.HEAL_DELAY later with a t after theirs, so everyone
+-- (who had taken the forgery) moves back to mine.
+
+local healFloor = {} -- [g] = the latest t a forgery for my group g carried
+
+function Share.healOwn(g, t)
+    if type(g) ~= "string" then return end
+    if type(t) == "number" and t > (healFloor[g] or 0) then healFloor[g] = t end
+    if not healFloor[g] then healFloor[g] = 0 end
+    stats.healed = stats.healed + 1
+    ns.coalesce("share-heal", Share.HEAL_DELAY, function()
+        local a, s = Share.selfAuthor(), store()
+        if not (a and s and mayShare()) then
+            for k in pairs(healFloor) do healFloor[k] = nil end
+            return
+        end
+        Share.observeOwn()
+        for hg, floor in pairs(healFloor) do
+            healFloor[hg] = nil
+            local rec = s.rec[a] and s.rec[a][hg]
+            if rec then
+                if rec.t <= floor then Share.offer(a, hg, floor + 1, rec.h, rec.v, true, a) end
+            elseif hg == "Z" then
+                -- Location not shared (D-019): my withdrawal goes after theirs.
+                s.tomb[a] = s.tomb[a] or {}
+                if (s.tomb[a].Z or 0) <= floor then s.tomb[a].Z = math.max(floor + 1, Share.serverNow()) end
+                changed(a, true)
+            end
+            Share.sendRecord(a, hg, true)
+        end
+    end)
+end
+
+-- Groups I observe myself (B level and class, P professions, Z location).
+local LIVE = { B = true, P = true, Z = true }
+
+-- A value for my author id from someone else: true = do not store it (my own
+-- goes out again). An older one or the same value takes the usual path.
+local function guardOwn(senderA, a, g, t, h)
+    if senderA == a or not LIVE[g] or a ~= Share.selfAuthor() then return false end
+    local s = store()
+    if not s then return false end
+    local rec = s.rec[a] and s.rec[a][g]
+    if rec and (h == rec.h or (type(t) == "number" and t <= rec.t)) then return false end
+    if g == "Z" and not rec and ns.Sync.shareLocation() and not ns.Data.location() then return false end
+    Share.healOwn(g, t)
+    return true
+end
+Share.guardOwn = guardOwn
+
+-- A withdrawal of my own data from someone else: true = not applied. My
+-- location while I share it, or the recipes of a profession I still have.
+local function guardOwnTomb(senderA, a, g, t)
+    if senderA == a or type(g) ~= "string" or a ~= Share.selfAuthor() then return false end
+    if g == "Z" then
+        if not ns.Sync.shareLocation() then return false end
+        Share.healOwn(g, t)
+        return true
+    end
+    local id = tonumber(g:match("^R(%d+)$"))
+    local s = store()
+    if not (id and s and s.rec[a] and s.rec[a][g]) then return false end
+    for _, prof in ipairs((ns.Data.ownProfessionsDetailed())) do
+        if prof.skillLineID == id then
+            Share.healOwn(g, t)
+            return true
+        end
+    end
+    return false
+end
+Share.guardOwnTomb = guardOwnTomb
+
+---------------------------------------------------------------------------
+-- GF-FIX-A (D-019): location sharing can be turned off
+---------------------------------------------------------------------------
+
+-- Withdraw my shared location (Z): a tombstone now, sent on GUILD.
+function Share.withdrawLocation()
+    local a, s = Share.selfAuthor(), store()
+    if not (a and s) then return false end
+    local rec = s.rec[a] and s.rec[a].Z
+    if not rec and not (s.tomb[a] and s.tomb[a].Z) then return false end
+    local t = Share.serverNow()
+    if rec and rec.t >= t then t = rec.t + 1 end
+    Share.applyTomb(a, "Z", t)
+    if mayShare() then Share.sendRecord(a, "Z", true) end
+    return true
+end
+
+-- Share my location again (after the switch is turned back on): at once.
+function Share.publishLocation()
+    if not mayShare() then return false end
+    local a = Share.selfAuthor()
+    for _, g in ipairs(Share.observeOwn()) do Share.sendRecord(a, g, true) end
+    return true
 end
 
 ---------------------------------------------------------------------------
@@ -1112,6 +1291,14 @@ end
 -- Drop everything about author a (records, tombstones, upload state).
 function Share.forget(s, a)
     s.rec[a], s.tomb[a], s.gone[a], s.queued[a], s.idsSent[a] = nil, nil, nil, nil, nil
+    -- GF-FIX-A (review 低-3): the roster window's copy goes too.
+    local peers = ns.db and ns.db.peers
+    if type(peers) == "table" then
+        local guid = Share.guidOf(a)
+        for k, peer in pairs(peers) do
+            if type(peer) == "table" and peer.guid == guid then peers[k] = nil end
+        end
+    end
     digestCache[a] = nil
     Share.version = Share.version + 1
     local prefix = a .. "|"
@@ -1178,7 +1365,11 @@ local partials = {}
 -- Compare one index item with ours; queue asks or pushes.
 local function compareItem(a, g, t, h, to)
     local s = store()
-    if h == "x" then Share.applyTomb(a, g, t); return end
+    if h == "x" then
+        -- GF-FIX-A (review 中-2): an index listing my own data as withdrawn.
+        if not guardOwnTomb(nil, a, g, t) then Share.applyTomb(a, g, t) end
+        return
+    end
     if not validGroup(g) then return end
     local tomb = tombFor(s, a, g)
     local rec = s.rec[a] and s.rec[a][g]
@@ -1254,7 +1445,7 @@ local function handleCatalog(fields)
             local mine, myMax = Share.digest(a)
             if mine ~= d then
                 if myMax > m and mayShare() then
-                    later("index|" .. a, 2, 6, function() Share.sendIndex(a) end)
+                    later("index|" .. a, 2, 6, function() Share.sendIndex(a, "index|" .. a) end)
                 else
                     wantIndex[a] = { a = a, t = m }
                 end
@@ -1269,7 +1460,7 @@ local function handleCatalog(fields)
     if mayShare() then
         for _, a in ipairs(Share.authors()) do
             if not seen[a] and (not covered or Share.inMask(covered, Share.bucketOf(a))) then
-                later("index|" .. a, 2, 6, function() Share.sendIndex(a) end)
+                later("index|" .. a, 2, 6, function() Share.sendIndex(a, "index|" .. a) end)
             end
         end
     end
@@ -1296,11 +1487,12 @@ local function sendCatalog(q, buckets)
         cur[#cur + 1] = item; len = len + 1 + #item
     end
     if #cur > 0 or (mask and #groups == 0) then groups[#groups + 1] = cur end
+    local tag = "catalog|" .. str(q)
     for i, list in ipairs(groups) do
         if mask then
-            enqueue(msg("C", q, Share.b36(i), Share.b36(#groups), mask, unpack(list)), "index")
+            enqueue(msg("C", q, Share.b36(i), Share.b36(#groups), mask, unpack(list)), "index", nil, tag)
         else
-            enqueue(msg("C", q, Share.b36(i), Share.b36(#groups), unpack(list)), "index")
+            enqueue(msg("C", q, Share.b36(i), Share.b36(#groups), unpack(list)), "index", nil, tag)
         end
     end
 end
@@ -1321,6 +1513,20 @@ end
 
 local function item1(items) return items[1].a .. "." .. items[1].g .. "." .. #items end
 
+-- GF-FIX-A (review 低-2): the session tables only keep what can still matter
+-- (each entry is only ever read within the time it is dropped after).
+local lastPrune = 0
+local function pruneSession(now)
+    if now - lastPrune < Share.SESSION_PRUNE then return end
+    lastPrune = now
+    for k, at in pairs(lastSent) do if now - at > Share.RESEND then lastSent[k] = nil end end
+    for k, at in pairs(claimed) do if now - at > Share.RESEND then claimed[k] = nil end end
+    for k, at in pairs(capable) do if now - at > Share.CAPABLE_KEEP then capable[k] = nil end end
+    for k, at in pairs(lastHeard) do if now - at > Share.TARGET_FRESH then lastHeard[k] = nil end end
+    for k, p in pairs(partials) do if now - p.at > Share.PART_TIMEOUT then partials[k] = nil end end
+end
+Share.pruneSession = function(now) lastPrune = 0; pruneSession(now or ns.now()) end
+
 -- Returns a result string (for tests and diagnostics).
 function Share.onMessage(prefix, text, channel, sender)
     if prefix ~= Share.PREFIX then return "prefix" end
@@ -1340,6 +1546,7 @@ function Share.onMessage(prefix, text, channel, sender)
     local function known(a) return a and byA and byA[a] ~= nil end
     lastHeard[senderA] = ns.now()
     gone[senderA] = nil
+    pruneSession(ns.now())
     -- Only data comes by WHISPER (replies to our own requests).
     if channel == "WHISPER" and kind ~= "V" and kind ~= "B" and kind ~= "D" and kind ~= "X" then
         return "channel"
@@ -1366,6 +1573,8 @@ function Share.onMessage(prefix, text, channel, sender)
         local q, count, digest = fields[1], Share.unb36(fields[2]), fields[3]
         if not q or not count then return "malformed" end
         if not mayShare() then return "disabled" end
+        -- GF-FIX-A (review 中-1): with this many replies still waiting, leave it to the others.
+        if controlQueued >= Share.BUSY_CONTROL then return "busy" end
         local myCount, myDigest = Share.totalDigest()
         if myCount == 0 or (myCount == count and myDigest == digest) then return "same" end
         -- 0.10 requesters send bucket digests: answer only what differs.
@@ -1381,7 +1590,9 @@ function Share.onMessage(prefix, text, channel, sender)
         for _, a in ipairs(fields) do
             if known(a) and #Share.indexItems(a) > 0 then
                 local mine = a == Share.selfAuthor()
-                later("index|" .. a, mine and 0 or 2, mine and 1 or 6, function() Share.sendIndex(a) end)
+                later("index|" .. a, mine and 0 or 2, mine and 1 or 6, function()
+                    Share.sendIndex(a, (not mine) and ("index|" .. a) or nil)
+                end)
             end
         end
         return "ok"
@@ -1410,17 +1621,19 @@ function Share.onMessage(prefix, text, channel, sender)
         return "ok"
     elseif kind == "K" then
         local toA = fields[1]
-        if not toA then return "malformed" end
+        -- GF-FIX-A (review 低-2): keys only for members and groups we know.
+        if not known(toA) then return "malformed" end
         local now = ns.now()
         for i = 2, #fields do
             local a, g = fields[i]:match("^([^%.]+)%.(.+)$")
-            if a then claimed[toA .. "|" .. recordKey(a, g)] = now end
+            if a and known(a) and validGroup(g) then claimed[toA .. "|" .. recordKey(a, g)] = now end
         end
         return "claim"
     elseif kind == "V" then
         local a, g, t, h, v = fields[1], fields[2], Share.unb36(fields[3]), fields[4], table.concat(fields, "~", 5)
         if not known(a) then return "unknown-author" end
         if not t then return "malformed" end
+        if guardOwn(senderA, a, g, t, h) then return "healed" end
         return onValue(senderA, a, g, t, h, v, channel)
     elseif kind == "B" then
         local a, g, t, h, n = fields[1], fields[2], Share.unb36(fields[3]), fields[4], Share.unb36(fields[5])
@@ -1445,11 +1658,13 @@ function Share.onMessage(prefix, text, channel, sender)
         p.parts[part] = table.concat(fields, "~", 5)
         for i = 1, p.n do if not p.parts[i] then return "partial" end end
         partials[key] = nil
+        if guardOwn(senderA, a, g, Share.unb36(tRaw), p.h) then return "healed" end
         return onValue(senderA, a, g, Share.unb36(tRaw), p.h, table.concat(p.parts), p.channel)
     elseif kind == "X" then
         local a, g, t = fields[1], fields[2], Share.unb36(fields[3])
         if not known(a) or not t then return "malformed" end
         if channel == "GUILD" then cancel("push|" .. recordKey(a, g)) end
+        if guardOwnTomb(senderA, a, g, t) then return "healed" end
         return Share.applyTomb(a, g, t) and "tomb" or "same"
     end
     return "unknown-type"
@@ -1463,6 +1678,9 @@ end
 function Share.fromV1(member, d)
     local a = member and member.guid and Share.authorOf(member.guid)
     if not a or type(d.capturedAt) ~= "number" then return false, "invalid" end
+    -- GF-FIX-A (review 低-5): 0.8.x stamps its own computer's time(); never
+    -- later than the realm's clock.
+    d.capturedAt = math.min(d.capturedAt, Share.serverNow())
     local any, why = false, "older"
     local function try(g, v)
         if not v then return end
@@ -1555,5 +1773,7 @@ function Share.resetSession()
     allowance, lastTick, draining = Share.ALLOWANCE, nil, false
     qid, catalogParts, wantIndex, wantRecords = nil, {}, {}, {}
     changeTimer, lastZoneAt, flushPending = false, nil, false
+    controlQueued, tagged, lastPrune = 0, {}, 0 -- GF-FIX-A
+    for k in pairs(healFloor) do healFloor[k] = nil end
     for k in pairs(stats) do stats[k] = 0 end
 end

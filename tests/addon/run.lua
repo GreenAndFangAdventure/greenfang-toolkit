@@ -2366,9 +2366,10 @@ test("D11 tombstones: only R<id> (profession given up); X~* and X~Z are ignored 
     local t = wow.state.now - 600
     shareFrom(ns, PEER, (vMsg(ns, A_THIRD, "Z", t, { zone = "幽暗城" })))
     shareFrom(ns, PEER, (vMsg(ns, A_THIRD, "R164", t, { 2660, 2661 })))
-    eq(shareFrom(ns, PEER, "S1~X~" .. A_THIRD .. "~Z~" .. ns.Share.b36(t + 10)), "same", "X~Z ignored")
+    -- GF-FIX-A (D-019 replaces D-015 here): a location may be withdrawn (the switch).
+    eq(shareFrom(ns, PEER, "S1~X~" .. A_THIRD .. "~Z~" .. ns.Share.b36(t + 10)), "tomb", "X~Z withdraws the location (D-019)")
     eq(shareFrom(ns, PEER, "S1~X~" .. A_THIRD .. "~*~" .. ns.Share.b36(t + 10)), "same", "X~* ignored")
-    ok(ns.Share.get(A_THIRD, "Z"), "location kept")
+    eq(ns.Share.get(A_THIRD, "Z"), nil, "location withdrawn (D-019)")
     eq(shareFrom(ns, PEER, "S1~X~" .. A_THIRD .. "~R164~" .. ns.Share.b36(t + 10)), "tomb", "profession given up")
     eq(ns.Share.get(A_THIRD, "R164"), nil, "recipes gone")
     eq(shareFrom(ns, PEER, (vMsg(ns, A_THIRD, "R164", t + 5, { 2660 }))), "tomb", "older recipes refused")
@@ -2405,7 +2406,7 @@ end)
 test("D11 no switches: always shares, location included, never sends X~* or X~Z", function()
     local ns = shareLogin()
     eq(ns.Sync.setEnabled, nil, "no sync switch")
-    eq(ns.Sync.setShareLocation, nil, "no location switch")
+    ok(ns.Sync.setShareLocation, "D-019 (GF-FIX-A): the one switch left is the location's")
     eq(ns.Share.watchSettings, nil, "no withdrawal watcher")
     ok(ns.Share.get(A_SELF, "Z"), "own location shared")
     wow.advance(60)
@@ -4708,6 +4709,10 @@ assert(loadfile(ROOT .. "/tests/addon/sleepingbag_map_tests.lua"))()({ test = te
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 -- GF-008-C: a map for every step, the raid target star (tests/addon/gf008c_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gf008c_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+
+-- GF-FIX-A: core caches, message guards, location switch (tests/addon/gffixa_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gffixa_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 
 ---------------------------------------------------------------------------
