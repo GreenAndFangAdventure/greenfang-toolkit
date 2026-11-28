@@ -460,7 +460,9 @@ function UI.listFor(kind)
             -- GF-012-C: the 黑箱 mark on the row's second line, and who holds it in the tooltip.
             local stockLine
             if it.stock then
-                stockLine = UI.stockTag(UI.STOCK_TEXT .. " " .. it.stock.qty .. " 個（" .. #it.stock.stock.places .. " 位保管人）")
+                stockLine = UI.stockTag(UI.STOCK_TEXT .. " " .. it.stock.qty .. " 個（" .. #it.stock.stock.places .. " 位保管人）"
+                    -- GF-012-D: what may be asked for now (shared − reserved).
+                    .. (ns.BankRequests and ("，可申領 " .. ns.BankRequests.itemAvailable(it.stock.stock)) or ""))
                 tip[#tip + 1] = UI.STOCK_NAME .. "："
                 for _, line in ipairs(ns.BankUI.tipLines(it.stock.stock)) do tip[#tip + 1] = "　" .. line end
             end

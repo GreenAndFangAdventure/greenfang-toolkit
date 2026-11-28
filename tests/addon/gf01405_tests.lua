@@ -323,7 +323,7 @@ return function(T)
         local UI = ns.NotifyUI
         local parent = CreateFrame("Frame", nil, UIParent)
         local boxes = UI.buildSettings(parent, 16, UI.TOP)
-        eq(#boxes, 19, "19 rows")
+        eq(#boxes, 20, "20 rows (GF-012-D: 黑箱申領)")
         local keys, cols = {}, { [0] = 0, [1] = 0 }
         for i, c in ipairs(boxes) do
             keys[c.key] = c

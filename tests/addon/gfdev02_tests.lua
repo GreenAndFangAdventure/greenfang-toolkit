@@ -156,7 +156,7 @@ return function(T)
         local f = ns.NotifyUI.list()
         ok(f:IsShown() and f.settings:IsShown(), "the switches are shown")
         local boxes = f.settings.boxes
-        eq(#boxes, 19, "19 rows")
+        eq(#boxes, 20, "20 rows (GF-012-D: 黑箱申領)")
         local cols = {}
         for _, c in ipairs(boxes) do cols[c.col] = true end
         ok(cols[0] and cols[1], "two columns")
