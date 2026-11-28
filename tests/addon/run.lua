@@ -4844,6 +4844,9 @@ assert(loadfile(ROOT .. "/tests/addon/gf00916_tests.lua"))()({ test = test, eq =
 assert(loadfile(ROOT .. "/tests/addon/gf006d_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint, shareLogin = shareLogin, shareFrom = shareFrom,
     rMsg = rMsg, leatherWindow = leatherWindow, PEER = PEER, A_PEER = A_PEER, A_THIRD = A_THIRD })
+-- GF-010-C: 職工檔案 「清除定位」 and the roster's toolkit wrench and filter (tests/addon/gf010c_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf010c_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0

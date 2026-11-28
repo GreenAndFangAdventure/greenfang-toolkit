@@ -43,6 +43,12 @@ local ICON_SIZE, ICON_GAP, MORE_WIDTH = ns.ROW_ICON, 2, 24
 local CLASS_ICON, BADGE_SIZE, STATUS_ICON = 24, 16, 16
 UI.ICON_SIZE, UI.CLASS_ICON, UI.BADGE_SIZE, UI.STATUS_ICON = ICON_SIZE, CLASS_ICON, BADGE_SIZE, STATUS_ICON
 UI.ROLE_MAIN, UI.ROLE_CAN = 24, 16 -- GF-010
+UI.TOOLKIT_ICON = 16 -- GF-010-C: the wrench (has the toolkit)
+UI.TOOLKIT_ART = "Interface\\Icons\\INV_Misc_Wrench_01" -- the toolkit's own icon (TOC IconTexture)
+UI.TOOLKIT_FILTER = "工具箱" -- the filter's check box (tooltip: 只看有裝工具箱的)
+UI.TOOLKIT_FILTER_TIP = "只看有裝工具箱的"
+UI.TOOLKIT_FILTER_NOTE = "收到過對方工具箱資料的會友"
+UI.TOOLKIT_OLD_ALPHA = 0.5 -- last data older than Profile.EARLIER (過期)
 local NO_DATA = "－"
 local SECONDARY_COLOR, NAMES_COLOR, TEXT_COLOR = { 0.72, 0.8, 0.74 }, { 0.6, 0.6, 0.6 }, { 1, 1, 1 }
 local NO_DATA_COLOR = { 0.42, 0.42, 0.42 }
@@ -180,7 +186,8 @@ end
 -- GF-UI-C (owner): 專業 and 職業 are multi-select lists: skills / classes are
 -- sets { [value] = true } (nil = everything; an empty set = nothing).
 -- GF-010: roles = { t, h, d, unknown } (nil = everything): anyone who can fill a ticked role.
-UI.filters = { skill = nil, class = nil, skills = nil, classes = nil, roles = nil, online = false, minLevel = nil, active = false }
+UI.filters = { skill = nil, class = nil, skills = nil, classes = nil, roles = nil, online = false, minLevel = nil, active = false,
+    toolkit = false }
 
 local function passes(m, f, own)
     if not f then return true end
@@ -197,6 +204,8 @@ local function passes(m, f, own)
     end
     -- GF-006-B (R-4.2): only crafters taking orders.
     if f.active and not (ns.Orders and ns.Orders.isActiveAny(m.guid)) then return false end
+    -- GF-010-C: only members with the toolkit (data received from it, Roster.toolkit).
+    if f.toolkit and not (ns.Roster.toolkit and ns.Roster.toolkit(m.guid)) then return false end
     return true
 end
 
@@ -379,6 +388,16 @@ local function newRow(i)
                 t:Hide()
                 row.roleCan[k] = t
             end
+        end
+        if col.key == "name" then
+            -- GF-010-C: the toolkit's wrench at the right end of 角色 (who has it).
+            row.tkIcon = row:CreateTexture(nil, "ARTWORK")
+            row.tkIcon:SetSize(UI.TOOLKIT_ICON, UI.TOOLKIT_ICON)
+            row.tkX = col.x + col.w - UI.TOOLKIT_ICON - 2
+            row.tkIcon:SetPoint("LEFT", row, "LEFT", row.tkX, 0)
+            row.tkIcon:Hide()
+            row.tkSlot = { toolkit = true, x0 = row.tkX, x1 = row.tkX + UI.TOOLKIT_ICON }
+            w = w - UI.TOOLKIT_ICON - 4
         end
         if col.status then
             row.statusIcon = row:CreateTexture(nil, "ARTWORK")
@@ -791,7 +810,42 @@ end
 
 -- Tooltip for a row: one profession when slot is given (GameTooltip, above
 -- that icon), else the member card (GF-UI-I). Never both.
+-- GF-010-C: the wrench's tooltip lines (tk = Roster.toolkit(guid)).
+UI.TOOLKIT_HAS = "有裝綠皮冒險工具箱"
+function UI.toolkitLines(tk)
+    if not tk then return {} end
+    local lines = { UI.TOOLKIT_HAS }
+    if tk.version and tk.version ~= "" then lines[#lines + 1] = "版本 " .. tk.version end
+    if tk.own then
+        lines[#lines + 1] = "本角色"
+    else
+        local okD, day = pcall(date, "%Y/%m/%d", tk.at)
+        local age = ns.Profile and ns.Profile.ageText(tk.at) or ""
+        lines[#lines + 1] = string.format("最後一次收到對方資料：%s%s", okD and day or "",
+            age ~= "" and ("（" .. age .. "）") or "")
+        lines[#lines + 1] = "以上是那時的狀態"
+    end
+    return lines
+end
+
+-- The wrench under x (a slot-like table with toolkit = true), or nil.
+function UI.toolkitAt(row, x)
+    local s = row.tkSlot
+    if not (x and s and row.tkIcon and row.tkIcon:IsShown()) then return nil end
+    if x >= s.x0 and x <= s.x1 then return s end
+    return nil
+end
+
 function UI.showRowTooltip(row, slot)
+    if slot and slot.toolkit then
+        UI.hideRosterCard()
+        ns.tooltipAbove(row, slot.x0 or 0)
+        for i, line in ipairs(UI.toolkitLines(row.toolkit)) do
+            if i == 1 then GameTooltip:AddLine(line) else GameTooltip:AddLine(line, 0.85, 0.85, 0.85) end
+        end
+        GameTooltip:Show()
+        return GameTooltip
+    end
     if slot then
         UI.hideRosterCard()
         ns.tooltipAbove(row, slot.x0 or 0) -- right above that icon (GF-001-D21)
@@ -805,7 +859,8 @@ end
 -- While the cursor is over a row: redraw the tooltip when it moves onto
 -- another profession (or off them).
 function UI.hoverRow(row)
-    local slot = UI.slotAt(row, UI.cursorX(row)) or nil
+    local x = UI.cursorX(row)
+    local slot = UI.slotAt(row, x) or UI.toolkitAt(row, x) or nil
     if slot == row.hoverSlot then return end
     row.hoverSlot = slot
     UI.showRowTooltip(row, slot)
@@ -1302,6 +1357,23 @@ function UI.drawCensus(list)
 end
 
 -- One roster row: class icon and colour, rank, centred level, coloured status.
+-- GF-010-C: the wrench when this computer has data from the member's toolkit
+-- (Roster.toolkit, cached); nothing at all for the others (only not heard yet).
+function UI.fillToolkit(row, m)
+    local tk = ns.Roster.toolkit and ns.Roster.toolkit(m.guid) or nil
+    row.toolkit = tk
+    if not row.tkIcon then return end
+    if tk then
+        Icons.set(row.tkIcon, UI.TOOLKIT_ART)
+        if row.tkIcon.SetTexCoord then row.tkIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
+        local old = not tk.own and ns.Profile and ns.Profile.ageText(tk.at) == "過期"
+        row.tkIcon:SetAlpha(old and UI.TOOLKIT_OLD_ALPHA or 1)
+        row.tkIcon:Show()
+    else
+        row.tkIcon:Hide()
+    end
+end
+
 function UI.fillRow(row, m, own)
     local color = Icons.classColor(m.classToken)
     local cells = row.cells
@@ -1310,6 +1382,7 @@ function UI.fillRow(row, m, own)
     local cell = row.cell
     cell.name:SetText(str(m.name))
     cell.name:SetTextColor(color[1], color[2], color[3])
+    UI.fillToolkit(row, m)
     cell.rank:SetText(str(m.guildRank))
     cell.rank:SetTextColor(RANK_COLOR[1], RANK_COLOR[2], RANK_COLOR[3])
     Icons.setClassIcon(row.classIcon, m.classToken)
@@ -1629,6 +1702,8 @@ function UI.clearFilters()
     UI.filters.skill, UI.filters.class, UI.filters.online, UI.filters.minLevel = nil, nil, false, nil
     UI.filters.skills, UI.filters.classes, UI.filters.roles = nil, nil, nil
     UI.filters.active = false
+    UI.filters.toolkit = false
+    if UI.toolkitCheck then UI.toolkitCheck.set(false) end
 
     if UI.activeCheck then UI.activeCheck.set(false) end
     if UI.skillChoice then UI.skillChoice.selected = nil; UI.skillChoice.refreshText() end
@@ -1741,6 +1816,17 @@ local function build(p)
     UI.activeCheck = ns.checkBox(f, hammer, x, Y - 1,
         function(on) UI.filters.active = on; UI.refresh(true) end)
     after(28 + ns.labelWidth(hammer))
+    -- GF-010-C: 只看有裝工具箱的 (next to 在線 / 接單中, the same check box).
+    UI.toolkitCheck = ns.checkBox(f, UI.TOOLKIT_FILTER, x, Y - 1,
+        function(on) UI.filters.toolkit = on; UI.refresh(true) end)
+    UI.toolkitCheck:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine(UI.TOOLKIT_FILTER_TIP)
+        GameTooltip:AddLine(UI.TOOLKIT_FILTER_NOTE, 0.85, 0.85, 0.85)
+        GameTooltip:Show()
+    end)
+    UI.toolkitCheck:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    after(28 + ns.labelWidth(UI.TOOLKIT_FILTER))
     UI.levelLabel = label("等級")
     UI.levelBox = ns.Theme.editBox(f)
     UI.levelBox:SetSize(40, ns.BUTTON_H)
@@ -1767,7 +1853,7 @@ local function build(p)
     UI.countText = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
     UI.countText:SetText("")
     rosterControls = { UI.updateButton, searchBox, UI.clearButton, UI.skillChoice, UI.classChoice,
-        UI.onlineCheck, UI.levelBox }
+        UI.onlineCheck, UI.levelBox, UI.toolkitCheck }
     -- Column header: 28 px, a faint bar with a line (GF-UI-D), gold names; the sorted one white with an arrow.
     local header = CreateFrame("Frame", nil, f)
     header:SetPoint("TOPLEFT", f, "TOPLEFT", 20, UI.HEADER_Y)

@@ -206,6 +206,22 @@ function Profile.setCan(r, on)
     return true
 end
 
+-- GF-010-C (owner: 未設定 → 清除定位, 主職責與可支援一起清掉): no main role
+-- and nothing in 可支援. A character that had set something shares "0."
+-- (others see 未設定); one that never set anything stays unshared. Returns
+-- true, or false and why; "same" when there was nothing to clear.
+Profile.CLEAR_NAME = "清除定位"
+function Profile.clearRoles()
+    local e = Profile.own()
+    if not e then return false, "no-guid" end
+    if e.main == nil and next(e.can) == nil then return true, "same" end
+    e.main, e.can = nil, {}
+    e.set, e.at = true, ns.now()
+    changed()
+    publish(false)
+    return true
+end
+
 -- Share with the guild, or withdraw (sent at once).
 function Profile.setShare(on)
     local e = Profile.own()

@@ -355,6 +355,45 @@ function Roster.flush()
     return recordedAt[key] ~= nil
 end
 
+-- GF-010-C (owner: 名冊可以看出誰有裝工具箱): what this computer already holds
+-- says who has the toolkit. Every toolkit shares its own character (D-015,
+-- no switch), and a shared record is kept under its author (Share.records),
+-- relayed copies too; so a member with any record here has the toolkit.
+-- Nothing new is sent or asked for. Answer for a GUID:
+--   { at = newest record time (the author's, server seconds), own = true|nil,
+--     version = "0.16.19" (own character only: no message carries a version) }
+-- or nil (nothing received yet: not "has no toolkit"). Kept while
+-- Share.version, Roster.version and the own GUID stay the same.
+Roster.toolkitComputed = 0 -- answers worked out, not taken from the cache (tests)
+local tkCache = { key = nil, by = {} }
+local NONE = {}
+local function toolkitNow(guid)
+    local S = ns.Share
+    local own = ns.selfGUID and ns.selfGUID()
+    if guid == own then return { at = S and S.serverNow() or ns.now(), own = true, version = ns.VERSION } end
+    local a = S and S.authorOf(guid)
+    local recs = a and S.store() and S.records(a)
+    if not recs then return nil end
+    local newest
+    for _, r in pairs(recs) do
+        if type(r) == "table" and type(r.t) == "number" and (not newest or r.t > newest) then newest = r.t end
+    end
+    return newest and { at = newest } or nil
+end
+function Roster.toolkit(guid)
+    guid = str(guid)
+    if guid == "" then return nil end
+    local key = string.format("%d|%d|%s", ns.Share and ns.Share.version or 0, Roster.version, str(ns.selfGUID and ns.selfGUID()))
+    if tkCache.key ~= key then tkCache.key, tkCache.by = key, {} end
+    local v = tkCache.by[guid]
+    if v == nil then
+        v = toolkitNow(guid) or NONE
+        Roster.toolkitComputed = Roster.toolkitComputed + 1
+        tkCache.by[guid] = v
+    end
+    return v ~= NONE and v or nil
+end
+
 function Roster.request()
     if not Roster.available() then return false end
     if C_GuildInfo and C_GuildInfo.GuildRoster then
