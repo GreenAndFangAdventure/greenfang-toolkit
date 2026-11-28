@@ -84,7 +84,7 @@ return function(T)
                 if b:IsShown() then
                     ok(b.textStyle, what .. ": " .. tostring(b.tip) .. " is a text button")
                     ok(not b.tex:IsShown(), what .. ": no icon in it")
-                    eq(b._h, ns.BUTTON_H - 2, what .. ": one height")
+                    eq(b._h, U.ACTION_H, what .. ": one height") -- GF-UI-Q: 24 (room between the two lines)
                     local right = b.flowX + ns.OrdersUI.buttonSpan(b)
                     ok(right <= U.ROW_WIDTH, what .. ": inside the row (" .. right .. ")")
                     boxes[#boxes + 1] = { l = b.flowX, r = right, line = 2, name = b.tip }

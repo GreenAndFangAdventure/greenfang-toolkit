@@ -4850,6 +4850,9 @@ assert(loadfile(ROOT .. "/tests/addon/gf010c_tests.lua"))()({ test = test, eq = 
 -- GF-008-F: the guide's text size (A－ / A＋), the legend in its colours, places as map links,
 -- the step the quest log says (tests/addon/gf008f_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gf008f_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+-- GF-UI-Q: the adventure page (owner 0.16.19): room above 撤回, the 規則 card in sentences, 週｜月 in
+-- 業務排程, three different legend marks (tests/addon/gfuiq_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gfuiq_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 

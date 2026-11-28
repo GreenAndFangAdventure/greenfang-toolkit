@@ -47,7 +47,7 @@ return function(T)
         ok(detail:find("需要坦，慢慢打", 1, true), "the note")
         eq(row.detail._points[1][5], A.LINE2, "details on line 2")
         eq(row.name._points[1][5], A.LINE1, "name on line 1")
-        for _, b in ipairs(row.buttons) do if b:IsShown() then eq(b._points[1][5], A.LINE2, "buttons on line 2") end end
+        for _, b in ipairs(row.buttons) do if b:IsShown() then eq(b._points[1][5], A.ACTION_Y2, "buttons on line 2 (GF-UI-Q: 2 px lower)") end end
         ok(row.who._fixedWidth >= 150, "room for the leader's name")
         ok(not row.who:IsTruncated(), "leader not cut")
         -- My worker ticket uses the same two lines.

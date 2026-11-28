@@ -907,6 +907,13 @@ UI.DEST_ICON = 44
 -- (UI.TEXT_ICON; the 在線／離線 mark on the class icon is one of those).
 UI.ROW_SMALL = 20
 UI.TEXT_ICON = 18
+-- GF-UI-Q (owner 0.16.19: 「撤回按鈕與人名稍微有點間隔比較好看」): a row's text
+-- buttons are 24 high (was 28: line 1's class icon and line 2's buttons touched
+-- at the row's middle); line 2's buttons sit 2 px lower and line 1's 刪除 2 px
+-- higher, so there are 4 px between the leader's class icon and a button below
+-- it, and 8 px between 刪除 and a button below it.
+UI.ACTION_H = 24
+UI.ACTION_Y1, UI.ACTION_Y2 = UI.LINE1 + 2, UI.LINE2 - 2
 
 local function newRow(i)
     local C = UI.COL
@@ -955,14 +962,14 @@ local function newRow(i)
     for k = 1, 4 do
         local b = iconButton(row, ns.ROW_ICON, "yes", nil)
         UI.textStyle(b, true) -- GF-UI-P: text buttons only
-        b:SetPoint("LEFT", row, "LEFT", UI.ROW_BUTTON_X, UI.LINE2) -- laid out one after another (fillRow)
+        b:SetPoint("LEFT", row, "LEFT", UI.ROW_BUTTON_X, UI.ACTION_Y2) -- laid out one after another (fillRow)
         row.buttons[k] = b
     end
     -- GF-002-J (owner 0.14.0): 刪除 on my own tickets, at the far right of line 1 (confirmed first).
     -- GF-UI-N (owner 0.16.12): my worker ticket's 移除 sits in the same place (row.deleteFn).
     row.delete = iconButton(row, ns.ROW_ICON, "no", "刪除", nil, "刪除")
     UI.textStyle(row.delete, true) -- GF-UI-P: the same text button as the others
-    row.delete:SetPoint("LEFT", row, "LEFT", UI.COL.delete, UI.LINE1)
+    row.delete:SetPoint("LEFT", row, "LEFT", UI.COL.delete, UI.ACTION_Y1)
     row.delete.action = "delete"
     row.delete:SetScript("OnClick", function()
         if row.deleteFn then return row.deleteFn() end
@@ -1136,7 +1143,7 @@ function UI.textStyle(b, on)
         end
         b.textStyle = true
         b.tex:Hide()
-        b:SetSize(UI.ACTION_W, ns.BUTTON_H - 2)
+        b:SetSize(UI.ACTION_W, UI.ACTION_H) -- GF-UI-Q: 24 (was BUTTON_H - 2)
         b.gfWidth = UI.ACTION_W
         b.gfTextText:SetText(b.tip or ""); b.gfTextText:Show()
         b.gfTextFill:Show(); b.gfTextEdges.show(true)
@@ -1606,7 +1613,7 @@ function UI.flowButtons(row)
                 b:Hide()
             else
                 b:ClearAllPoints()
-                b:SetPoint("LEFT", row, "LEFT", x, UI.LINE2)
+                b:SetPoint("LEFT", row, "LEFT", x, UI.ACTION_Y2)
                 b.flowX = x
                 x = x + w + UI.BUTTON_GAP
             end
@@ -3860,14 +3867,26 @@ function UI.calendarItems(dayOff)
     return UI.calendarBuckets()[dayOff] or {}
 end
 
-local function frameIcon(cell, k)
-    local ic = cell.icons[k]
-    if ic then return ic end
-    ic = CreateFrame("Frame", nil, cell)
-    ic:SetSize(32, 32)
-    ic.tex = ic:CreateTexture(nil, "ARTWORK"); ic.tex:SetAllPoints()
+-- GF-UI-Q (owner 0.16.19: 「上面的鑰匙圖案很重複，也看不懂作用」): the three
+-- legend entries were one key icon each, told apart only by a faint glow. They
+-- are a legend (not filters): each mark now has its own corner icon, the same on
+-- the day's icons, the day's list and the legend, and the legend says it on hover.
+--   我開的: a gold frame and the leader's crown (top left)
+--   我報名: a green frame and the green check (top left)
+--   已定案: the shine and the sealed scroll (bottom right)
+UI.CAL_MARK = {
+    mine = { art = "consent", color = UI.CAL_MINE, text = "我開的", tip = "你開的冒險單：金框，左上角有隊長皇冠" },
+    signed = { art = "yes", color = UI.CAL_SIGNED, text = "我報名", tip = "你報名的冒險單：綠框，左上角有綠勾" },
+    final = { art = "final", text = "已定案", tip = "時間已經定案的冒險單：圖示發亮，右下角有卷軸" },
+}
+UI.CAL_LEGEND = { "mine", "signed", "final" }
+
+-- The marks on one icon frame ic (ic.tex the destination): the coloured frame,
+-- the shine, the corner icons. size: the icon's size.
+local function addMarks(ic, size)
     ic.glow = ic:CreateTexture(nil, "OVERLAY")
-    ic.glow:SetSize(48, 48); ic.glow:SetPoint("CENTER", ic, "CENTER", 0, 0) -- GF-UI-A §2.8 item 4: 56 crowded the next icon
+    local g = math.floor(size * 1.5 + 0.5) -- 32 -> 48 (GF-UI-A §2.8 item 4: 56 crowded the next icon)
+    ic.glow:SetSize(g, g); ic.glow:SetPoint("CENTER", ic, "CENTER", 0, 0)
     if not Icons.set(ic.glow, ns.OrdersUI.GLOW) then ic.glow:SetColorTexture(1, 0.85, 0.4, 0.35) end
     if ic.glow.SetBlendMode then ic.glow:SetBlendMode("ADD") end
     ic.glow:Hide()
@@ -3877,155 +3896,351 @@ local function frameIcon(cell, k)
         ic.shine:SetAlpha(0.6)
     end
     ic.shine:Hide()
+    local c = math.max(12, math.floor(size / 2))
+    ic.who = ic:CreateTexture(nil, "OVERLAY", nil, 2)
+    ic.who:SetSize(c, c); ic.who:SetPoint("TOPLEFT", ic, "TOPLEFT", -3, 3)
+    ic.who:Hide()
+    ic.fin = ic:CreateTexture(nil, "OVERLAY", nil, 2)
+    ic.fin:SetSize(c, c); ic.fin:SetPoint("BOTTOMRIGHT", ic, "BOTTOMRIGHT", 3, -3)
+    ns.GameIcons.set(ic.fin, UI.CAL_MARK.final.art)
+    ic.fin:Hide()
+    return ic
+end
+
+local function frameIcon(cell, k)
+    local ic = cell.icons[k]
+    if ic then return ic end
+    ic = CreateFrame("Frame", nil, cell)
+    ic:SetSize(32, 32)
+    ic.tex = ic:CreateTexture(nil, "ARTWORK"); ic.tex:SetAllPoints()
+    addMarks(ic, 32)
     local col, row = (k - 1) % 3, math.floor((k - 1) / 3)
     ic:SetPoint("TOPLEFT", cell, "TOPLEFT", 12 + col * 38, -40 - row * 40)
     cell.icons[k] = ic
     return ic
 end
 
--- Draw one icon: the destination, the frame for mine / signed, the shine for finalized.
+-- Draw one icon: the destination, the frame and corner for mine / signed, the shine
+-- and the scroll for finalized (the legend's marks).
 function UI.calendarMark(ic, item)
-    UI.setDest(ic.tex, item.view)
-    local c = item.mine and UI.CAL_MINE or item.signed and UI.CAL_SIGNED or nil
-    if c then
-        if ic.glow.SetVertexColor then ic.glow:SetVertexColor(c[1], c[2], c[3]) end
+    if item.view then UI.setDest(ic.tex, item.view) end
+    local kind = item.mine and "mine" or item.signed and "signed" or nil
+    local m = kind and UI.CAL_MARK[kind]
+    if m then
+        if ic.glow.SetVertexColor then ic.glow:SetVertexColor(m.color[1], m.color[2], m.color[3]) end
         ic.glow:Show()
-    else ic.glow:Hide() end
+        if ic.who then ns.GameIcons.set(ic.who, m.art); ic.who:Show() end
+    else
+        ic.glow:Hide()
+        if ic.who then ic.who:Hide() end
+    end
     if item.final then ic.shine:Show() else ic.shine:Hide() end
-    ic.kind = item.mine and "mine" or item.signed and "signed" or "other"
+    if ic.fin then if item.final then ic.fin:Show() else ic.fin:Hide() end end
+    ic.kind = kind or "other"
     ic.final = item.final
     ic:Show()
 end
 
-function UI.drawCalendar()
-    if not (calendar and calendar:IsShown()) then return end
-    local f = calendar
-    local first = (f.page or 0) * 7
-    f.weekLabel:SetText(UI.day(UI.dayStart(first) + 43200):sub(6) .. " - " .. UI.day(UI.dayStart(math.min(first + 6, 14)) + 43200):sub(6))
-    for i, cell in ipairs(f.cells) do
-        local off = first + i - 1
-        cell.dayOff = off
-        local inRange = off <= 14
-        local t = UI.dayStart(off) + 43200
-        local d = dateTable(t - UI.skew())
+---------------------------------------------------------------------------
+-- GF-UI-Q (owner 0.16.19: 「業務排成想要有周與月」): 週｜月. 週 = seven days from
+-- the page's first day (as before: today, +7, +14); 月 = the month's days in a
+-- 日-六 grid (6 rows), ◀ ▶ a month. Only days 0-14 hold tickets (Adv.FUTURE_DAYS),
+-- so the others are dim and cannot be chosen. The choice is kept
+-- (settings().calendarView). Each view's cells are made once and reused.
+---------------------------------------------------------------------------
+
+UI.CAL_VIEWS = { "week", "month" }
+UI.CAL_MONTH_H, UI.CAL_MONTH_ICONS, UI.CAL_MONTH_ICON = 44, 2, 24
+UI.CAL_TOP = -76           -- the week cells / the month's weekday line
+UI.CAL_WIN_H = 640
+UI.CAL_LIST_BOTTOM = -620  -- the day's list ends here
+function UI.calendarView()
+    local v = ns.settings().calendarView
+    return v == "month" and "month" or "week"
+end
+function UI.setCalendarView(view)
+    view = view == "month" and "month" or "week"
+    local s = ns.db and ns.db.settings
+    if s then s.calendarView = view end
+    if calendar then
+        calendar.page = 0
+        if calendar.views then calendar.views.select(view) end
+    end
+    UI.drawCalendar()
+    return view
+end
+
+-- Days in a month (year, month 1-12).
+local function monthDays(y, m)
+    if m == 2 then return (y % 4 == 0 and (y % 100 ~= 0 or y % 400 == 0)) and 29 or 28 end
+    if m == 4 or m == 6 or m == 9 or m == 11 then return 30 end
+    return 31
+end
+-- The day offset (from today) of the 1st of the month `page` months from this one,
+-- and that month's { year, month, days }.
+function UI.monthStart(page)
+    local d = dateTable(UI.dayStart(0) + 43200 - UI.skew())
+    local off, y, m = -(d.day - 1), d.year, d.month
+    for _ = 1, (page or 0) do
+        off = off + monthDays(y, m)
+        m = m + 1
+        if m > 12 then m, y = 1, y + 1 end
+    end
+    return off, { year = y, month = m, days = monthDays(y, m) }
+end
+-- How many month pages hold a day 0-14 (this month, and the next when day 14 is in it).
+function UI.monthPages()
+    local n = 1
+    while UI.monthStart(n) <= A().FUTURE_DAYS do n = n + 1 end
+    return n
+end
+
+-- The marks' tooltips (the legend and the corner icons say the same).
+local function legendEnter(self)
+    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+    GameTooltip:AddLine(self.gfTip)
+    GameTooltip:Show()
+end
+local function legendLeave() GameTooltip:Hide() end
+
+local function makeCell(f, w, h)
+    local cell = CreateFrame("Button", nil, f)
+    cell:SetSize(w, h)
+    cell.bg = cell:CreateTexture(nil, "BACKGROUND"); cell.bg:SetAllPoints()
+    cell.head = ns.freeText(cell:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
+    cell.more = ns.freeText(cell:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
+    cell.icons = {}
+    cell.frame = ns.Widgets.goldFrame(cell, 2)
+    cell.pick = ns.Widgets.rowSelect(cell)
+    if cell.SetHighlightTexture then cell:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD") end
+    ns.Theme.guardHover(cell) -- GF-UI-D2: a day outside the 14 days stays dark
+    cell:SetScript("OnClick", function(self)
+        if not self.enabled then return end
+        f.day = self.dayOff
+        f.listOffset = 0
+        UI.drawCalendar()
+    end)
+    return cell
+end
+
+-- A month cell's small icons (made when first needed, reused).
+local function monthIcon(cell, k)
+    local ic = cell.icons[k]
+    if ic then return ic end
+    local s = UI.CAL_MONTH_ICON
+    ic = CreateFrame("Frame", nil, cell)
+    ic:SetSize(s, s)
+    ic.tex = ic:CreateTexture(nil, "ARTWORK"); ic.tex:SetAllPoints()
+    addMarks(ic, s)
+    ic:SetPoint("TOPRIGHT", cell, "TOPRIGHT", -8 - (k - 1) * (s + 8), -(UI.CAL_MONTH_H - s) / 2)
+    cell.icons[k] = ic
+    return ic
+end
+
+local function makeMonth(f)
+    local W, H = UI.CAL_CELL_W, UI.CAL_MONTH_H
+    f.weekdays = {}
+    for i = 1, 7 do
+        local l = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
+        l:SetPoint("TOPLEFT", f, "TOPLEFT", 30 + (i - 1) * (W + 4), UI.CAL_TOP)
+        l:SetText(UI.WEEKDAY[i])
+        l:Hide()
+        f.weekdays[i] = l
+    end
+    f.monthCells = {}
+    for i = 1, 42 do
+        local cell = makeCell(f, W, H)
+        local col, row = (i - 1) % 7, math.floor((i - 1) / 7)
+        cell:SetPoint("TOPLEFT", f, "TOPLEFT", 20 + col * (W + 4), UI.CAL_TOP - 24 - row * (H + 4))
+        cell.head:SetPoint("TOPLEFT", cell, "TOPLEFT", 8, -4)
+        cell.more:SetPoint("BOTTOMLEFT", cell, "BOTTOMLEFT", 8, 4)
+        cell:Hide()
+        f.monthCells[i] = cell
+    end
+end
+
+-- Where the chosen day's list starts in each view (below the cells).
+function UI.calendarListTop(view)
+    if view == "month" then return UI.CAL_TOP - 24 - 6 * (UI.CAL_MONTH_H + 4) - 12 end
+    return UI.CAL_TOP - UI.CAL_CELL_H - 16
+end
+function UI.calendarListRows(view)
+    return math.floor((UI.calendarListTop(view) - 32 - UI.CAL_LIST_BOTTOM) / ns.PAGE_ROW)
+end
+
+local function drawCell(f, cell, off, opts)
+    cell.dayOff = off
+    local inRange = off >= 0 and off <= A().FUTURE_DAYS
+    local t = UI.dayStart(off) + 43200
+    local d = dateTable(t - UI.skew())
+    local items = inRange and UI.calendarItems(off) or {}
+    cell.items = items
+    if opts.month then
+        cell.head:SetText(tostring(d.day))
+        local max = UI.CAL_MONTH_ICONS
+        for k = 1, max do
+            local item = items[k]
+            if item then UI.calendarMark(monthIcon(cell, k), item)
+            elseif cell.icons[k] then cell.icons[k]:Hide() end
+        end
+        cell.more:SetText(#items > 0 and (#items .. " 張") or "")
+    else
         cell.head:SetText(UI.WEEKDAY[d.wday] .. " " .. d.day)
-        if off == 0 then cell.head:SetTextColor(1, 0.82, 0) else cell.head:SetTextColor(1, 1, 1) end
-        local items = inRange and UI.calendarItems(off) or {}
-        cell.items = items
         for k = 1, UI.CAL_ICONS do
             local item = items[k]
             if item then UI.calendarMark(frameIcon(cell, k), item)
             elseif cell.icons[k] then cell.icons[k]:Hide() end
         end
         cell.more:SetText(#items > UI.CAL_ICONS and ("+" .. (#items - UI.CAL_ICONS)) or "")
-        -- GF-UI-A §2.8 item 1: today = a 2 px gold frame; the chosen day = the bright
-        -- row highlight and the gold frame (both: one frame and the highlight).
-        local st = ns.COLOR and ns.COLOR.stripe or { 1, 1, 1, 0.04 }
-        cell.bg:SetColorTexture(st[1], st[2], st[3], inRange and st[4] or st[4] / 2)
-        cell.today, cell.chosen = off == 0, off == f.day
-        cell.frame.set(cell.today or cell.chosen)
-        cell.pick.set(cell.chosen)
-        if cell.SetAlpha then cell:SetAlpha(inRange and 1 or 0.4) end
-        cell.enabled = inRange
     end
-    -- GF-UI-A §2.8 item 5: the arrows are greyed out, not hidden (the week does not jump).
-    ns.Widgets.setEnabled(f.prev, f.page > 0)
-    ns.Widgets.setEnabled(f.next, f.page < UI.CAL_PAGES - 1)
-    -- The chosen day's tickets.
+    local other = opts.month and d.month ~= opts.month
+    if off == 0 then cell.head:SetTextColor(1, 0.82, 0)
+    elseif other then cell.head:SetTextColor(0.5, 0.5, 0.5)
+    else cell.head:SetTextColor(1, 1, 1) end
+    -- GF-UI-A §2.8 item 1: today = a 2 px gold frame; the chosen day = the bright
+    -- row highlight and the gold frame (both: one frame and the highlight).
+    local st = ns.COLOR and ns.COLOR.stripe or { 1, 1, 1, 0.04 }
+    cell.bg:SetColorTexture(st[1], st[2], st[3], inRange and st[4] or st[4] / 2)
+    cell.today, cell.chosen = off == 0, off == f.day
+    cell.frame.set(cell.today or cell.chosen)
+    cell.pick.set(cell.chosen)
+    if cell.SetAlpha then cell:SetAlpha(inRange and 1 or 0.4) end
+    cell.enabled = inRange
+    cell:Show()
+end
+
+function UI.drawCalendar()
+    if not (calendar and calendar:IsShown()) then return end
+    local f = calendar
+    local view = UI.calendarView()
+    f.view = view
+    local month = view == "month"
+    if month and not f.monthCells then makeMonth(f) end
+    local last = A().FUTURE_DAYS
+    if month then
+        local pages = UI.monthPages()
+        f.page = math.max(0, math.min(pages - 1, f.page or 0))
+        local first, m = UI.monthStart(f.page)
+        local d1 = dateTable(UI.dayStart(first) + 43200 - UI.skew())
+        local lead = (d1.wday or 1) - 1 -- 日 first
+        f.weekLabel:SetText(m.year .. " 年 " .. m.month .. " 月")
+        for i, cell in ipairs(f.monthCells) do drawCell(f, cell, first - lead + i - 1, { month = m.month }) end
+        for _, cell in ipairs(f.cells) do cell:Hide() end
+        for _, l in ipairs(f.weekdays) do l:Show() end
+        f.prev.tip, f.next.tip = "上個月", "下個月"
+        ns.Widgets.setEnabled(f.prev, f.page > 0)
+        ns.Widgets.setEnabled(f.next, f.page < pages - 1)
+    else
+        local first = (f.page or 0) * 7
+        f.weekLabel:SetText(UI.day(UI.dayStart(first) + 43200):sub(6) .. " - " .. UI.day(UI.dayStart(math.min(first + 6, last)) + 43200):sub(6))
+        for i, cell in ipairs(f.cells) do drawCell(f, cell, first + i - 1, {}) end
+        if f.monthCells then for _, cell in ipairs(f.monthCells) do cell:Hide() end end
+        if f.weekdays then for _, l in ipairs(f.weekdays) do l:Hide() end end
+        f.prev.tip, f.next.tip = "上一週", "下一週"
+        -- GF-UI-A §2.8 item 5: the arrows are greyed out, not hidden (the week does not jump).
+        ns.Widgets.setEnabled(f.prev, f.page > 0)
+        ns.Widgets.setEnabled(f.next, f.page < UI.CAL_PAGES - 1)
+    end
+    -- The chosen day's tickets, below the cells (scrolls when more than fit).
+    local top = UI.calendarListTop(view)
+    local fit = math.min(#f.list, UI.calendarListRows(view))
     local items = UI.calendarItems(f.day or 0)
+    f.listOffset = math.max(0, math.min(f.listOffset or 0, #items - fit))
+    f.dayLabel:ClearAllPoints(); f.dayLabel:SetPoint("TOPLEFT", f, "TOPLEFT", 24, top)
     f.dayLabel:SetText(UI.dayText(UI.dayStart(f.day or 0) + 43200))
+    f.empty:ClearAllPoints(); f.empty:SetPoint("TOPLEFT", f, "TOPLEFT", 24, top - 36)
+    f.listBar:ClearAllPoints(); f.listBar:SetPoint("TOPLEFT", f, "TOPLEFT", 20 + UI.CAL_LIST_W + ns.Widgets.SCROLL_GAP, top - 32)
+    f.listBar.setHeight(fit * ns.PAGE_ROW)
     for k, row in ipairs(f.list) do
-        local item = items[k]
+        local item = k <= fit and items[f.listOffset + k] or nil
+        row:ClearAllPoints(); row:SetPoint("TOPLEFT", f, "TOPLEFT", 20, top - 32 - (k - 1) * ns.PAGE_ROW)
         if item then
             row.item = item
             UI.setDest(row.dest, item.view)
             row.name:SetText(UI.destText(item.view))
             row.time:SetText(UI.slotText(item.slot))
             row.seats:SetText(UI.roleText(item.view))
-            -- GF-UI-A §2.8 item 3: the state badge; mine / signed as the same frame as above.
+            -- GF-UI-A §2.8 item 3: the state badge; mine / signed / finalized as on the day's icons.
             row.badge.set(UI.why(item.view), UI.WHY_OPTS)
-            local c = item.mine and UI.CAL_MINE or item.signed and UI.CAL_SIGNED or nil
-            if c then
-                if row.glow.SetVertexColor then row.glow:SetVertexColor(c[1], c[2], c[3]) end
-                row.glow:Show()
-            else row.glow:Hide() end
-            row.kind = item.mine and "mine" or item.signed and "signed" or "other"
+            UI.calendarMark(row.mark, { mine = item.mine, signed = item.signed, final = item.final })
+            row.kind = row.mark.kind
             row:Show()
         else row:Hide(); row.item = nil end
     end
+    f.listBar.sync(f.listOffset, #items, fit)
+    if #items > fit then f.listBar:Show() else f.listBar:Hide() end
     f.empty:SetText(#items == 0 and "沒有冒險單" or "")
 end
+
+UI.CAL_LIST_W = 7 * (UI.CAL_CELL_W + 4) - 4 - ns.Widgets.SCROLL_W - ns.Widgets.SCROLL_GAP
 
 function UI.openCalendar()
     if not calendar then
         local W, H = UI.CAL_CELL_W, UI.CAL_CELL_H
-        local f = ns.popupWindow(UI.CALENDAR_NAME, 40 + 7 * (W + 4), 640)
+        local winW = 40 + 7 * (W + 4)
+        local f = ns.popupWindow(UI.CALENDAR_NAME, winW, UI.CAL_WIN_H)
         f:SetPoint("CENTER", 0, 40)
         f:EnableMouse(true)
         ns.exclusivePopup(f)
         if f.TitleText then f.TitleText:SetText("業務排程") end
-        f.prev = iconButton(f, ns.ROW_ICON, "prev", "上一週", function() f.page = math.max(0, f.page - 1); UI.drawCalendar() end)
+        f.prev = iconButton(f, ns.ROW_ICON, "prev", "上一週", function() f.page = math.max(0, (f.page or 0) - 1); UI.drawCalendar() end)
         ns.GameIcons.set(f.prev.tex, "prev")
         f.prev:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -36)
         f.weekLabel = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
         f.weekLabel:SetPoint("TOPLEFT", f, "TOPLEFT", 60, -42)
-        f.next = iconButton(f, ns.ROW_ICON, "next", "下一週", function() f.page = math.min(UI.CAL_PAGES - 1, f.page + 1); UI.drawCalendar() end)
+        f.next = iconButton(f, ns.ROW_ICON, "next", "下一週", function()
+            local pages = UI.calendarView() == "month" and UI.monthPages() or UI.CAL_PAGES
+            f.page = math.min(pages - 1, (f.page or 0) + 1); UI.drawCalendar()
+        end)
         ns.GameIcons.set(f.next.tex, "next")
         f.next:SetPoint("TOPLEFT", f, "TOPLEFT", 200, -36)
-        -- Legend: the three frames (2-3 character names).
+        -- The legend: three different marks, as on the icons below; the mouse says what each is.
         local lx = 260
         f.legend = {}
-        for _, it in ipairs({ { "我開的", { mine = true } }, { "我報名", { signed = true } }, { "已定案", { final = true } } }) do
-            local ic = CreateFrame("Frame", nil, f)
-            ic:SetSize(24, 24)
-            ic:SetPoint("TOPLEFT", f, "TOPLEFT", lx, -38)
-            ic.tex = ic:CreateTexture(nil, "ARTWORK"); ic.tex:SetAllPoints()
-            ns.GameIcons.set(ic.tex, "key")
-            ic.glow = ic:CreateTexture(nil, "OVERLAY"); ic.glow:SetSize(42, 42); ic.glow:SetPoint("CENTER", ic, "CENTER", 0, 0)
-            if not Icons.set(ic.glow, ns.OrdersUI.GLOW) then ic.glow:SetColorTexture(1, 0.85, 0.4, 0.35) end
-            if ic.glow.SetBlendMode then ic.glow:SetBlendMode("ADD") end
-            ic.shine = ic:CreateTexture(nil, "OVERLAY"); ic.shine:SetAllPoints()
-            if Icons.set(ic.shine, ns.OrdersUI.SHINE) and ic.shine.SetBlendMode then ic.shine:SetBlendMode("ADD") end
-            local c = it[2].mine and UI.CAL_MINE or it[2].signed and UI.CAL_SIGNED or nil
-            if c then if ic.glow.SetVertexColor then ic.glow:SetVertexColor(c[1], c[2], c[3]) end else ic.glow:Hide() end
-            if not it[2].final then ic.shine:Hide() end
-            local l = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
-            l:SetPoint("LEFT", ic, "RIGHT", 10, 0)
-            l:SetText(it[1])
-            f.legend[#f.legend + 1] = { icon = ic, label = l }
-            lx = lx + 24 + 10 + ns.labelWidth(it[1]) + 28
+        for _, key in ipairs(UI.CAL_LEGEND) do
+            local m = UI.CAL_MARK[key]
+            local e = CreateFrame("Frame", nil, f)
+            local textW = ns.labelWidth(m.text)
+            e:SetSize(24 + 8 + textW, 24)
+            e:SetPoint("TOPLEFT", f, "TOPLEFT", lx, -38)
+            e.icon = e:CreateTexture(nil, "ARTWORK"); e.icon:SetSize(24, 24); e.icon:SetPoint("LEFT", e, "LEFT", 0, 0)
+            ns.GameIcons.set(e.icon, m.art)
+            e.label = ns.freeText(e:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
+            e.label:SetPoint("LEFT", e.icon, "RIGHT", 8, 0)
+            e.label:SetText(m.text)
+            local c = m.color
+            if c then e.label:SetTextColor(c[1], c[2], c[3]) end
+            e.key, e.gfTip = key, m.tip
+            e:EnableMouse(true)
+            e:SetScript("OnEnter", legendEnter)
+            e:SetScript("OnLeave", legendLeave)
+            f.legend[#f.legend + 1] = e
+            lx = lx + 24 + 8 + textW + 28
         end
+        -- 週｜月 (the same selected look as 進行中｜已結束).
+        f.views = ns.Widgets.subTabs(f, { { key = "week", text = "週", w = 72 }, { key = "month", text = "月", w = 72 } },
+            winW - 20 - ns.Widgets.CLOSE_SIZE - 16 - 2 * 72 - 8, -36, function(key) UI.setCalendarView(key) end)
         f.cells = {}
         for i = 1, 7 do
-            local cell = CreateFrame("Button", nil, f)
-            cell:SetSize(W, H)
-            cell:SetPoint("TOPLEFT", f, "TOPLEFT", 20 + (i - 1) * (W + 4), -76)
-            cell.bg = cell:CreateTexture(nil, "BACKGROUND"); cell.bg:SetAllPoints()
-            cell.head = ns.freeText(cell:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
+            local cell = makeCell(f, W, H)
+            cell:SetPoint("TOPLEFT", f, "TOPLEFT", 20 + (i - 1) * (W + 4), UI.CAL_TOP)
             cell.head:SetPoint("TOPLEFT", cell, "TOPLEFT", 10, -10)
-            cell.more = ns.freeText(cell:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
             cell.more:SetPoint("BOTTOMRIGHT", cell, "BOTTOMRIGHT", -8, 8)
-            cell.icons = {}
-            cell.frame = ns.Widgets.goldFrame(cell, 2)
-            cell.pick = ns.Widgets.rowSelect(cell)
-            if cell.SetHighlightTexture then cell:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD") end
-            ns.Theme.guardHover(cell) -- GF-UI-D2: a day outside the 14 days stays dark
-            cell:SetScript("OnClick", function(self)
-                if not self.enabled then return end
-                f.day = self.dayOff
-                UI.drawCalendar()
-            end)
             f.cells[i] = cell
         end
         f.dayLabel = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
-        f.dayLabel:SetPoint("TOPLEFT", f, "TOPLEFT", 24, -76 - H - 16)
         f.list = {}
-        for k = 1, 8 do
+        local rows = math.max(UI.calendarListRows("week"), UI.calendarListRows("month"))
+        for k = 1, rows do
             local row = CreateFrame("Frame", nil, f)
-            row:SetSize(7 * (W + 4) - 4, ns.PAGE_ROW)
-            row:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -76 - H - 48 - (k - 1) * ns.PAGE_ROW)
+            row:SetSize(UI.CAL_LIST_W, ns.PAGE_ROW)
             row.dest = row:CreateTexture(nil, "ARTWORK"); row.dest:SetSize(ns.ROW_ICON, ns.ROW_ICON)
             row.dest:SetPoint("LEFT", row, "LEFT", 4, 0)
+            -- The marks over the destination (the legend's), on their own frame.
+            row.mark = CreateFrame("Frame", nil, row)
+            row.mark:SetSize(ns.ROW_ICON, ns.ROW_ICON); row.mark:SetPoint("LEFT", row, "LEFT", 4, 0)
+            addMarks(row.mark, ns.ROW_ICON)
+            row.glow = row.mark.glow
             local function text(x, w)
                 local fs = row:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
                 fs:SetPoint("LEFT", row, "LEFT", x, 0); fs:SetWidth(w); fs:SetJustifyH("LEFT"); fs:SetWordWrap(false)
@@ -4036,21 +4251,20 @@ function UI.openCalendar()
             row.seats = text(560, 190)
             row.badge = ns.Widgets.statusBadge(row)
             row.badge:SetPoint("LEFT", row, "LEFT", 760, 0)
-            row.glow = row:CreateTexture(nil, "OVERLAY")
-            row.glow:SetSize(42, 42); row.glow:SetPoint("CENTER", row.dest, "CENTER", 0, 0)
-            if not Icons.set(row.glow, ns.OrdersUI.GLOW) then row.glow:SetColorTexture(1, 0.85, 0.4, 0.35) end
-            if row.glow.SetBlendMode then row.glow:SetBlendMode("ADD") end
-            row.glow:Hide()
             row:Hide()
             f.list[k] = row
         end
+        f.listBar = ns.Widgets.scrollBar(f, 4 * ns.PAGE_ROW, function(o) f.listOffset = o; UI.drawCalendar() end)
+        f.listBar:Hide()
+        if f.EnableMouseWheel then f:EnableMouseWheel(true) end
+        f:SetScript("OnMouseWheel", function(_, delta) f.listBar.scrollBy(-(tonumber(delta) or 0)) end)
         f.empty = f:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT)
-        f.empty:SetPoint("TOPLEFT", f, "TOPLEFT", 24, -76 - H - 52)
         f:Hide()
         calendar = f
     end
-    calendar.page, calendar.day = 0, 0
-    UI.fitScreen(calendar, 40 + 7 * (UI.CAL_CELL_W + 4), 640) -- GF-014-03
+    calendar.page, calendar.day, calendar.listOffset = 0, 0, 0
+    calendar.views.select(UI.calendarView())
+    UI.fitScreen(calendar, 40 + 7 * (UI.CAL_CELL_W + 4), UI.CAL_WIN_H) -- GF-014-03
     calendar:Show()
     UI.drawCalendar()
     return calendar
@@ -4058,51 +4272,181 @@ end
 function UI.calendar() return calendar end
 
 ---------------------------------------------------------------------------
--- GF-002-I (R-17.13): the 規則 card: only icons, arrows, 2-4 character nouns
--- and numbers. The numbers come from Adventure (autoNeeded, the 24 hours).
+-- GF-UI-Q (owner 0.16.19: 「冒險說明的規則很亂，而且只有圖看不懂，另外也過時了」):
+-- the 規則 card is plain sentences under short headings (an icon by each heading
+-- only helps). Every rule is what Adventure.lua does now; every number comes from
+-- it (FUTURE_DAYS, AUTO_BEFORE, AUTO_NO_LENGTH, SLACK, UNFINISHED_AFTER,
+-- OFFLINE_CLOSE, FINAL_DUE, AUTO_SHARE, autoNeeded). One line each (no wrapping),
+-- so the card scrolls by lines (Widgets.scrollBar and the mouse wheel).
 ---------------------------------------------------------------------------
 
 UI.RULES_NAME = "GreenFangToolkit_AdventureRules"
 UI.RULE_SIZES = { 3, 4, 5, 10, 20, 40 }
+UI.RULES_W, UI.RULES_VIEW = 720, 456
+UI.RULES_HEAD_H, UI.RULES_LINE_H = 38, 28
+UI.RULES_TEXT_W = UI.RULES_W - 2 * ns.Widgets.CARD_PAD - ns.Widgets.SCROLL_W - ns.Widgets.SCROLL_GAP - 12
+UI.RULES_COL_X, UI.RULES_COL_W = 140, 64
 local rules
 
-function UI.rulesRows()
+local function stateWord(st)
+    local c = ns.Widgets.color(st) or { 1, 1, 1 }
+    return string.format("|cff%02x%02x%02x%s|r", math.floor(c[1] * 255 + 0.5), math.floor(c[2] * 255 + 0.5),
+        math.floor(c[3] * 255 + 0.5), A().STATE_NAME[st] or st)
+end
+
+-- The card's lines: { head = text, icon = GameIcons key } | { text = text } | { cols = { label, n, n ... } }.
+function UI.rulesText()
     local Adv = A()
-    local need5 = Adv.autoNeeded({ size = 5 })
-    local arrow = { arrow = true }
-    local hours = math.floor(Adv.UNFINISHED_AFTER / 3600) .. "h"
-    local sizes = { { icon = "group" } }
+    local S = stateWord
+    local arrow = " " .. ns.GameIcons.markup("arrow", 18) .. " " -- the game font has no →; the old card's arrow
+    local min = function(sec) return math.floor(sec / 60 + 0.5) .. " 分鐘" end
+    local hrs = function(sec) return math.floor(sec / 3600 + 0.5) .. " 小時" end
+    local share = math.floor(Adv.AUTO_SHARE * 100 + 0.5) .. "%"
+    local floor = Adv.autoNeeded({ size = 1 })
+    local out = {}
+    local function head(icon, text) out[#out + 1] = { head = text, icon = icon } end
+    local function line(text) out[#out + 1] = { text = text } end
+    head("adventure", "一張冒險單怎麼走")
+    line(S("open") .. arrow .. S("final") .. arrow .. S("formed") .. arrow .. S("done") .. "，照順序往下走。")
+    line("沒走完的單，會停在" .. S("ended") .. "、" .. S("unfinished") .. "或" .. S("cancel") .. "。")
+    line("結束的單會移到「已結束」，留一天後清掉。")
+    head("state_final", "什麼時候算已定案")
+    line("只有一個時段：團長錄取第一個人，就自動定案。")
+    line("有好幾個時段：團長按「定案」，選定其中一個。")
+    line("最早的時段前 " .. min(Adv.FINAL_DUE) .. "還沒定案，團長那列會出現提醒。")
+    head("state_formed", "什麼時候算成團")
+    line(S("final") .. "之後，下面任一項成立，就自動" .. S("formed") .. "：")
+    line("一、名額全部錄取滿了。")
+    line("二、在時段內，同一隊裡的已錄取人數夠了（看最後的表）。")
+    line("「時段內」＝定案時段開始前 " .. min(Adv.AUTO_BEFORE) .. "，到時段結束。")
+    line("時段沒寫長度時，從開始算 " .. hrs(Adv.AUTO_NO_LENGTH) .. "。")
+    head("state_done", "什麼時候算成行")
+    line(S("formed") .. "時，團長按「完成」，就" .. S("done") .. "。")
+    line("也會自動成行：在時段內、隊伍人數夠，再加上：")
+    line("地城單是進到目的地地城；任務單是交了單上的任務。")
+    line("團長或任一位已錄取的人看到就算（要裝工具箱）。")
+    line("還在" .. S("final") .. "就自動成行時，也一起算成團。")
+    head("state_ended", "過期、未成行、取消")
+    line(S("open") .. "或" .. S("final") .. "，時段過了還沒成團：" .. S("ended") .. "。")
+    line("看定案的時段；還沒定案就看最後一個時段。")
+    line("時段沒寫長度：開始後 " .. min(Adv.SLACK) .. "算過了。")
+    line("時間選「現在」又沒寫長度：不會過期。")
+    line(S("formed") .. "後，時段結束再過 " .. hrs(Adv.UNFINISHED_AFTER) .. "還沒成行：" .. S("unfinished") .. "。")
+    line("時段開始後，團長離線 " .. min(Adv.OFFLINE_CLOSE) .. "還沒成團：" .. S("cancel") .. "。")
+    line("團長刪除有人報名的單，也算" .. S("cancel") .. "。")
+    head("back", "退回與重開")
+    line("團長按「退回」，單子往回退一步：")
+    line(S("done") .. arrow .. S("formed") .. arrow .. S("final") .. arrow .. S("open") .. "。")
+    line("只有一個時段的單，不能從" .. S("final") .. "退回" .. S("open") .. "。")
+    line("退回後要重新進地城或重新組隊，才會再自動成團、成行。")
+    line(S("ended") .. "、" .. S("unfinished") .. "、" .. S("cancel") .. "的單，團長可以按「重開」。")
+    line("重開：內容照舊、重新選時間；新單開好，舊單就拿掉。")
+    head("group", "隊伍要幾個人")
+    line("同一隊裡的已錄取人數（團長也算），要到單子人數的 " .. share .. "，")
+    line("小數無條件進位，最少 " .. floor .. " 人：")
+    local sizes, needs = { "單子人數" }, { "隊伍至少" }
     for _, n in ipairs(UI.RULE_SIZES) do
-        sizes[#sizes + 1] = { text = tostring(n) }
-        sizes[#sizes + 1] = arrow
-        sizes[#sizes + 1] = { text = tostring(Adv.autoNeeded({ size = n })), color = "gold" }
-        sizes[#sizes + 1] = { gap = 10 }
+        sizes[#sizes + 1] = tostring(n)
+        needs[#needs + 1] = tostring(Adv.autoNeeded({ size = n }))
     end
-    return {
-        { { icon = "state_open", text = "招募中" }, arrow, { icon = "final", text = "定案" }, arrow, { icon = "state_final", text = "已定案", color = "gold" } },
-        { { icon = "state_final", text = "已定案" }, arrow, { icon = "person", text = "滿員" }, { text = "或", color = "muted" },
-            { icon = "group", text = "隊伍 " .. need5 .. "/5" }, { icon = "today", text = "時段內" }, arrow,
-            { icon = "state_formed", text = "成團", color = "formed" } },
-        { { icon = "state_formed", text = "成團" }, arrow, { icon = "today", text = "時段內" }, { icon = "group", text = "隊伍 " .. need5 .. "/5" },
-            { icon = "key", text = "目的地" }, { text = "或", color = "muted" }, { icon = "quest", text = "交任務" }, arrow,
-            { icon = "state_done", text = "成行", color = "good" } },
-        { { icon = "state_open", text = "招募中" }, { icon = "state_final", text = "已定案" }, arrow, { icon = "today", text = "時段過" }, arrow,
-            { icon = "state_ended", text = "過期", color = "disabled" } },
-        { { icon = "state_formed", text = "成團" }, arrow, { icon = "today", text = hours }, arrow,
-            { icon = "state_unfinished", text = "未成行", color = "warn" } },
-        { { icon = "back", text = "退回" }, { icon = "state_done" }, arrow, { icon = "state_formed" }, arrow, { icon = "state_final" }, arrow,
-            { icon = "state_open" }, { gap = 24 }, { icon = "reopen", text = "重開" } },
-        sizes,
-    }
+    out[#out + 1] = { cols = sizes }
+    out[#out + 1] = { cols = needs, gold = true }
+    return out
+end
+function UI.ruleHeight(e) return e.head and UI.RULES_HEAD_H or UI.RULES_LINE_H end
+
+-- The first line the card can start from and still end on the last line.
+function UI.rulesMaxOffset(list)
+    local h, k = 0, #list
+    while k >= 1 and h + UI.ruleHeight(list[k]) <= UI.RULES_VIEW do
+        h = h + UI.ruleHeight(list[k]); k = k - 1
+    end
+    return k
+end
+
+function UI.drawRules()
+    local f = rules
+    if not f then return end
+    local list = f.list or UI.rulesText()
+    f.list = list
+    local maxOff = UI.rulesMaxOffset(list)
+    f.offset = math.max(0, math.min(f.offset or 0, maxOff))
+    local used = { ruleIcons = 0, ruleHeads = 0, ruleTexts = 0, ruleCols = 0 }
+    local FONT = { ruleHeads = ns.FIELD_FONT, ruleTexts = ns.LABEL_FONT, ruleCols = ns.LABEL_FONT }
+    local function pool(kind)
+        used[kind] = used[kind] + 1
+        local p, n = f[kind], used[kind]
+        local o = p[n]
+        if not o then
+            if kind == "ruleIcons" then o = f:CreateTexture(nil, "ARTWORK"); o:SetSize(24, 24)
+            else
+                o = ns.freeText(f:CreateFontString(nil, "ARTWORK", FONT[kind]))
+                o:SetJustifyH("LEFT"); o:SetWordWrap(false)
+            end
+            p[n] = o
+        end
+        return o
+    end
+    local y = -52
+    local x0 = ns.Widgets.CARD_PAD
+    f.shown = {}
+    for k = f.offset + 1, #list do
+        local e = list[k]
+        local h = UI.ruleHeight(e)
+        if -y - 52 + h > UI.RULES_VIEW then break end
+        if e.head then
+            local ic = pool("ruleIcons")
+            ns.GameIcons.set(ic, e.icon)
+            ic:ClearAllPoints(); ic:SetPoint("TOPLEFT", f, "TOPLEFT", x0, y - 8); ic:Show()
+            local fs = pool("ruleHeads")
+            fs:SetWidth(UI.RULES_TEXT_W - 32)
+            fs:SetText(e.head); fs:SetTextColor(1, 0.82, 0)
+            fs:ClearAllPoints(); fs:SetPoint("TOPLEFT", f, "TOPLEFT", x0 + 32, y - 12); fs:Show()
+            f.shown[#f.shown + 1] = fs
+        elseif e.cols then
+            for i, s in ipairs(e.cols) do
+                local fs = pool("ruleCols")
+                local cx = i == 1 and (x0 + 16) or (x0 + UI.RULES_COL_X + (i - 2) * UI.RULES_COL_W)
+                fs:SetWidth(i == 1 and (UI.RULES_COL_X - 20) or UI.RULES_COL_W)
+                fs:SetJustifyH(i == 1 and "LEFT" or "CENTER")
+                fs:SetText(s)
+                if e.gold and i > 1 then fs:SetTextColor(1, 0.82, 0) else fs:SetTextColor(1, 1, 1) end
+                fs:ClearAllPoints(); fs:SetPoint("TOPLEFT", f, "TOPLEFT", cx, y - 6); fs:Show()
+            end
+        else
+            local fs = pool("ruleTexts")
+            fs:SetWidth(UI.RULES_TEXT_W - 16)
+            fs:SetText(e.text); fs:SetTextColor(1, 1, 1)
+            fs:ClearAllPoints(); fs:SetPoint("TOPLEFT", f, "TOPLEFT", x0 + 16, y - 6); fs:Show()
+            f.shown[#f.shown + 1] = fs
+        end
+        y = y - h
+    end
+    for kind, n in pairs(used) do
+        for k = n + 1, #f[kind] do f[kind][k]:Hide() end
+    end
+    f.bar.sync(f.offset, #list, #list - maxOff)
+    if maxOff > 0 then f.bar:Show() else f.bar:Hide() end
+    return f
 end
 
 function UI.openRules(owner)
     if ns.Framework.closeMenu then ns.Framework.closeMenu() end
-    if not rules then rules = ns.Widgets.flowCard(UI.RULES_NAME, "規則"); ns.Widgets.closeButton(rules) end
-    ns.Widgets.drawFlow(rules, UI.rulesRows())
+    if not rules then
+        rules = ns.Widgets.flowCard(UI.RULES_NAME, "規則")
+        ns.Widgets.closeButton(rules)
+        rules.ruleIcons, rules.ruleHeads, rules.ruleTexts, rules.ruleCols = {}, {}, {}, {}
+        rules:SetSize(UI.RULES_W, 52 + UI.RULES_VIEW + ns.Widgets.CARD_PAD)
+        rules.bar = ns.Widgets.scrollBar(rules, UI.RULES_VIEW, function(o) rules.offset = o; UI.drawRules() end)
+        rules.bar:SetPoint("TOPRIGHT", rules, "TOPRIGHT", -ns.Widgets.CARD_PAD + 4, -52)
+        if rules.EnableMouseWheel then rules:EnableMouseWheel(true) end
+        rules:SetScript("OnMouseWheel", function(_, delta) rules.bar.scrollBy(-(tonumber(delta) or 0) * 2) end)
+    end
+    rules.list, rules.offset = UI.rulesText(), 0 -- the numbers are read again each time it opens
+    UI.drawRules()
     rules:ClearAllPoints()
     if owner then rules:SetPoint("TOPRIGHT", owner, "BOTTOMRIGHT", 0, -4) else rules:SetPoint("CENTER", UIParent, "CENTER", 0, 40) end
-    UI.fitScreen(rules) -- GF-014-03: clamped (a small card)
+    UI.fitScreen(rules, UI.RULES_W, 52 + UI.RULES_VIEW + ns.Widgets.CARD_PAD) -- GF-014-03
     rules:Show()
     return rules
 end
