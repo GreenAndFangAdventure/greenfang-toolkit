@@ -772,7 +772,7 @@ end
 ---------------------------------------------------------------------------
 
 Req.NOTIFY = "bank_request"
-Req.NOTIFY_TEXT = { new = "有新的黑箱申領等你核准：%s（%s）", give = "有黑箱申領等你交付：%s 給 %s", mine = "你的黑箱申領%s：%s" }
+Req.NOTIFY_TEXT = { new = "有新的臨時黑箱申領等你核准：%s（%s）", give = "有臨時黑箱申領等你交付：%s 給 %s", mine = "你的臨時黑箱申領%s：%s" }
 Req.NOTIFY_SAID = { approved = "已核准", rejected = "被拒絕", short = "數量不足，請重新申領", delivered = "保管人已交付，收到後請按已收到" }
 local notifyPending = false
 

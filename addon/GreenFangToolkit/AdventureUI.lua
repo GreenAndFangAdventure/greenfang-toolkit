@@ -1837,7 +1837,6 @@ local function build(p)
     UI.nextInvite:Hide() -- only while names wait for a click (R-7.2 fallback)
     UI.emptyLine = p:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT)
     UI.emptyLine:SetPoint("TOP", p, "TOP", 0, -200)
-    ns.Diag.smallButton(p, "BOTTOMRIGHT", -24, 10)
     -- GF-014-03: the page goes (another page, the main window closed): its small
     -- windows go with it; a form keeps its draft.
     p:HookScript("OnHide", function() UI.closeFloating() end)
@@ -2518,14 +2517,14 @@ end
 -- GF-UI-O (owner 2026-11-28: 「冒險單的功能太複雜了，按鈕有點多，先把快速設定按鈕，
 -- 整合與內建蒐尋器相同」): the form reads like the game's 建立隊伍 screen. First look,
 -- top to bottom: 活動 (the chosen dungeon / quests, two same-size buttons 地城 任務),
--- 職責 (the role icons with their numbers; quests: one 人數), 時段, 說明 (the
+-- 職責 (the role icons with their numbers; quests: one 人數), 時段, 備註 (the
 -- ticket's note; saved and shared as before), then 上架到尋求組隊 and 開單.
 -- 更多設定 folds the rest: the ＋ － of 人數, 錄取 and 標籤; folded, one line says
 -- their values (grey while they are the defaults). Every control is made once;
 -- folding only shows / hides and moves them (no new frames, events or timers).
-UI.TICKET_MAIN = { "活動", "職責", "時段", "說明" }
+UI.TICKET_MAIN = { "活動", "職責", "時段", "備註" }
 UI.TICKET_MORE = { "人數", "錄取", "標籤" }
-UI.TICKET_FIELDS = { "活動", "職責", "時段", "說明", "人數", "錄取", "標籤" }
+UI.TICKET_FIELDS = { "活動", "職責", "時段", "備註", "人數", "錄取", "標籤" }
 UI.TICKET_W = 820
 UI.DEST_NAME_W = 320 -- the 活動 field (the name is cut with … past it), then 地城 任務
 UI.MORE_TEXT = { closed = "＋ 更多設定", open = "－ 更多設定" }
@@ -2627,7 +2626,7 @@ local function layoutTicket(f, lines, extra)
     end
     local function at(w, x, yy) w:ClearAllPoints(); w:SetPoint("TOPLEFT", f, "TOPLEFT", x, yy) end
     local y = f.rowY[3] - lines * UI.CHIP_LINE - 10 - (extra or 0)
-    f.rowY[4] = y; label("說明", y); at(f.note, X + 6, y)
+    f.rowY[4] = y; label("備註", y); at(f.note, X + 6, y)
     y = y - STEP
     f.rowY[5] = y; at(f.moreToggle, X, y); at(f.moreSummary, X + f.moreToggle.gfWidth + 12, y - 8)
     local open = f.moreOpen == true
@@ -2796,14 +2795,14 @@ function UI.openTicket(v, mode)
         f.slotListFn = function() return draft and draft.slots end -- GF-UI-G: the slot editor
         f.slotRedraw = function() drawTicket() end
         -- 說明: the ticket's note (draft.note, saved and shared as before).
-        field(f, "說明", FX, y[3] - 8)
+        field(f, "備註", FX, y[3] - 8)
         f.note = ns.Theme.editBox(f); f.note:SetSize(480, 30)
         if f.note.SetFontObject then f.note:SetFontObject(ns.LABEL_FONT) end
         f.note:SetAutoFocus(false)
         if f.note.SetMaxLetters then f.note:SetMaxLetters(A().NOTE_MAX) end
         f.note:SetScript("OnTextChanged", function(self) if draft then draft.note = A().cleanNote(self:GetText()) end end)
         f.note:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-        f.note.fieldNamed = "說明"
+        f.note.fieldNamed = "備註"
         -- 更多設定 and its folded line.
         f.moreToggle = O.textButton(f, UI.MORE_TEXT.closed, function() UI.setTicketMore() end,
             math.max(ns.labelWidth(UI.MORE_TEXT.closed), ns.labelWidth(UI.MORE_TEXT.open)) + 28)

@@ -836,6 +836,8 @@ local function newRow(i)
             local c = m.online and { 0.4, 1, 0.4 } or { 0.8, 0.8, 0.8 }
             GameTooltip:AddLine(ns.shortName(m.name), c[1], c[2], c[3])
         end
+        -- GF-UI-S: what the 選配方 window's tooltip said (the fee icons, the hammer, how to order).
+        for _, line in ipairs(Recipes.orderTipLines(data)) do GameTooltip:AddLine(line[1], line[2], line[3], line[4], true) end
         if self.pattern and self.pattern:IsShown() then
             GameTooltip:AddLine(" ")
             GameTooltip:AddLine("右鍵或圖紙鈕：" .. ns.RecipeLink.LABEL, 1, 0.82, 0)
@@ -859,6 +861,20 @@ function Recipes.rowAction(data)
     if data.mine then return "fee" end
     return nil
 end
+-- GF-UI-S: the lines the 選配方 window's row tooltip had, for a row that can be ordered.
+function Recipes.orderTipLines(data)
+    if Recipes.rowAction(data) ~= "order" then return {} end
+    local O = ns.OrdersUI
+    local fee = Recipes.rowFee(data)
+    local kind = O.feeKind and O.feeKind(fee)
+    local feeLine = kind == "unset" and "工錢：灰色硬幣＝會做的人都還沒填工錢，下單時可以自己填"
+        or kind == "free" and "工錢：禮物＝有工匠寫免費"
+        or ("工錢：最低 " .. O.money(fee))
+    return { { " ", 1, 1, 1 }, { feeLine, 0.85, 0.85, 0.85 },
+        { "名字前的小錘子＝這位工匠目前有開「接單」", 0.85, 0.85, 0.85 },
+        { Recipes.ORDER_HINT, 1, 0.82, 0 } }
+end
+Recipes.ORDER_HINT = "按右邊的「下單」：開始下單"
 function Recipes.pressOrder(row)
     local data = row and row.data
     local action = Recipes.rowAction(data)
@@ -1075,6 +1091,23 @@ function Recipes.show(guid, skill)
     Recipes.refresh()
 end
 
+-- GF-UI-S (owner 2026-11-28): 製作委託's ＋下單 comes here (the 選配方 window is
+-- gone): every member's recipes, the other filters as they were, the cursor in 搜尋.
+function Recipes.forOrder()
+    Recipes.show(nil)
+    if search and search.SetFocus then search:SetFocus() end
+    return panel
+end
+
+-- Enter in 搜尋: the first row that can be ordered opens the order popup (as the
+-- 選配方 window did); nil when none.
+function Recipes.orderFirst()
+    for _, data in ipairs(shownRows) do
+        if Recipes.rowAction(data) == "order" then return Recipes.pressOrder({ data = data }) end
+    end
+    return nil
+end
+
 -- GF-001-D20 layout: one filter line at the top, like the roster's:
 -- 搜尋 [box]  專業 [v]  會做的人 [v]  [ ] 只看在線   N 個配方
 local FILTER_Y = -44
@@ -1105,6 +1138,11 @@ local function build(p)
         Recipes.soon("search", Recipes.SEARCH_DELAY, function() if panel then Recipes.refresh() end end)
     end)
     search:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    search:SetScript("OnEnterPressed", function(self)
+        -- the newest text first (the redraw may still be waiting for SEARCH_DELAY)
+        current.query = str(self:GetText()); Recipes.refresh()
+        self:ClearFocus(); Recipes.orderFirst()
+    end)
     Recipes.searchBox = search
     label(p, "專業", C[2])
     -- GF-001-D22: check boxes (several professions at once), with icons.

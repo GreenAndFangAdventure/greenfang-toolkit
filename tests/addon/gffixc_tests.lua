@@ -163,24 +163,8 @@ return function(T)
     test("GF-FIX-C searches: first key at once, a burst of keys one more redraw at most 0.15 s later", function()
         local ns = login(4)
         local UI = ns.OrdersUI
-        eq(UI.PICKER_DELAY <= 0.15, true, "picker delay")
+        -- GF-UI-S: no recipe picker any more (＋下單 goes to 工匠配方); the recipe page's search below.
         eq(ns.Recipes.SEARCH_DELAY <= 0.15, true, "recipe page delay")
-        local f = UI.openPicker()
-        local drawn = {}
-        local orig = UI.drawPicker
-        UI.drawPicker = function(...) drawn[#drawn + 1] = f.query; return orig(...) end
-        local box = f.search
-        for _, text in ipairs({ "製", "製皮", "製皮甲" }) do
-            box:SetText(text)
-            box._scripts.OnTextChanged(box, true)
-            wow.advance(0.03)
-        end
-        eq(table.concat(drawn, "|"), "製", "the first key at once, the next ones wait")
-        wow.advance(0.07) -- just past 0.15 s after the first key
-        eq(table.concat(drawn, "|"), "製|製皮甲", "one more redraw, with the latest text")
-        wow.advance(1)
-        eq(#drawn, 2, "nothing more without keys")
-        UI.drawPicker = orig
         -- The recipe page.
         ns.Framework.open("recipes")
         local refreshes, restore2 = count(ns.Recipes, "refresh")

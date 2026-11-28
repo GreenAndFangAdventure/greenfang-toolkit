@@ -349,7 +349,7 @@ return function(T)
         ns.Supply.db().auto = false
         UI.setTab("guild")
         eq(UI.pageState(), "empty", "nothing to match")
-        eq(UI.statePanel.text._text, "目前沒有任何徵求、供應或黑箱物品", "the empty words")
+        eq(UI.statePanel.text._text, "目前沒有任何徵求、供應或臨時黑箱物品", "the empty words (GF-UI-S: 臨時黑箱)")
         UI.setTab("mine")
         eq(UI.statePanel.text._text, "還沒有刊登", "我的刊登 empty")
         -- Stale: only expired snapshots.

@@ -130,8 +130,7 @@ return function(T)
         eq(badTexts(_G[O.PASTE_NAME]), "", "paste window")
         O.openServices()
         eq(badTexts(_G[O.SERVICES_NAME]), "", "services window")
-        O.openPicker()
-        eq(badTexts(_G[O.PICKER_NAME]), "", "recipe picker")
+        -- GF-UI-S: no recipe picker (＋下單 goes to 工匠配方, checked with the pages).
         -- The dungeon grid: every short name in full under its icon, normal font.
         A.openTicket()
         local grid = A.pickDestination(_G[A.TICKET_NAME].dest)
@@ -341,22 +340,20 @@ return function(T)
         wow.click(onlyMine.order)
         ok(_G[O.FEE_NAME]:IsShown(), "我的工錢: the fee window")
         ok(not _G[O.POPUP_NAME]:IsShown(), "one window at a time")
-        -- ＋下單: choose a recipe (search), then the order window.
+        -- ＋下單 (GF-UI-S): 工匠配方, search, then a row's 下單 opens the order window.
+        _G[O.FEE_NAME]:Hide()
         ns.Framework.open("orders")
         ok(plain(O.orderButton._text):find("＋下單", 1, true), "＋下單 on top of the orders page")
         wow.click(O.orderButton)
-        local picker = _G[O.PICKER_NAME]
-        ok(picker:IsShown(), "recipe picker open")
-        local listed = {}
-        for _, r in ipairs(picker.list) do listed[#listed + 1] = r.id end
-        table.sort(listed)
-        eq(table.concat(listed, ","), "2152,2153,2160", "only recipes someone else can make")
-        picker.search:SetText(ns.Recipes.name(2160))
-        picker.search._scripts.OnTextChanged(picker.search)
-        eq(#picker.list, 1, "search")
-        eq(picker.list[1].id, 2160, "the one found")
-        wow.click(picker.rows[1])
-        ok(_G[O.POPUP_NAME]:IsShown() and not picker:IsShown(), "the order window replaces the picker")
+        eq(ns.Framework.current(), "recipes", "工匠配方 open")
+        local search = ns.Recipes.searchBox
+        search:SetText(ns.Recipes.name(2160))
+        search._scripts.OnTextChanged(search)
+        eq(#ns.Recipes.shownRows(), 1, "search")
+        eq(ns.Recipes.shownRows()[1].id, 2160, "the one found")
+        local found = rowOf(ns, 2160)
+        wow.click(found.order)
+        ok(_G[O.POPUP_NAME]:IsShown(), "the order window")
         eq(O.draft().recipe, 2160, "for the picked recipe")
         -- The right-click menu is still there.
         ok(#O.recipeMenuItems({ id = 2153, skill = 165, crafters = { { guid = "Player-" .. B, name = "測試乙" } } }) > 0, "right-click menu kept")

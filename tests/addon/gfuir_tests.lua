@@ -135,11 +135,10 @@ return function(T)
         for _, id in ipairs({ "character", "roster", "orders", "recipes", "supply", "bank", "adventure", "sleepingbag" }) do
             ns.Framework.open(id)
         end
-        ns.OrdersUI.openPicker()
-        ns.AdventureUI.openCalendar()
+        ns.AdventureUI.openCalendar() -- GF-UI-S: no 選配方 window any more
         ns.Diag.open()
         eq(H.made.overlays, 0, "no layer"); eq(H.made.boxes, 0, "no frame"); eq(H.made.tags, 0, "no number")
-        ok(H.made.buttons >= 4, "the buttons: main window, 選配方, 業務排程, 同步與診斷 (" .. H.made.buttons .. ")")
+        ok(H.made.buttons >= 3, "the buttons: main window, 業務排程, 同步與診斷 (" .. H.made.buttons .. ")")
         ok(H.mainButton(), "main window button")
         local src = readAll(ADDON_DIR .. "/Help.lua") .. readAll(ADDON_DIR .. "/HelpText.lua")
         ok(not src:find("OnUpdate\"", 1, true) and not src:find("RegisterEvent", 1, true), "no OnUpdate, no event")
@@ -211,14 +210,10 @@ return function(T)
         ns.Help.stop()
     end)
 
-    test("GF-UI-R pop-ups: 下單, 選配方, 開單, 業務排程, 同步與診斷, 業務通知 have their own button and help", function()
+    test("GF-UI-R pop-ups: 下單, 開單, 業務排程, 同步與診斷, 業務通知 have their own button and help", function()
         local ns = login()
         ns.Framework.open("orders")
-        local U = ns.OrdersUI
-        local picker = U.openPicker()
-        ok(picker.gfHelpButton, "選配方 button")
-        check(ns, picker, 4, "picker")
-        picker:Hide()
+        local U = ns.OrdersUI -- GF-UI-S: the 選配方 window is gone (＋下單 goes to 工匠配方)
         ns.Prices.storeReagents(2738, { output = 2851, yield = 1, list = { { id = 2840, n = 3 } } })
         U.openOrder({ recipe = 2738, skill = 164, crafters = {} })
         local form = _G[U.POPUP_NAME]
@@ -246,7 +241,7 @@ return function(T)
         ok(rh.r <= rs.l and not overlaps(rh, rs) and inside(rh, rl), "left of 設定, inside the list")
         check(ns, list, 2, "notify")
         -- One look on every window: the same button size.
-        eq(picker.gfHelpButton._w, ns.Help.mainButton()._w, "same width"); eq(d.gfHelpButton._h, ns.Help.mainButton()._h, "same height")
+        eq(form.gfHelpButton._w, ns.Help.mainButton()._w, "same width"); eq(d.gfHelpButton._h, ns.Help.mainButton()._h, "same height")
     end)
 
     test("GF-UI-R ESC, another page, closing the window, a second press end it; the window stays for ESC", function()
@@ -334,7 +329,7 @@ return function(T)
             end
         end
         ok(n >= 100, "parts registered: " .. n)
-        for _, k in ipairs({ "frame", "character", "roster", "orders", "recipes", "orderform", "picker", "supply", "bank",
+        for _, k in ipairs({ "frame", "character", "roster", "orders", "recipes", "orderform", "supply", "bank",
             "adventure", "ticket", "calendar", "sleepingbag", "notify", "settings" }) do
             ok(H.pages[k] and #H.pages[k] > 0, "page " .. k .. " registered")
         end
