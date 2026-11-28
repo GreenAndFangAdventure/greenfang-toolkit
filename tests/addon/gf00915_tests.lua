@@ -372,7 +372,7 @@ return function(T)
             if o.where and o.itemID == P1 and o.IsShown and o:IsShown() then shownRow = o end
         end
         ok(shownRow, "the row is drawn")
-        eq(shownRow.where._text, row.where, "the row shows where")
+        eq(shownRow.where._text, row.mineText .. "｜" .. row.where, "the row shows where (GF-009-16: after 「我可能多 N」)")
         ok(shownRow.where:IsShown(), "second line shown")
         ok(shownRow.name._points[1][5] > 0 and shownRow.where._points[1][5] < 0, "name up, where under it")
         -- Need rows: a second line only when something is held (one of each page is needed, so here none).

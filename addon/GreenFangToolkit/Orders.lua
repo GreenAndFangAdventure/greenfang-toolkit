@@ -1151,7 +1151,11 @@ function Orders.onCustom(kind, fields, _, channel)
         if not recipe then return "malformed" end
         answering[recipe] = nil -- someone answered
         local r = ns.Prices and ns.Prices.decodeReagents(fields[2])
-        if r and asked[recipe] and not ns.Prices.cachedReagents(recipe) then ns.Prices.storeReagents(recipe, r, "guild") end
+        if r and asked[recipe] and not ns.Prices.cachedReagents(recipe) then
+            ns.Prices.storeReagents(recipe, r, "guild")
+            -- GF-006-D: an open order window waiting for this list fills its materials now.
+            if ns.OrdersUI and ns.OrdersUI.reagentsArrived then ns.OrdersUI.reagentsArrived(recipe) end
+        end
         return "ok"
     end
     return "unknown-type"

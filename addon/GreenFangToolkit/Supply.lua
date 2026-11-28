@@ -952,6 +952,28 @@ function Supply.view(kind, entries)
                 list[#list + 1] = e
             end
         end
+    elseif kind == "board" then
+        -- GF-009-16: 調貨看板 shows everything: the others' needs / offers /
+        -- 臨時黑箱 (others, by needs / offers / stock) and my own (mineNeed,
+        -- mineOffer, stockOwn; never in others, never counted as online).
+        for _, e in ipairs(all) do
+            local it = itemFor(e.itemID)
+            if e.own then
+                if e.direction == "stock" then it.stockOwn = e
+                elseif e.direction == "need" then it.mineNeed = e
+                else it.mineOffer = e end
+            else
+                if e.direction == "stock" then
+                    it.stock = e
+                else
+                    local list = e.direction == "need" and it.needs or it.offers
+                    list[#list + 1] = e
+                end
+                it.others[#it.others + 1] = e
+            end
+            it.rule = it.rule or e.rule
+        end
+        for _, it in ipairs(order) do it.mine = it.mineNeed or it.mineOffer end
     else
         for _, e in ipairs(all) do
             if not e.own then

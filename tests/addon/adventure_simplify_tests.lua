@@ -473,18 +473,10 @@ return function(T)
         wow.click(U.rulesButton)
         local f = U.rules()
         ok(f:IsShown(), "open")
-        local arrows, icons = 0, 0
-        for _, row in ipairs(U.rulesRows()) do
-            for _, tok in ipairs(row) do
-                if tok.arrow then arrows = arrows + 1 end
-                if tok.icon then icons = icons + 1 end
-                if tok.text then
-                    local s = tok.text
-                    ok(s:match("^[%d/h ]+$") or ns_chars(s:gsub("[%d/ ]", "")) <= 4, "a short noun or a number: " .. s)
-                end
-            end
-        end
-        ok(arrows >= 10 and icons >= 15, "mostly icons and arrows")
+        -- GF-UI-Q (owner 0.16.19): plain sentences under headings now (gfuiq_tests checks the words).
+        local heads = 0
+        for _, e in ipairs(U.rulesText()) do if e.head then heads = heads + 1 end end
+        ok(heads >= 6, "headings: " .. heads)
         local sizes = {}
         for _, n in ipairs(U.RULE_SIZES) do sizes[#sizes + 1] = n .. ">" .. ns.Adventure.autoNeeded({ size = n }) end
         eq(table.concat(sizes, " "), "3>2 4>3 5>3 10>6 20>12 40>24", "the party numbers come from autoNeeded")
@@ -500,7 +492,7 @@ return function(T)
                 end
             end
         end
-        ok(#parts > 30, "parts measured: " .. #parts)
+        ok(#parts > 20, "parts measured: " .. #parts)
         for i = 1, #parts do
             local a = parts[i]
             ok(a.l >= 0 and a.t >= 0 and a.r <= f._w + 1 and a.b <= f._h + 1, "inside: " .. a.n)

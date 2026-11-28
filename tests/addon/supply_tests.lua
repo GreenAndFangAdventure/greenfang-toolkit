@@ -620,11 +620,13 @@ return function(T)
         ns.Supply.scanNow()
         ns.Framework.open("supply")
         local UI = ns.SupplyUI
-        eq(UI.state.tab, "need", "我缺的 first")
+        -- GF-009-16: 調貨看板 first; 我缺的 is its 範圍 filter (UI.setTab("need") jumps there).
+        eq(UI.state.tab, "guild", "調貨看板 first")
+        UI.setTab("need")
         local rows = 0
         for _, it in ipairs(UI.state.items) do
             rows = rows + 1
-            ok(it.qty:find("^缺 %d+$"), "quantity: " .. it.qty)
+            ok(it.mineText:find("^我缺 %d+$"), "quantity: " .. it.mineText)
         end
         eq(rows, 3, "pages 4, 6, 8 missing")
         local sawLoading = false
@@ -636,12 +638,13 @@ return function(T)
         ok(sawLoading, "an item not in the cache shows the rule's label or 載入中")
         UI.setTab("offer")
         eq(#UI.state.items, 1, "page 1: may have 2 extra")
-        eq(UI.state.items[1].qty, "可能多 2", "可能多 2")
-        ok(UI.state.items[1].match == "暫無需要者", "no match yet")
-        UI.setTab("guild")
-        ok(#UI.state.items == 0, "empty guild view")
+        eq(UI.state.items[1].mineText, "我可能多 2", "可能多 2")
+        eq(UI.state.items[1].cells[1], "", "nobody asks for it yet")
+        -- GF-009-16: 和我有關的 (somebody answers mine): nothing yet, and the page says so.
+        UI.setScope("match")
+        ok(#UI.state.items == 0, "nothing matched")
         local seenEmpty = false
-        for _, txt in ipairs(texts()) do if txt == "目前沒有可配對的公會物資" then seenEmpty = true end end
+        for _, txt in ipairs(texts()) do if txt == UI.EMPTY_FILTERED then seenEmpty = true end end
         ok(seenEmpty, "clear empty state")
     end))
 

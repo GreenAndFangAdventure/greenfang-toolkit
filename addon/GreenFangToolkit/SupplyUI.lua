@@ -14,7 +14,7 @@ local Th, W = ns.Theme, ns.Widgets
 
 UI.ID = "supply"
 UI.ROW_H, UI.ICON = 44, 36
-UI.ROWS = 11
+UI.ROWS = 10 -- GF-009-16: one row less for the filter row
 -- GF-UI-P: the narrow list gives 22 px to its scroll bar (it ends before the divider at 570).
 UI.LIST_X, UI.LIST_W = 22, 518
 UI.BAR_GAP = 4 -- between a list's rows and its scroll bar (the wide list and the detail end at 1078)
@@ -99,7 +99,9 @@ UI.POST_W = 96
 -- GF-UI-K (owner) had no 「＋」; GF-UI-P (owner 2026-11-28): 「＋」 in front, as ＋冒險單 /
 -- ＋職工單 / ＋下單, so it reads as adding one.
 UI.POST_TEXT = "＋刊登"
-UI.HEAD_Y, UI.HEAD_H = -128, 28
+-- GF-009-16: the filter row (FILTER_Y) sits between the tool row and the column header.
+UI.HEAD_Y, UI.HEAD_H = -172, 28
+UI.FILTER_Y = -128
 UI.TOP = UI.HEAD_Y - UI.HEAD_H - 4
 UI.EXPAND = 16
 -- Row columns (x inside a row, width); the quantity is right-aligned.
@@ -112,6 +114,29 @@ UI.COL = {
     match = { x = 334, w = 96 },
     fresh = { x = 438, w = 72 },
 }
+-- GF-009-16 (owner 0.16.19: 「1／0」 could not be told apart or filtered): 調貨看板
+-- has one column each for 徵求, 供應 and 黑箱 (people, people, pieces), then
+-- 在線 and 時效. The columns after 物品 per tab (x, w at the narrow width;
+-- right = right-aligned); 我的刊登 keeps its three (UI.COL).
+UI.COLS = {
+    guild = {
+        name = { x = 66, w = 138 },
+        { key = "need", x = 210, w = 56, right = true },
+        { key = "offer", x = 272, w = 56, right = true },
+        { key = "stock", x = 334, w = 64, right = true },
+        { key = "on", x = 410, w = 44 },
+        { key = "fresh", x = 458, w = 52 },
+    },
+    mine = {
+        name = { x = 66, w = 158 },
+        { key = "qty", x = 230, w = 92, right = true },
+        { key = "match", x = 334, w = 96 },
+        { key = "fresh", x = 438, w = 72 },
+    },
+}
+UI.CELLS = 5 -- the most columns after 物品 (調貨看板's)
+-- Cell colours on 調貨看板: 徵求 gold, 供應 green, 黑箱 the 黑箱 purple.
+UI.NEED_COLOR, UI.OFFER_COLOR = { 1, 0.82, 0 }, { 0.45, 0.9, 0.45 }
 -- The detail list: who, how many, online, how fresh, where from, 聯絡.
 UI.DETAIL_HEAD_Y = UI.HEAD_Y - 52
 UI.DETAIL_TOP = UI.DETAIL_HEAD_Y - UI.HEAD_H - 4
@@ -130,9 +155,7 @@ UI.DISCARD_TEXT = "放棄未儲存的修改？"
 
 -- Column names per tab (GF-UI-F).
 UI.HEADINGS = {
-    need = { "物品", "數量", "可能提供", "時效" },
-    offer = { "物品", "數量", "需要", "時效" },
-    guild = { "物品", "徵求／供應", "在線", "時效" },
+    guild = { "物品", "徵求", "供應", "黑箱", "在線", "時效" }, -- GF-009-16
     mine = { "物品", "類型／數量", "狀態", "時效" }, -- GF-UI-K: the cell reads 「徵求 1」
 }
 UI.DETAIL_HEADINGS = { "職工", "數量", "在線", "時效", "條件" } -- GF-009-14 B: 來源 → 交易條件 (自動 rows say 自動)
@@ -152,44 +175,61 @@ UI.NOTE_PREFIX = "備註："
 UI.MORE_TEXT = "還有 %d 位，用滑鼠滾輪往下看"
 UI.MORE_H = 22
 UI.DETAIL_BOTTOM = UI.TOP - UI.ROWS * UI.ROW_H -- the left list's bottom
--- 收集組 only where the lists come from the collection rules.
-UI.GROUP_TABS = { need = true, offer = true }
 -- GF-UI-K (owner: 刊登 stood alone mid-page): 刊登 at the list's left edge on
--- every tab, right over the column header; 收集組 follows it.
+-- every tab, over the filter row.
 UI.POST_X = 22
-UI.GROUP_X, UI.GROUP_W = 142, 170
 -- GF-012-C (owner 2026-11-28): 臨時黑箱's stock on 調貨看板 too, marked 黑箱
--- (the game's box icon and the word, in its own colour); a 黑箱 filter in
--- 收集組's place (全部／只看黑箱／不看黑箱). Only BankStock.rows() is used
--- (valid custodians in the roster, the epoch rule): nothing is read here.
+-- (the game's box icon and the word, in its own colour). Only BankStock.rows()
+-- is used (valid custodians in the roster, the epoch rule): nothing is read here.
 UI.STOCK_TEXT = "黑箱"
 UI.STOCK_NAME = "臨時黑箱"
+UI.STOCK_OWN_NAME = "我保管的黑箱" -- GF-009-16: my own custody is listed too (聯絡 grey)
+UI.MY_NAME = "我" -- GF-009-16: my own 徵求／供應／缺／多 in the detail (聯絡 grey)
 UI.STOCK_ICON = "Interface\\Icons\\INV_Box_01"
 UI.STOCK_COLOR = { 0.78, 0.55, 1 }
-UI.STOCK_FILTER_W = 150
-UI.STOCK_FILTERS = { { value = nil, text = "全部" }, { value = "only", text = "只看黑箱" }, { value = "none", text = "不看黑箱" } }
 function UI.stockTag(text) return "|T" .. UI.STOCK_ICON .. ":16:16|t " .. (text or UI.STOCK_TEXT) end
 UI.EXPAND_CLOSED = "Interface\\Buttons\\UI-PlusButton-Up"
 UI.EXPAND_OPEN = "Interface\\Buttons\\UI-MinusButton-Up"
 
+-- GF-009-16 (owner 0.16.19: 「調貨看板請再確認每個看板的用途與必要性／如果是比較像
+-- 篩選器的功能，請用篩選器做」): 我缺的, 我可能有多的 and 調貨看板 were three
+-- looks at the same records (Supply.entries + 臨時黑箱); they are one list
+-- now, 調貨看板, with a filter row (as 冒險業務's): 搜尋, 種類 (徵求／供應／
+-- 黑箱), 範圍 (我缺的／我可能有多的／和我有關的) and 收集組. 我的刊登 stays a
+-- tab: its rows are my listings (ended ones too) with 修改／續期／結束／刪除.
 UI.TABS = {
-    { key = "need", text = "我缺的" },
-    { key = "offer", text = "我可能有多的" },
     { key = "guild", text = "調貨看板" }, -- GF-UI-H: owner named it (was 公會供需); the key stays
     { key = "mine", text = "我的刊登" },
 }
 UI.EMPTY = {
-    need = "目前沒有缺的物品",
-    offer = "目前沒有可能多的物品",
-    guild = "目前沒有可配對的公會物資",
+    guild = "目前沒有任何徵求、供應或黑箱物品",
     mine = "還沒有刊登",
 }
+UI.EMPTY_FILTERED = "沒有符合的項目，換個篩選試試"
+UI.SEARCH_DELAY = 0.15
+UI.SEARCH_W, UI.KIND_W, UI.SCOPE_W, UI.GROUP_W = 150, 96, 130, 170
+UI.FILTER_X = { searchLabel = 22, search = 66, kindLabel = 232, kind = 276, scopeLabel = 388, scope = 432,
+    groupLabel = 578, group = 634 }
+UI.GROUP_X = UI.FILTER_X.groupLabel -- (old name) 收集組's label
+UI.KIND_ITEMS = {
+    guild = { { value = "all", text = "全部" }, { value = "need", text = "徵求" }, { value = "offer", text = "供應" },
+        { value = "stock", text = "黑箱" } },
+    mine = { { value = "all", text = "全部" }, { value = "need", text = "徵求" }, { value = "offer", text = "供應" } },
+}
+UI.KIND_TIP = "徵求＝有人在找；供應＝會友可能有多或刊登供應；黑箱＝臨時黑箱的存貨"
+UI.SCOPE_ITEMS = { { value = "all", text = "全部" }, { value = "need", text = "我缺的" }, { value = "offer", text = "我可能有多的" },
+    { value = "match", text = "和我有關的" } }
+UI.SCOPE_TIP = "我缺的／我可能有多的：自動集料算出的或我自己刊登的；和我有關的：我缺而有人供應或黑箱有、我多而有人徵求"
+-- state.filter: the page's filters; search is lower case, trimmed.
+UI.FILTER_OFF = { search = "", kind = "all", scope = "all" }
+UI.filterStats = { built = 0, hits = 0, base = 0 }
 
 local panel, tabs, statePanel, autoBox, manualBox, postButton, header, detailHeader
 local groupLabel, groupButton
 local rows, detailRows = {}, {}
 local detail = {}
-local state = { tab = "need", offset = 0, selected = nil, items = {}, group = nil, stock = nil }
+local state = { tab = "guild", offset = 0, selected = nil, items = {}, base = {}, group = nil,
+    filter = { search = "", kind = "all", scope = "all" } }
 UI.state = state
 
 -- f.tip under the mouse (check boxes, buttons, edit boxes of this page).
@@ -289,13 +329,15 @@ function UI.personText(e)
         -- GF-012-C: one 黑箱 line per item: how many in all, how many custodians online.
         local on = 0
         for _, p in ipairs(e.stock.places) do if ns.BankStock.isOnline(p.h) then on = on + 1 end end
-        return UI.STOCK_NAME, "共 " .. e.qty, on > 0 and ("在線 " .. on) or "離線", Supply.FRESH_TEXT[e.fresh or "unknown"] or "未知"
+        if e.own then on = 1 end -- GF-009-16: my own custody (I am here)
+        return e.own and UI.STOCK_OWN_NAME or UI.STOCK_NAME, "共 " .. e.qty, on > 0 and ("在線 " .. on) or "離線",
+            Supply.FRESH_TEXT[e.fresh or "unknown"] or "未知"
     end
-    local name = e.member and ns.shortName(e.member.name) or "未知"
+    local name = e.own and UI.MY_NAME or (e.member and ns.shortName(e.member.name) or "未知")
     -- GF-UI-H: automatic candidates read 可能提供 (manual ones 徵求／供應, below).
     local what = e.direction == "need" and ("缺 " .. e.qty) or ("可能提供 " .. e.qty)
     if e.manual and not e.auto then what = (e.direction == "need" and "徵求 " or "供應 ") .. e.qty end
-    local on = e.member and e.member.online and "在線" or "離線"
+    local on = (e.own or (e.member and e.member.online)) and "在線" or "離線"
     return name, what, on, Supply.FRESH_TEXT[e.fresh or "unknown"] or "未知"
 end
 
@@ -325,21 +367,28 @@ local function itemTooltip(owner, itemID, extra)
 end
 
 -- Move a row's (or the header's) cells for list width w: 物品 grows, the
--- other columns keep their width and move right.
-local COL_KEYS = { "name", "qty", "match", "fresh" }
-function UI.placeCells(owner, cells, w, dy)
+-- other columns keep their width and move right. cells[1] is 物品, then one
+-- per column of the tab (UI.COLS[tab]); cells past the tab's columns are
+-- emptied by the caller. tab defaults to the page's.
+function UI.colsOf(tab) return UI.COLS[tab or state.tab] or UI.COLS.guild end
+function UI.placeCells(owner, cells, w, dy, tab)
     dy = dy or 0
     local d = w - UI.LIST_W
-    local C = UI.COL
-    for i, key in ipairs(COL_KEYS) do
-        local fs = cells[i]
-        if fs then
-            local x = key == "name" and (fs.gfHeadX or C.name.x) or (C[key].x + d)
-            local cw = key == "name" and ((fs.gfHeadW or C.name.w) + d) or C[key].w
-            fs:ClearAllPoints()
-            fs:SetPoint("LEFT", owner, "LEFT", x, dy)
-            fs:SetWidth(cw)
+    local spec = UI.colsOf(tab)
+    for i, fs in ipairs(cells) do
+        local x, cw
+        if i == 1 then
+            x = fs.gfHeadX or spec.name.x
+            cw = (fs.gfHeadX and (spec.name.x + spec.name.w - fs.gfHeadX) or spec.name.w) + d
+        else
+            local c = spec[i - 1] or spec[#spec]
+            x, cw = c.x + d, c.w
+            local align = c.right and "RIGHT" or "LEFT"
+            if fs.gfAlign ~= align then fs:SetJustifyH(align); fs.gfAlign = align end
         end
+        fs:ClearAllPoints()
+        fs:SetPoint("LEFT", owner, "LEFT", x, dy)
+        fs:SetWidth(cw)
     end
 end
 -- GF-009-15: a row with r.whereText set has two lines: the cells move up
@@ -349,7 +398,7 @@ UI.WHERE_DY = 8
 function UI.placeRow(r, w)
     r:SetWidth(w)
     local two = r.gfTwoLine == true
-    UI.placeCells(r, { r.name, r.qty, r.match, r.fresh }, w, two and UI.WHERE_DY or 0)
+    UI.placeCells(r, r.cells, w, two and UI.WHERE_DY or 0)
     if r.where then
         r.where:ClearAllPoints()
         r.where:SetPoint("LEFT", r, "LEFT", UI.COL.name.x, -UI.WHERE_DY - 2)
@@ -376,19 +425,17 @@ local function newRow(i)
     r.icon = r:CreateTexture(nil, "ARTWORK")
     r.icon:SetSize(UI.ICON, UI.ICON)
     r.icon:SetPoint("LEFT", r, "LEFT", C.icon.x, 0)
-    local function cell(key, font, justify)
+    local function cell(font)
         local fs = r:CreateFontString(nil, "ARTWORK", font)
-        fs:SetPoint("LEFT", r, "LEFT", C[key].x, 0)
-        fs:SetWidth(C[key].w)
-        fs:SetJustifyH(justify or "LEFT")
-        fs.gfAlign = justify or "LEFT"
+        fs:SetJustifyH("LEFT")
+        fs.gfAlign = "LEFT"
         if fs.SetWordWrap then fs:SetWordWrap(false) end
         return fs
     end
-    r.name = cell("name", ns.LABEL_FONT)
-    r.qty = cell("qty", ns.FIELD_FONT, "RIGHT")
-    r.match = cell("match", ns.LABEL_FONT)
-    r.fresh = cell("fresh", ns.LABEL_FONT)
+    -- GF-009-16: 物品 and up to UI.CELLS columns (placed per tab by UI.placeCells).
+    r.cells = { cell(ns.LABEL_FONT) }
+    for k = 1, UI.CELLS do r.cells[k + 1] = cell(k == 1 and ns.FIELD_FONT or ns.LABEL_FONT) end
+    r.name = r.cells[1]
     r.where = r:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT) -- GF-009-15
     r.where:SetJustifyH("LEFT")
     if r.where.SetWordWrap then r.where:SetWordWrap(false) end
@@ -404,6 +451,7 @@ local function newRow(i)
     rows[i] = r
     return r
 end
+function UI.rows() return rows end
 
 -- GF-009-10: 「教：亞麻斗篷｜裁縫」 for a recipe item whose recipe is known by
 -- its ID (RecipeLink), else nil (nothing guessed).
@@ -412,108 +460,266 @@ function UI.teachText(itemID)
     return RL and RL.teachText(itemID) or nil
 end
 
--- The rows of the current tab: { itemID, qtyText, matchText, tip, ref }.
-function UI.listFor(kind)
+---------------------------------------------------------------------------
+-- GF-009-16: 調貨看板 (one list: everybody's 徵求／供應, mine included, and
+-- 臨時黑箱, my own custody included) and its filters.
+---------------------------------------------------------------------------
+
+-- 「我缺 3」「我徵求 1」「我可能多 2」「我供應 1」 (my own part of an item).
+function UI.mineText(it)
+    local parts = {}
+    local n, o = it.mineNeed, it.mineOffer
+    if n then parts[#parts + 1] = ((n.manual and not n.auto) and "我徵求 " or "我缺 ") .. n.qty end
+    if o then parts[#parts + 1] = ((o.manual and not o.auto) and "我供應 " or "我可能多 ") .. o.qty end
+    return table.concat(parts, "｜")
+end
+-- How many people ask / offer (me included), and the 黑箱 pieces (my custody included).
+function UI.needCount(it) return #it.needs + (it.mineNeed and 1 or 0) end
+function UI.offerCount(it) return #it.offers + (it.mineOffer and 1 or 0) end
+function UI.stockQty(it) return (it.stock and it.stock.qty or 0) + (it.stockOwn and it.stockOwn.qty or 0) end
+-- The cells of a 調貨看板 row: 徵求, 供應, 黑箱, 在線, 時效 (empty = none).
+function UI.boardCells(it)
+    local n, o, k = UI.needCount(it), UI.offerCount(it), UI.stockQty(it)
+    local on = ""
+    if #it.others > 0 then on = it.onlineCount > 0 and (it.onlineCount .. " 位") or "離線" end
+    return { n > 0 and (n .. " 位") or "", o > 0 and (o .. " 位") or "", k > 0 and (k .. " 個") or "", on, UI.freshShort(it) }
+end
+UI.BOARD_CELL_COLORS = { UI.NEED_COLOR, UI.OFFER_COLOR, UI.STOCK_COLOR }
+-- The detail's line under the item name: 「徵求 2 位｜供應 1 位｜黑箱 12 個｜在線 1 位」.
+function UI.boardSub(it)
+    local parts = {}
+    local n, o, k = UI.needCount(it), UI.offerCount(it), UI.stockQty(it)
+    if n > 0 then parts[#parts + 1] = "徵求 " .. n .. " 位" end
+    if o > 0 then parts[#parts + 1] = "供應 " .. o .. " 位" end
+    if k > 0 then parts[#parts + 1] = "黑箱 " .. k .. " 個" end
+    if #it.others > 0 then parts[#parts + 1] = it.onlineCount > 0 and ("在線 " .. it.onlineCount .. " 位") or "都不在線" end
+    return table.concat(parts, "｜")
+end
+
+-- 調貨看板's rows (no filter): { itemID, item, cells, tip, hasNote, where,
+-- mineText, teach, stockLine }.
+function UI.boardRows()
+    UI.filterStats.base = UI.filterStats.base + 1
     local out = {}
-    if kind == "mine" then
-        -- GF-UI-K: live listings first, ended ones after (each group keeps L.own()'s order).
-        local own, live, ended = L.own(), {}, {}
-        for _, l in ipairs(own) do
-            if l.status == "active" then live[#live + 1] = l else ended[#ended + 1] = l end
+    for _, it in ipairs(Supply.view("board", UI.guildEntries())) do
+        local tip = {}
+        local mine = it.mineNeed or it.mineOffer
+        if mine then tip[#tip + 1] = "來源：" .. sourceText(mine) end
+        -- GF-009-15: where my own items are (自動集料 on; never sent).
+        local mineAuto = mine and ((it.mineNeed and it.mineNeed.auto) or (it.mineOffer and it.mineOffer.auto)) and Supply.autoOn()
+        local where = mineAuto and Supply.whereShort(it.itemID) or nil
+        if where == "" then where = nil end
+        if mineAuto then
+            tip[#tip + 1] = "我的存放位置："
+            for _, line in ipairs(Supply.whereLines(it.itemID)) do tip[#tip + 1] = "　" .. line end
         end
-        for _, l in ipairs(ended) do live[#live + 1] = l end
-        for _, l in ipairs(live) do
-            local left = (l.expiresAt or 0) - ns.Share.serverNow()
-            local days = left > 0 and math.max(1, math.ceil(left / 86400)) or 0
-            local q = L.DIRECTION_TEXT[l.direction] .. " " .. l.quantity
-            local st = L.STATUS_TEXT[l.status] or ""
-            local tip = { L.categoryText(l.category), "交易條件：" .. L.termsText(l.terms, l.price) }
-            if (l.note or "") ~= "" then tip[#tip + 1] = "備註：" .. l.note end
-            local teach = UI.teachText(l.itemID) -- GF-009-10
-            if teach then table.insert(tip, 1, teach) end
-            out[#out + 1] = { itemID = l.itemID, listing = l, qty = q, qtyShort = q, match = st, matchShort = st,
-                fresh = l.status == "active" and ("剩 " .. days .. " 天") or "", ended = l.status ~= "active",
-                tip = tip, hasNote = (l.note or "") ~= "", teach = teach }
-        end
-        return out
-    end
-    local rule = UI.GROUP_TABS[kind] and UI.groupRule() or nil
-    local entries
-    if kind == "guild" then entries = UI.guildEntries() end
-    for _, it in ipairs(Supply.view(kind, entries)) do
-        if (not rule or (rule.items and rule.items[it.itemID])) and (kind ~= "guild" or state.stock ~= "only" or it.stock) then
-            local tip = {}
-            if it.mine then tip[#tip + 1] = "來源：" .. sourceText(it.mine) end
-            -- GF-009-15: where my own items are (自動集料 on; never sent).
-            local mineAuto = it.mine and it.mine.auto and Supply.autoOn()
-            local where = mineAuto and Supply.whereShort(it.itemID) or nil
-            if where == "" then where = nil end
-            if mineAuto then
-                tip[#tip + 1] = "我的存放位置："
-                for _, line in ipairs(Supply.whereLines(it.itemID)) do tip[#tip + 1] = "　" .. line end
+        -- GF-009-14 B: every viewable manual listing: terms and the full note.
+        local hasNote = false
+        for _, e in ipairs(it.others) do
+            if UI.manualOf(e) then
+                for _, line in ipairs(UI.listingTipLines(e, true)) do tip[#tip + 1] = line end
+                if (UI.manualOf(e).note or "") ~= "" then hasNote = true end
             end
-            -- GF-009-14 B: every viewable manual listing: terms and the full note.
-            local hasNote = false
-            for _, e in ipairs(it.others or {}) do
-                if UI.manualOf(e) then
-                    for _, line in ipairs(UI.listingTipLines(e, true)) do tip[#tip + 1] = line end
-                    if (UI.manualOf(e).note or "") ~= "" then hasNote = true end
+        end
+        local teach = UI.teachText(it.itemID) -- GF-009-10
+        if teach then table.insert(tip, 1, teach) end
+        -- GF-012-C: the 黑箱 mark (the row's second line when nothing of mine is
+        -- there), and who holds it in the tooltip. GF-009-16: my custody counts.
+        local stockLine
+        local k = UI.stockQty(it)
+        if k > 0 then
+            local holders, mineToo = 0, it.stockOwn ~= nil
+            if it.stock then holders = #it.stock.stock.places end
+            if mineToo then holders = holders + 1 end
+            local avail = 0
+            if ns.BankRequests then
+                for _, key in ipairs({ "stock", "stockOwn" }) do
+                    local e = it[key]
+                    if e then avail = avail + (tonumber(ns.BankRequests.itemAvailable(e.stock)) or 0) end
                 end
             end
-            local teach = UI.teachText(it.itemID) -- GF-009-10
-            if teach then table.insert(tip, 1, teach) end
-            -- GF-012-C: the 黑箱 mark on the row's second line, and who holds it in the tooltip.
-            local stockLine
-            if it.stock then
-                stockLine = UI.stockTag(UI.STOCK_TEXT .. " " .. it.stock.qty .. " 個（" .. #it.stock.stock.places .. " 位保管人）"
-                    -- GF-012-D: what may be asked for now (shared − reserved).
-                    .. (ns.BankRequests and ("，可申領 " .. ns.BankRequests.itemAvailable(it.stock.stock)) or ""))
-                tip[#tip + 1] = UI.STOCK_NAME .. "："
-                for _, line in ipairs(ns.BankUI.tipLines(it.stock.stock)) do tip[#tip + 1] = "　" .. line end
+            stockLine = UI.stockTag(UI.STOCK_TEXT .. " " .. k .. " 個（" .. holders .. " 位保管人" .. (mineToo and "，含我" or "") .. "）"
+                -- GF-012-D: what may be asked for now (shared − reserved).
+                .. (ns.BankRequests and ("，可申領 " .. avail) or ""))
+            tip[#tip + 1] = UI.STOCK_NAME .. "："
+            for _, key in ipairs({ "stock", "stockOwn" }) do
+                local e = it[key]
+                if e then for _, line in ipairs(ns.BankUI.tipLines(e.stock)) do tip[#tip + 1] = "　" .. line end end
             end
-            out[#out + 1] = { itemID = it.itemID, item = it, qty = UI.qtyText(kind, it), match = UI.matchText(kind, it),
-                qtyShort = UI.qtyShort(kind, it), matchShort = UI.matchShort(kind, it), fresh = UI.freshShort(it),
-                tip = tip, hasNote = hasNote, where = where, teach = teach, stockLine = stockLine }
         end
+        local mt = UI.mineText(it)
+        out[#out + 1] = { itemID = it.itemID, item = it, cells = UI.boardCells(it), cellColors = UI.BOARD_CELL_COLORS,
+            fresh = UI.freshShort(it), tip = tip, hasNote = hasNote, where = where,
+            mineText = mt ~= "" and mt or nil, teach = teach, stockLine = stockLine }
     end
     return out
 end
 
--- GF-012-C: 調貨看板's entries: everybody's needs and offers plus one 黑箱
--- entry per item in 臨時黑箱 (BankStock.rows(): only valid custodians in the
--- roster, the epoch rule). 不看黑箱 leaves them out. My own places are not
--- counted (my own supplies are not on 調貨看板 either).
+-- The rows of a tab before the filters: 我的刊登 (my listings, ended ones too)
+-- or 調貨看板 (UI.boardRows).
+function UI.baseFor(tab)
+    if tab ~= "mine" then return UI.boardRows() end
+    local out = {}
+    -- GF-UI-K: live listings first, ended ones after (each group keeps L.own()'s order).
+    local own, live, ended = L.own(), {}, {}
+    for _, l in ipairs(own) do
+        if l.status == "active" then live[#live + 1] = l else ended[#ended + 1] = l end
+    end
+    for _, l in ipairs(ended) do live[#live + 1] = l end
+    for _, l in ipairs(live) do
+        local left = (l.expiresAt or 0) - ns.Share.serverNow()
+        local days = left > 0 and math.max(1, math.ceil(left / 86400)) or 0
+        local q = L.DIRECTION_TEXT[l.direction] .. " " .. l.quantity
+        local st = L.STATUS_TEXT[l.status] or ""
+        local tip = { L.categoryText(l.category), "交易條件：" .. L.termsText(l.terms, l.price) }
+        if (l.note or "") ~= "" then tip[#tip + 1] = "備註：" .. l.note end
+        local teach = UI.teachText(l.itemID) -- GF-009-10
+        if teach then table.insert(tip, 1, teach) end
+        local fresh = l.status == "active" and ("剩 " .. days .. " 天") or ""
+        out[#out + 1] = { itemID = l.itemID, listing = l, qty = q, qtyShort = q, match = st, matchShort = st,
+            fresh = fresh, cells = { q, st, fresh }, ended = l.status ~= "active",
+            tip = tip, hasNote = (l.note or "") ~= "", teach = teach }
+    end
+    return out
+end
+
+-- The words a row is searched in: the item's name and the people's names
+-- (lower case, kept on the row until the rows are built again).
+local function plainLower(t)
+    t = tostring(t or ""):gsub("|T.-|t", ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    return string.lower(t)
+end
+UI.plainLower = plainLower
+function UI.hayOf(d)
+    if d.hay then return d.hay end
+    local words = { Supply.itemName(d.itemID) or "" }
+    for _, e in ipairs(d.item and d.item.others or {}) do
+        if e.member and e.member.name then words[#words + 1] = ns.shortName(e.member.name) end
+        if e.stock then for _, p in ipairs(e.stock.places or {}) do words[#words + 1] = p.h.name or "" end end
+    end
+    -- An item whose name is not loaded yet is looked at again next time.
+    local h = plainLower(table.concat(words, " "))
+    if words[1] ~= "" then d.hay = h end
+    return h
+end
+
+-- Does an entry (a person line) pass 種類? need / offer / stock (all = yes).
+function UI.kindPass(e, kind)
+    if not kind or kind == "all" then return true end
+    return e.direction == kind
+end
+-- Does a row pass the filters f = { search, kind, scope, group } on tab?
+function UI.rowPass(d, f, tab, rule)
+    if tab == "mine" then
+        local l = d.listing
+        if f.kind ~= "all" and (not l or l.direction ~= f.kind) then return false end
+    else
+        local it = d.item
+        if rule and not (rule.items and rule.items[d.itemID]) then return false end
+        local k = f.kind
+        if k == "need" and UI.needCount(it) == 0 then return false end
+        if k == "offer" and UI.offerCount(it) == 0 then return false end
+        if k == "stock" and UI.stockQty(it) == 0 then return false end
+        local s = f.scope
+        if s == "need" and not it.mineNeed then return false end
+        if s == "offer" and not it.mineOffer then return false end
+        if s == "match" and not ((it.mineNeed and (#it.offers > 0 or it.stock ~= nil)) or (it.mineOffer and #it.needs > 0)) then
+            return false
+        end
+    end
+    if f.search ~= "" then
+        local h = d.listing and plainLower(Supply.itemName(d.itemID) or "") or UI.hayOf(d)
+        if not h:find(f.search, 1, true) then return false end
+    end
+    return true
+end
+-- The rows that pass f (a new list; base untouched).
+function UI.filterRows(base, f, tab, rule)
+    f = f or UI.FILTER_OFF
+    local out = {}
+    for _, d in ipairs(base) do if UI.rowPass(d, f, tab, rule) then out[#out + 1] = d end end
+    return out
+end
+function UI.filtersOn()
+    local f = state.filter
+    return f.search ~= "" or f.kind ~= "all" or (state.tab ~= "mine" and (f.scope ~= "all" or state.group ~= nil))
+end
+-- The filtered rows of the page, kept until the rows or a filter change.
+local filtered = {}
+function UI.filteredItems()
+    local f = state.filter
+    local rule = state.tab ~= "mine" and UI.groupRule() or nil
+    local key = table.concat({ state.tab, f.search, f.kind, state.tab == "mine" and "all" or f.scope, tostring(rule and rule.collectionID) }, "\2")
+    if filtered.base == state.base and filtered.key == key then
+        UI.filterStats.hits = UI.filterStats.hits + 1
+        return filtered.out
+    end
+    UI.filterStats.built = UI.filterStats.built + 1
+    local out = UI.filtersOn() and UI.filterRows(state.base, f, state.tab, rule) or state.base
+    filtered.base, filtered.key, filtered.out = state.base, key, out
+    return out
+end
+
+-- The rows of a tab the way UI.setTab(kind) shows them (no filter but the
+-- one the old tab stood for): "need" / "offer" are 調貨看板 with 範圍 set.
+function UI.listFor(kind)
+    if kind == "need" or kind == "offer" then
+        return UI.filterRows(UI.baseFor("guild"), { search = "", kind = "all", scope = kind }, "guild")
+    end
+    return UI.baseFor(kind == "mine" and "mine" or "guild")
+end
+
+-- The people of a row for the detail, the 種類 filter applied: the others
+-- (best first), then my own lines (聯絡 grey). Kept on the row per 種類.
+function UI.peopleOf(d)
+    local it = d and d.item
+    if not it then return {} end
+    local kind = state.tab ~= "mine" and state.filter.kind or "all"
+    d.people = d.people or {}
+    if d.people[kind] then return d.people[kind] end
+    local out = {}
+    for _, e in ipairs(it.others) do if UI.kindPass(e, kind) then out[#out + 1] = e end end
+    for _, key in ipairs({ "mineNeed", "mineOffer", "stockOwn" }) do
+        local e = it[key]
+        if e and UI.kindPass(e, kind) then out[#out + 1] = e end
+    end
+    d.people[kind] = out
+    return out
+end
+
+-- GF-012-C: 臨時黑箱's entries, one per item for the others' custody and
+-- (GF-009-16) one for my own (own = true: 「我保管的黑箱」, 聯絡 grey). Only
+-- BankStock.rows() is read: valid custodians in the roster, the epoch rule.
 function UI.stockEntries()
     local K = ns.BankStock
     local out = {}
     if not K then return out end
     for _, r in ipairs((K.rows())) do
-        local places, qty = {}, 0
+        local theirs, mine, qt, qm = {}, {}, 0, 0
         for _, p in ipairs(r.places) do
-            if not p.h.own then places[#places + 1] = p; qty = qty + p.bags + p.bank end
+            if p.h.own then mine[#mine + 1] = p; qm = qm + p.bags + p.bank
+            else theirs[#theirs + 1] = p; qt = qt + p.bags + p.bank end
         end
-        if #places > 0 then
-            local row = #places == #r.places and r or { itemID = r.itemID, total = qty, places = places, t = r.t, base = r }
+        local t = r.t or 0
+        local fresh = t > 0 and Supply.freshness(t, math.huge) or "unknown"
+        if #theirs > 0 then
+            local row = #theirs == #r.places and r or { itemID = r.itemID, total = qt, places = theirs, t = r.t, base = r }
             local entry = K.contactEntry(row)
-            local t = r.t or 0
             out[#out + 1] = { key = "stock|" .. r.itemID, a = "~stock", member = entry and entry.member or nil, own = false,
-                itemID = r.itemID, direction = "stock", qty = qty, t = t,
-                fresh = t > 0 and Supply.freshness(t, math.huge) or "unknown", stock = row }
+                itemID = r.itemID, direction = "stock", qty = qt, t = t, fresh = fresh, stock = row }
+        end
+        if #mine > 0 then
+            local row = #mine == #r.places and r or { itemID = r.itemID, total = qm, places = mine, t = r.t, base = r }
+            out[#out + 1] = { key = "stock-own|" .. r.itemID, a = "~stock-own", member = mine[1].h.member, own = true,
+                itemID = r.itemID, direction = "stock", qty = qm, t = t, fresh = fresh, stock = row }
         end
     end
     return out
 end
 function UI.guildEntries()
     local list = Supply.entries()
-    if state.stock ~= "none" then
-        for _, e in ipairs(UI.stockEntries()) do list[#list + 1] = e end
-    end
+    for _, e in ipairs(UI.stockEntries()) do list[#list + 1] = e end
     return list
-end
-function UI.setStockFilter(v)
-    state.stock, state.offset, state.selected = v, 0, nil
-    if UI.stockButton then UI.stockButton.value = v; UI.stockButton.refreshText() end
-    UI.refresh()
 end
 
 function UI.scroll(delta)
@@ -534,12 +740,21 @@ function UI.drawList()
             setItemIcon(r.icon, data.itemID)
             local name = Supply.itemLabel(data.itemID)
             r.name:SetText(name)
-            r.qty:SetText(data.qtyShort or data.qty or "")
-            r.match:SetText(data.matchShort or data.match or "")
-            r.fresh:SetText(data.fresh or "")
-            -- GF-009-15: where my own items are, on a second line.
-            -- GF-009-10: a recipe item says what it teaches there (when nothing else does).
-            local second = (data.where or "") ~= "" and data.where or data.stockLine or data.teach
+            -- GF-009-16: the tab's columns (調貨看板: 徵求 gold, 供應 green, 黑箱 purple).
+            local cells = data.cells or { data.qtyShort or data.qty, data.matchShort or data.match, data.fresh }
+            if r.gfTab ~= state.tab then r.gfTab = state.tab; UI.placeRow(r, UI.listWidth()) end
+            for k = 1, UI.CELLS do
+                local fs = r.cells[k + 1]
+                fs:SetText(cells[k] or "")
+                local c = data.cellColors and data.cellColors[k] or ns.COLOR.white
+                fs:SetTextColor(c[1], c[2], c[3])
+            end
+            -- GF-009-15: where my own items are, on a second line (GF-009-16: after
+            -- 「我缺 3」). GF-012-C: else the 黑箱 mark. GF-009-10: else what a recipe teaches.
+            local mineLine
+            if data.mineText then mineLine = data.mineText .. (data.where and ("｜" .. data.where) or "")
+            elseif data.where then mineLine = data.where end
+            local second = mineLine or data.stockLine or data.teach
             local two = (second or "") ~= ""
             if two ~= (r.gfTwoLine == true) then r.gfTwoLine = two; UI.placeRow(r, UI.listWidth()) end
             r.where:SetText(two and second or "")
@@ -572,7 +787,8 @@ function UI.pageState()
     if state.failed then return "error" end
     if #state.items > 0 then return nil end
     local tab = state.tab
-    if UI.GROUP_TABS[tab] and Supply.autoOn() then
+    if #(state.base or {}) > 0 then return "empty" end -- GF-009-16: the filters hide them all
+    if tab ~= "mine" and Supply.autoOn() then
         local last = Supply.last or {}
         if last.questOK == false or last.bagOK == false then return "error" end
         if not last.scanAt then return "loading" end
@@ -586,7 +802,9 @@ end
 function UI.drawState()
     if not statePanel then return end
     local kind = UI.pageState()
-    statePanel.set(kind, kind == "empty" and UI.EMPTY[state.tab] or nil)
+    local words = UI.EMPTY[state.tab]
+    if #(state.base or {}) > 0 then words = UI.EMPTY_FILTERED end
+    statePanel.set(kind, kind == "empty" and words or nil)
 end
 -- /gftk supply state <empty|loading|stale|error|off>: show one state for a
 -- screenshot (MANUAL §3uif); nothing is read or changed.
@@ -614,28 +832,72 @@ function UI.groupRule()
     return nil
 end
 function UI.setGroup(id)
-    state.group, state.offset, state.selected = id, 0, nil
+    if id == state.group then return false end
+    state.group = id
     if groupButton then groupButton.value = id; groupButton.refreshText() end
-    UI.refresh()
+    UI.applyFilters()
+    return true
 end
-local function drawGroup()
+-- GF-009-16: the filter row. 搜尋 and 種類 on both tabs (我的刊登: 全部／徵求／
+-- 供應); 範圍 and 收集組 on 調貨看板 only.
+local function showIf(f, on) if f then if on then f:Show() else f:Hide() end end end
+local function drawFilters()
     if not groupButton then return end
-    if UI.stockButton then -- GF-012-C: the 黑箱 filter, on 調貨看板 only
-        local on = state.tab == "guild"
-        if on then UI.stockLabel:Show(); UI.stockButton:Show() else UI.stockLabel:Hide(); UI.stockButton:Hide() end
-    end
     if state.group and not UI.groupRule() then state.group = nil; groupButton.value = nil end
     groupButton.refreshText()
-    local on = UI.GROUP_TABS[state.tab] == true
-    if on then groupLabel:Show(); groupButton:Show() else groupLabel:Hide(); groupButton:Hide() end
+    local board = state.tab ~= "mine"
+    showIf(groupLabel, board); showIf(groupButton, board)
+    showIf(UI.scopeLabel, board); showIf(UI.scopeDrop, board)
     W.setEnabled(groupButton, #Supply.activeRules() > 0)
+    if UI.kindDrop then
+        UI.kindDrop.setItems(UI.KIND_ITEMS[board and "guild" or "mine"])
+        UI.kindDrop.setValue(state.filter.kind)
+    end
+    if UI.scopeDrop then UI.scopeDrop.setValue(state.filter.scope) end
+end
+UI.drawFilters = drawFilters
+-- Filter setters: nothing is read again, the kept rows are filtered (UI.filteredItems).
+function UI.setSearch(text)
+    local q = plainLower(text):gsub("^%s+", ""):gsub("%s+$", "")
+    if q == state.filter.search then return false end
+    state.filter.search = q
+    UI.applyFilters()
+    return true
+end
+function UI.setKind(kind)
+    local ok = false
+    for _, it in ipairs(UI.KIND_ITEMS[state.tab == "mine" and "mine" or "guild"]) do if it.value == kind then ok = true end end
+    if not ok then kind = "all" end
+    if kind == state.filter.kind then return false end
+    state.filter.kind = kind
+    if UI.kindDrop then UI.kindDrop.setValue(kind) end
+    UI.applyFilters()
+    return true
+end
+function UI.setScope(scope)
+    local ok = false
+    for _, it in ipairs(UI.SCOPE_ITEMS) do if it.value == scope then ok = true end end
+    if not ok then scope = "all" end
+    if scope == state.filter.scope then return false end
+    state.filter.scope = scope
+    if UI.scopeDrop then UI.scopeDrop.setValue(scope) end
+    UI.applyFilters()
+    return true
+end
+-- Every filter off (a jump from a notice, 職工檔案).
+function UI.clearFilters()
+    state.filter.search, state.filter.kind, state.filter.scope = "", "all", "all"
+    state.group = nil
+    if groupButton then groupButton.value = nil end
+    if UI.searchBox then UI.searchBox:SetText(""); UI.searchBox.gfText = "" end
 end
 
 -- Column header texts of the current tab.
 local function drawHeader()
     if not header then return end
-    local names = UI.HEADINGS[state.tab] or UI.HEADINGS.need
+    local names = UI.HEADINGS[state.tab] or UI.HEADINGS.guild
     for i, fs in ipairs(header.cells) do fs:SetText(names[i] or "") end
+    UI.placeCells(header, header.cells, UI.listWidth())
 end
 
 ---------------------------------------------------------------------------
@@ -768,7 +1030,7 @@ end
 
 -- A row has something for the right side: my listing (its buttons) or matches.
 function UI.hasDetail(data)
-    return data ~= nil and (data.listing ~= nil or (data.item ~= nil and #data.item.others > 0))
+    return data ~= nil and (data.listing ~= nil or (data.item ~= nil and #UI.peopleOf(data) > 0))
 end
 
 -- Narrow (list + detail) or wide (list only); also moves 刊登 and the divider.
@@ -845,10 +1107,10 @@ function UI.drawDetail()
         return
     end
     listingButtons(nil)
-    if detailHeader then if #data.item.others > 0 then detailHeader:Show() else detailHeader:Hide() end end
+    local list = UI.peopleOf(data)
+    if detailHeader then if #list > 0 then detailHeader:Show() else detailHeader:Hide() end end
     local it = data.item
-    detail.sub:SetText(data.qty .. (data.match ~= "" and ("｜" .. data.match) or "") .. (data.where and ("｜" .. data.where) or ""))
-    local list = it.others
+    detail.sub:SetText(UI.boardSub(it))
     -- GF-UI-M: rows stack by their own height, from the scrolled-to person on.
     state.detailOffset = math.max(0, math.min(state.detailOffset or 0, math.max(0, #list - 1)))
     local y, used = UI.DETAIL_TOP, 0
@@ -868,6 +1130,7 @@ function UI.drawDetail()
             local sc = e.stock and UI.STOCK_COLOR or ns.COLOR.disabled -- GF-012-C
             r.src:SetTextColor(sc[1], sc[2], sc[3])
             local nc = e.stock and UI.STOCK_COLOR or ns.COLOR.white
+            if e.own and not e.stock then nc = ns.COLOR.disabled end -- GF-009-16: my own line
             r.name:SetTextColor(nc[1], nc[2], nc[3])
             local h = UI.setRowNote(r, UI.noteText(e), UI.NOTE_X, UI.NOTE_W, -UI.MAIN_H, true)
             if y - h < bottom and used > 0 then
@@ -911,7 +1174,7 @@ end
 function UI.scrollDetail(delta)
     local data = state.selected and state.items[state.selected]
     if not (data and data.item and not data.listing) then return end
-    local n = #data.item.others
+    local n = #UI.peopleOf(data)
     local before = state.detailOffset or 0
     local after = math.max(0, math.min(n - 1, before - (delta or 0)))
     if after == before then return end
@@ -955,16 +1218,26 @@ function UI.refresh()
     autoBox.setOn(Supply.autoOn())
     manualBox.setOn(Supply.manualOn())
     W.setEnabled(postButton, Supply.manualOn())
-    local keepItem = state.selected and state.items[state.selected] and state.items[state.selected].itemID
-    local keepListing = state.selected and state.items[state.selected] and state.items[state.selected].listing
-    drawGroup()
+    drawFilters()
     drawHeader()
     -- GF-UI-F: a failed read shows 暫時無法讀取 instead of breaking the page;
     -- a screenshot preview (UI.previewState) shows its state with no rows.
-    local okList, list = pcall(UI.listFor, state.tab)
+    -- GF-009-16: the rows are read here (data changed, tab, switches); a filter
+    -- change only filters the kept rows (UI.applyFilters).
+    local okList, list = pcall(UI.listFor, state.tab) -- (= UI.baseFor; the dev preview swaps listFor)
     state.failed = not okList
     if not okList and Supply.note then pcall(Supply.note, "調貨所列表讀取失敗：" .. tostring(list)) end
-    state.items = (okList and not state.preview) and list or {}
+    state.base = (okList and not state.preview) and list or {}
+    UI.applyFilters()
+end
+
+-- GF-009-16: the kept rows through the filters, the chosen row kept when it is still there.
+function UI.applyFilters()
+    if not panel then return end
+    local keep = state.selected and state.items[state.selected]
+    local keepItem = keep and keep.itemID
+    local keepListing = keep and keep.listing
+    state.items = UI.filteredItems()
     state.selected = nil
     for i, d in ipairs(state.items) do
         if (keepListing and d.listing and d.listing.id == keepListing.id) or (not keepListing and keepItem and d.itemID == keepItem) then
@@ -986,10 +1259,22 @@ function UI.refreshSoon()
     ns.after(0.5, function() refreshTimer = false; if ns.Framework.isModuleShown(UI.ID) then UI.refresh() end end)
 end
 
-function UI.setTab(key)
+-- A tab chosen by the player: the filters stay (種類 back to 全部 when the
+-- tab has no such choice).
+function UI.showTab(key)
+    if key ~= "mine" then key = "guild" end
     state.tab, state.offset, state.selected = key, 0, nil
+    if key == "mine" and state.filter.kind == "stock" then state.filter.kind = "all" end
     if tabs then tabs.select(key) end
     UI.refresh()
+end
+-- A jump (a notice, 職工檔案, the old tab keys): every filter off, then the
+-- one the old tab stood for: "need" = 範圍 我缺的, "offer" = 我可能有多的.
+-- Afterwards UI.listFor(key) and the page's rows are the same list.
+function UI.setTab(key)
+    UI.clearFilters()
+    if key == "need" or key == "offer" then state.filter.scope = key end
+    UI.showTab(key)
 end
 
 
@@ -1248,44 +1533,66 @@ local function build(p)
         local items = {}
         for _, t in ipairs(UI.TABS) do items[#items + 1] = { key = t.key, text = t.text } end
         return items
-    end)(), UI.LIST_X, UI.BAR_Y, function(key) UI.setTab(key) end)
+    end)(), UI.LIST_X, UI.BAR_Y, function(key) UI.showTab(key) end)
     tabs.select(state.tab)
     UI.tabs = tabs
     postButton = Th.button(p, UI.POST_TEXT, UI.POST_W, ns.BUTTON_H)
     postButton:SetPoint("TOPLEFT", p, "TOPLEFT", UI.POST_X, UI.TOOL_Y)
     UI.postButton = postButton
     postButton:SetScript("OnClick", function() UI.openForm() end)
-    -- GF-UI-F: 收集組, shown on 我缺的 / 我可能有多的 only (GF-UI-H: on the tool row).
+    -- GF-009-16: the filter row (as 冒險業務's): 搜尋, 種類, 範圍, 收集組. Typing
+    -- filters at most UI.SEARCH_DELAY late (ns.coalesce, nothing every frame).
+    local FY, FX = UI.FILTER_Y, UI.FILTER_X
+    UI.searchLabel = label(p, "搜尋", ns.FIELD_FONT)
+    UI.searchLabel:SetPoint("TOPLEFT", p, "TOPLEFT", FX.searchLabel, FY - 6)
+    UI.searchBox = Th.editBox(p, UI.SEARCH_W, ns.BUTTON_H)
+    UI.searchBox:SetPoint("TOPLEFT", p, "TOPLEFT", FX.search, FY)
+    if UI.searchBox.SetMaxLetters then UI.searchBox:SetMaxLetters(40) end
+    UI.searchBox.tip = "物品名或職工名"
+    withTip(UI.searchBox)
+    UI.searchBox:SetScript("OnTextChanged", function(self)
+        self.gfText = ns.str(self:GetText())
+        ns.coalesce("supply-search", UI.SEARCH_DELAY, function()
+            if panel and panel:IsShown() then UI.setSearch(UI.searchBox.gfText) end
+        end)
+    end)
+    UI.searchBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    UI.kindLabel = label(p, "種類", ns.FIELD_FONT)
+    UI.kindLabel:SetPoint("TOPLEFT", p, "TOPLEFT", FX.kindLabel, FY - 6)
+    UI.kindDrop = W.dropdown(p, UI.KIND_W, function(v) UI.setKind(v) end)
+    UI.kindDrop:SetPoint("TOPLEFT", p, "TOPLEFT", FX.kind, FY)
+    UI.kindDrop.setItems(UI.KIND_ITEMS.guild); UI.kindDrop.setValue("all")
+    UI.kindDrop.tip = UI.KIND_TIP
+    withTip(UI.kindDrop)
+    UI.scopeLabel = label(p, "範圍", ns.FIELD_FONT)
+    UI.scopeLabel:SetPoint("TOPLEFT", p, "TOPLEFT", FX.scopeLabel, FY - 6)
+    UI.scopeDrop = W.dropdown(p, UI.SCOPE_W, function(v) UI.setScope(v) end)
+    UI.scopeDrop:SetPoint("TOPLEFT", p, "TOPLEFT", FX.scope, FY)
+    UI.scopeDrop.setItems(UI.SCOPE_ITEMS); UI.scopeDrop.setValue("all")
+    UI.scopeDrop.tip = UI.SCOPE_TIP
+    withTip(UI.scopeDrop)
+    -- GF-UI-F: 收集組 (the collection rules in force; 全部 = no filter).
     groupLabel = label(p, "收集組", ns.FIELD_FONT)
-    groupLabel:SetPoint("TOPLEFT", p, "TOPLEFT", UI.GROUP_X, UI.TOOL_Y - 6)
-    groupButton = ns.choiceButton(p, UI.GROUP_W, UI.GROUP_X + 56, UI.TOOL_Y, UI.groupOptions,
+    groupLabel:SetPoint("TOPLEFT", p, "TOPLEFT", FX.groupLabel, FY - 6)
+    groupButton = ns.choiceButton(p, UI.GROUP_W, FX.group, FY, UI.groupOptions,
         function(value) UI.setGroup(value) end, "全部")
     UI.groupLabel, UI.groupButton, UI.autoBox, UI.manualBox = groupLabel, groupButton, autoBox, manualBox
-    -- GF-012-C: 黑箱 (全部／只看黑箱／不看黑箱), in 收集組's place on 調貨看板.
-    UI.stockLabel = label(p, UI.STOCK_TEXT, ns.FIELD_FONT)
-    UI.stockLabel:SetPoint("TOPLEFT", p, "TOPLEFT", UI.GROUP_X, UI.TOOL_Y - 6)
-    UI.stockButton = ns.choiceButton(p, UI.STOCK_FILTER_W, UI.GROUP_X + 56, UI.TOOL_Y, function() return UI.STOCK_FILTERS end,
-        function(value) UI.setStockFilter(value) end, "全部")
-    UI.stockLabel:Hide(); UI.stockButton:Hide()
     -- The list's column header: a faint bar, gold names; the quantity right-aligned.
     header = CreateFrame("Frame", nil, p)
     header:SetPoint("TOPLEFT", p, "TOPLEFT", UI.LIST_X, UI.HEAD_Y)
     header:SetSize(UI.LIST_W, UI.HEAD_H)
     Th.headerBar(header)
     header.cells = {}
-    local C = UI.COL
-    local cols = { { x = C.icon.x, w = C.name.x + C.name.w - C.icon.x }, { x = C.qty.x, w = C.qty.w, right = true },
-        { x = C.match.x, w = C.match.w }, { x = C.fresh.x, w = C.fresh.w } }
-    for i, c in ipairs(cols) do
+    -- GF-009-16: 物品 (from the icon on) and the tab's columns (UI.placeCells).
+    for i = 1, UI.CELLS + 1 do
         local fs = header:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT)
-        fs:SetPoint("LEFT", header, "LEFT", c.x, 0)
-        fs:SetWidth(c.w)
-        fs:SetJustifyH(c.right and "RIGHT" or "LEFT")
-        fs.gfAlign = c.right and "RIGHT" or "LEFT"
+        fs:SetJustifyH("LEFT")
+        fs.gfAlign = "LEFT"
         if fs.SetWordWrap then fs:SetWordWrap(false) end
         header.cells[i] = fs
     end
-    header.cells[1].gfHeadX, header.cells[1].gfHeadW = cols[1].x, cols[1].w
+    header.cells[1].gfHeadX = UI.COL.icon.x
+    UI.placeCells(header, header.cells, UI.LIST_W)
     UI.header = header
     -- Empty / loading / stale / error: the shared state panel in the list area.
     statePanel = W.statePanel(p, UI.LIST_W, 120)

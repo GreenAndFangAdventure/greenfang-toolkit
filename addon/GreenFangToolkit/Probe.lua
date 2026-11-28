@@ -908,3 +908,41 @@ function Probe.command(rest)
     Probe.showCopy()
     return true
 end
+
+---------------------------------------------------------------------------
+-- GF-008-F: /gftk probe sleepingbag prints, for each quest of the sleeping-bag
+-- chain (SleepingBagData route.questChain), whether this character has it done
+-- or in the quest log, and the step the guide works out from that. Read only;
+-- nothing saved. (The IDs come from public guides: this checks them on Forever.)
+---------------------------------------------------------------------------
+
+function Probe.sleepingBagLines()
+    local SB = ns.SleepingBag
+    local route = SB and SB.route and SB.route()
+    if not (route and type(route.questChain) == "table") then return { "睡袋：你的陣營沒有任務編號資料" } end
+    local q = rawget(_G, "C_QuestLog")
+    local function call(name, id)
+        if type(q) ~= "table" or type(q[name]) ~= "function" then return "（沒有此功能）" end
+        local ok, v = pcall(q[name], id)
+        if not ok then return "（出錯）" end
+        return tostring(v)
+    end
+    local out = {}
+    for i, id in ipairs(route.questChain) do
+        out[#out + 1] = string.format("睡袋任務 %d：%d｜已完成 %s｜在任務記錄 %s", i, id,
+            call("IsQuestFlaggedCompleted", id), call("IsOnQuest", id))
+    end
+    local hint = SB.hint and SB.hint()
+    if hint then out[#out + 1] = hint end
+    return out
+end
+
+local probeCommand = Probe.command
+function Probe.command(rest)
+    local sub = ns.str(rest):lower():match("^(%S*)") or ""
+    if sub == "sleepingbag" then
+        for _, line in ipairs(Probe.sleepingBagLines()) do ns.say(line) end
+        return true
+    end
+    return probeCommand(rest)
+end

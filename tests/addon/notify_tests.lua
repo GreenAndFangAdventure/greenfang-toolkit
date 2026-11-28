@@ -330,7 +330,7 @@ return function(T)
         ok(list[1].text:find("2 位", 1, true), "two people now: " .. list[1].text)
         -- clicking finds the item on the page
         eq(N.open(list[1]), "focused", "focused")
-        eq(ns.SupplyUI.state.tab, "need", "我缺的")
+        eq(ns.SupplyUI.state.tab, "guild", "調貨看板 (GF-009-16)"); eq(ns.SupplyUI.state.filter.scope, "need", "範圍 我缺的")
         eq(ns.SupplyUI.state.items[ns.SupplyUI.state.selected].itemID, SCROLL, "the item is chosen")
     end))
 
