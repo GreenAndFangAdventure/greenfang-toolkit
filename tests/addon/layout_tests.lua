@@ -156,9 +156,7 @@ return function(T)
         O.editFee({ skill = 164 }); check("fee", _G[O.FEE_NAME])
         O.openPaste(); check("paste", _G[O.PASTE_NAME])
         O.openServices(); check("services", _G[O.SERVICES_NAME])
-        O.openPicker()
-        local pk = _G[O.PICKER_NAME]
-        eq((overlaps(pk)), "", "picker: overlaps")
+        -- GF-UI-S: no recipe picker window (＋下單 goes to 工匠配方).
         -- The destination picker: the ticket window steps aside (nothing covered), cells apart.
         A.openTicket()
         local grid = A.pickDestination(tf.dest)

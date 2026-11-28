@@ -436,6 +436,26 @@ F.GFSYNC_TIP = {
 F.GFSYNC_SEEN_NOTE = "這只表示這台電腦裝過會寫網站訂單的 GF Sync，不代表它現在正在執行。"
 F.GFSYNC_CHECK = "GF Sync 有沒有在上傳，請看工作列右下角的 GF Sync 圖示。"
 F.GFSYNC_CLICK = "點一下打開「同步與診斷」"
+-- GF-UI-S (owner 2026-11-28): the version takes the sync status colour (the
+-- 「診斷」 buttons had it); the tooltip says what the colour means.
+F.SYNC_COLOR_TIP = {
+    on = "版本號是綠色：同步資料正常記錄中，下線後會上傳到公會網站。",
+    off = "版本號是灰色：同步資料還沒準備好（剛登入或沒有公會時會這樣）。",
+}
+function F.syncColorKey()
+    local c = ns.Sync and ns.Sync.statusColor and ns.Sync.statusColor()
+    if c and ns.Sync.COLOR_OFF and c == ns.Sync.COLOR_OFF then return "off" end
+    return "on"
+end
+-- Puts the colour on the version's text (window open, sync change, mouse leaves).
+function F.paintInfo()
+    local b = window and window.info
+    local fs = b and b.GetFontString and b:GetFontString()
+    local c = ns.Sync and ns.Sync.statusColor and ns.Sync.statusColor()
+    if not (fs and fs.SetTextColor and c) then return nil end
+    fs:SetTextColor(c[1], c[2], c[3])
+    return c
+end
 
 function F.versionText()
     local v = str(ns.VERSION)
@@ -502,6 +522,7 @@ local function placeInfo()
         b:SetText(text)
         b:SetWidth(math.max(1, ns.labelWidth(text)))
     end
+    F.paintInfo()
     if text == "" then b:Hide() else b:Show() end
     return text
 end
@@ -516,6 +537,10 @@ local function showInfoTip(self)
         local c = ns.Theme.C.sub
         for _, line in ipairs(F.gfSyncTip(self.sig)) do GameTooltip:AddLine(line, c[1], c[2], c[3], true) end
     end
+    local tc = ns.Theme.C.sub
+    GameTooltip:AddLine(F.SYNC_COLOR_TIP[F.syncColorKey()], tc[1], tc[2], tc[3], true)
+    -- (no GF Sync words here: GF-UI-L-2 keeps them in 同步與診斷)
+    if ns.Sync and ns.Sync.pending then GameTooltip:AddLine("待上傳 " .. ns.Sync.pending() .. " 筆", tc[1], tc[2], tc[3], true) end
     GameTooltip:AddLine(F.GFSYNC_CLICK)
     GameTooltip:Show()
 end
@@ -537,7 +562,7 @@ local function infoButton()
     end
     b:SetScript("OnClick", function() if ns.Diag then ns.Diag.open() end end)
     b:SetScript("OnEnter", showInfoTip)
-    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    b:SetScript("OnLeave", function() GameTooltip:Hide(); F.paintInfo() end)
     window.info = b
     return b
 end

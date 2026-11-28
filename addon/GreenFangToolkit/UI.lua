@@ -932,20 +932,10 @@ function UI.detailFor(m, own)
     return nil
 end
 
-local syncIndicator
-
 function UI.syncLine()
     return "下線後由 GF Sync 上傳（名冊不含位置與在線狀態）"
 end
 local syncLine = UI.syncLine
-
--- The small 「同步與診斷」 button at the bottom right of the roster page
--- (D-014 point 6). Clicking opens that window; it never switches sync.
-function UI.refreshSyncIndicator()
-    if not syncIndicator then return end
-    local c = ns.Sync.statusColor()
-    if syncIndicator.label then syncIndicator.label:SetTextColor(c[1], c[2], c[3]) end
-end
 
 -- Outbox writes and shared data can come in bursts: redraw at most once a
 -- second (GF-001-D11).
@@ -956,10 +946,7 @@ local function refreshSoon()
         end)
     end
 end
-ns.Sync.onChange(function()
-    UI.refreshSyncIndicator()
-    refreshSoon()
-end)
+ns.Sync.onChange(refreshSoon)
 ns.Share.onUpdate(refreshSoon)
 
 -- GF-UI-B (GF-UI-A §2.2 item 3): what the middle of the list shows instead
@@ -1019,8 +1006,8 @@ function UI.refresh(resetScroll)
     end
     UI.placeCount()
     UI.drawEmpty(UI.emptyState(s))
+    UI.refreshMoreFilter()
     ns.Framework.refreshTitle()
-    UI.refreshSyncIndicator()
     UI.refreshAdminButtons()
     if UI.selected then
         local still
@@ -1718,14 +1705,113 @@ function UI.clearFilters()
     UI.refresh(true)
 end
 
+-- GF-UI-S (owner 2026-11-28, from GF-UI-R's list D-1): 更多篩選, a drop-down
+-- with the check boxes 在線, 接單中, 工具箱 and 等級 __ 以上 (several at once).
+-- The button says how many are on, 「更多篩選（2）」, and is gold; 清除 clears
+-- them. The list is made once with the page (no frames later, no timer); it
+-- closes on a click outside or ESC like every drop-down (Core escRegister).
+UI.MORE_FILTER_TEXT = "更多篩選"
+UI.MORE_FILTER_ROW = 32
+UI.MORE_FILTER_W = 200
+function UI.moreFilterCount()
+    local f = UI.filters
+    local n = 0
+    if f.online then n = n + 1 end
+    if f.active then n = n + 1 end
+    if f.toolkit then n = n + 1 end
+    if f.minLevel then n = n + 1 end
+    return n
+end
+function UI.moreFilterText()
+    local n = UI.moreFilterCount()
+    return n > 0 and (UI.MORE_FILTER_TEXT .. "（" .. n .. "）") or UI.MORE_FILTER_TEXT
+end
+function UI.refreshMoreFilter()
+    local b = UI.moreFilterButton
+    if not b then return nil end
+    local text = UI.moreFilterText()
+    if b.gfText ~= text then b.gfText = text; b:SetText(text) end
+    -- Any on: the theme's chosen look (gold line, faint gold fill, gold text).
+    local on = UI.moreFilterCount() > 0
+    if b.gfSelected ~= on then ns.Theme.setSelected(b, on) end
+    return text
+end
+function UI.buildMoreFilter(f, x, Y)
+    local w = ns.labelWidth(UI.MORE_FILTER_TEXT .. "（4）") + 20 + ns.Framework.DROP_ARROW -- text at 10, the arrow and 6 px on the right
+    local b = ns.Theme.button(f, UI.MORE_FILTER_TEXT, w, ns.BUTTON_H)
+    b:SetPoint("TOPLEFT", f, "TOPLEFT", x, Y)
+    b.gfWidth = w
+    ns.dropArrow(b)
+    local menu = CreateFrame("Frame", nil, b)
+    menu:SetFrameStrata("TOOLTIP") -- above the click-outside blocker, as multiChoiceButton's
+    if menu.SetFrameLevel then menu:SetFrameLevel(100) end
+    menu:SetPoint("TOPLEFT", b, "BOTTOMLEFT", 0, -2)
+    menu:SetSize(UI.MORE_FILTER_W, 4 * UI.MORE_FILTER_ROW + 12)
+    ns.makeOpaque(menu, 0)
+    menu:EnableMouse(true)
+    menu:Hide()
+    ns.escRegister(menu, ns.ESC_LEVEL.menu)
+    b.menu = menu
+    b:SetScript("OnClick", function()
+        if menu:IsShown() then menu:Hide(); return end
+        ns.closeMenus()
+        menu:Show()
+    end)
+    b:HookScript("OnHide", function() menu:Hide() end)
+    local RX, R = 8, UI.MORE_FILTER_ROW
+    local function rowY(i) return -6 - (i - 1) * R end
+    UI.onlineCheck = ns.checkBox(menu, "在線", RX, rowY(1),
+        function(on) UI.filters.online = on; UI.refresh(true) end)
+    -- GF-006-B (R-4.2): 只看接單中 (GF-UI-C: the words are enough).
+    UI.activeCheck = ns.checkBox(menu, "接單中", RX, rowY(2),
+        function(on) UI.filters.active = on; UI.refresh(true) end)
+    -- GF-010-C: 只看有裝工具箱的.
+    UI.toolkitCheck = ns.checkBox(menu, UI.TOOLKIT_FILTER, RX, rowY(3),
+        function(on) UI.filters.toolkit = on; UI.refresh(true) end)
+    UI.toolkitCheck:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(UI.TOOLKIT_FILTER_TIP)
+        GameTooltip:AddLine(UI.TOOLKIT_FILTER_NOTE, 0.85, 0.85, 0.85)
+        GameTooltip:Show()
+    end)
+    UI.toolkitCheck:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    local ly = rowY(4)
+    UI.levelLabel = ns.freeText(menu:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
+    UI.levelLabel:SetPoint("TOPLEFT", menu, "TOPLEFT", RX + 4, ly - 6)
+    UI.levelLabel:SetText("等級")
+    local bx = RX + 4 + ns.labelWidth("等級") + 8
+    UI.levelBox = ns.Theme.editBox(menu)
+    UI.levelBox:SetSize(40, ns.BUTTON_H)
+    UI.levelBox:SetPoint("TOPLEFT", menu, "TOPLEFT", bx, ly)
+    UI.levelBox:SetAutoFocus(false)
+    UI.levelBox:SetMaxLetters(2)
+    if UI.levelBox.SetNumeric then UI.levelBox:SetNumeric(true) end
+    UI.levelBox:SetScript("OnTextChanged", function(self)
+        local n = tonumber(str(self:GetText()))
+        UI.filters.minLevel = (n and n > 1) and n or nil
+        UI.refreshMoreFilter()
+        if UI.clearing then return end
+        UI.soon("level", UI.SEARCH_DELAY, function() if panel then UI.refresh(true) end end)
+    end)
+    UI.levelBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    UI.levelBox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    UI.levelSuffix = ns.freeText(menu:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
+    UI.levelSuffix:SetPoint("TOPLEFT", menu, "TOPLEFT", bx + 40 + 8, ly - 6) -- the box border is drawn ~6 px outside it
+    UI.levelSuffix:SetText("以上")
+    UI.moreFilterButton = b
+    UI.moreFilterMenu = menu
+    UI.refreshMoreFilter()
+    return b
+end
+
 -- GF-UI-B (GF-UI-A §1.2, §2.2): the page from top to bottom:
 --   tool bar (y -36, 30 px controls):
---     [更新] 搜尋 [box] [專業][職業] [ ]在線 [ ]接單中 等級 [  ] 以上 [清除]   [人頭] 12/80
+--     [更新] 搜尋 [box] [專業][職業] [更多篩選] [清除]   [人頭] 12/80 (GF-UI-S)
 --   人力盤點 (y -72, GF-UI-F: moved up from the bottom row)
 --   column header (y -108, 28 px, gold, arrow textures)
 --   the list (36 px rows)
 --   the chosen member's buttons (44 px bar)
---   bottom row: [邀請] [公會] [遊戲公會] [診斷] on the right
+--   bottom row: [邀請] [公會] on the right (GF-UI-S: 診斷 is gone)
 -- GF-UI-M (owner: the list's last line was cut in half by the bottom row):
 -- the list is 12 whole rows (680 - 138 - 110 = 432 = 12 x 36); the wheel
 -- moves half a list (6 rows), so a scrolled list shows whole rows too.
@@ -1808,42 +1894,10 @@ local function build(p)
     UI.classChoice = ns.multiChoiceButton(f, 110, x, Y, UI.classOptions,
         function() UI.syncChoiceFilters(); UI.refresh(true) end, UI.choiceSummary("全部職業", "職業"))
     after(110)
-    UI.onlineCheck = ns.checkBox(f, "在線", x, Y - 1,
-        function(on) UI.filters.online = on; UI.refresh(true) end)
-    after(28 + ns.labelWidth("在線"))
-    -- GF-006-B (R-4.2): 只看接單中 (GF-UI-C: the words are enough).
-    local hammer = "接單中"
-    UI.activeCheck = ns.checkBox(f, hammer, x, Y - 1,
-        function(on) UI.filters.active = on; UI.refresh(true) end)
-    after(28 + ns.labelWidth(hammer))
-    -- GF-010-C: 只看有裝工具箱的 (next to 在線 / 接單中, the same check box).
-    UI.toolkitCheck = ns.checkBox(f, UI.TOOLKIT_FILTER, x, Y - 1,
-        function(on) UI.filters.toolkit = on; UI.refresh(true) end)
-    UI.toolkitCheck:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine(UI.TOOLKIT_FILTER_TIP)
-        GameTooltip:AddLine(UI.TOOLKIT_FILTER_NOTE, 0.85, 0.85, 0.85)
-        GameTooltip:Show()
-    end)
-    UI.toolkitCheck:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    after(28 + ns.labelWidth(UI.TOOLKIT_FILTER))
-    UI.levelLabel = label("等級")
-    UI.levelBox = ns.Theme.editBox(f)
-    UI.levelBox:SetSize(40, ns.BUTTON_H)
-    UI.levelBox:SetPoint("TOPLEFT", f, "TOPLEFT", x + 4, Y)
-    UI.levelBox:SetAutoFocus(false)
-    UI.levelBox:SetMaxLetters(2)
-    if UI.levelBox.SetNumeric then UI.levelBox:SetNumeric(true) end
-    UI.levelBox:SetScript("OnTextChanged", function(self)
-        local n = tonumber(str(self:GetText()))
-        UI.filters.minLevel = (n and n > 1) and n or nil
-        if UI.clearing then return end
-        UI.soon("level", UI.SEARCH_DELAY, function() if panel then UI.refresh(true) end end)
-    end)
-    UI.levelBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    x = x + 4 + 40 + 8 -- the box border is drawn ~6 px outside it
-    UI.levelSuffix = label("以上")
-    x = x + UI.TOOLBAR_GAP - 2
+    -- GF-UI-S (owner 2026-11-28): 在線, 接單中, 工具箱 and 等級 __ 以上 in one
+    -- drop-down, 更多篩選 (its count when any is on); 清除 still clears them.
+    UI.buildMoreFilter(f, x, Y)
+    after(UI.moreFilterButton.gfWidth)
     UI.clearButton = button(f, "清除", nil, nil, x, Y, UI.clearFilters)
     after(UI.clearButton.gfWidth)
     UI.toolbarRight = x
@@ -1853,7 +1907,7 @@ local function build(p)
     UI.countText = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
     UI.countText:SetText("")
     rosterControls = { UI.updateButton, searchBox, UI.clearButton, UI.skillChoice, UI.classChoice,
-        UI.onlineCheck, UI.levelBox, UI.toolkitCheck }
+        UI.moreFilterButton }
     -- Column header: 28 px, a faint bar with a line (GF-UI-D), gold names; the sorted one white with an arrow.
     local header = CreateFrame("Frame", nil, f)
     header:SetPoint("TOPLEFT", f, "TOPLEFT", 20, UI.HEADER_Y)
@@ -1923,10 +1977,10 @@ local function build(p)
     -- GF-011-B: placed only while the page is really on screen; the window shows
     -- after the page (Framework.open), and its OnShow reaches the page here.
     p:HookScript("OnShow", function() pcall(UI.placeOwnButtons) end)
-    -- Bottom row: 診斷 on the right; the guild buttons left of it (refreshAdminButtons).
-    syncIndicator = ns.Diag.smallButton(f, "BOTTOMRIGHT", -20, UI.BOTTOM_Y)
-    UI.syncIndicator = syncIndicator
-    UI.diagLeft = ns.Framework.PANEL_WIDTH - 20 - (syncIndicator.gfWidth or 0)
+    -- Bottom row: the guild buttons at the right end (refreshAdminButtons). GF-UI-S:
+    -- 診斷 is gone (its colour is on the version); they take its place, the last
+    -- one's right edge where 診斷's was (20 px from the page's right).
+    UI.diagLeft = ns.Framework.PANEL_WIDTH - 20 + 10
     -- GF-001-Q, GF-UI-C (owner): 邀請 / 公會, text only (遊戲公會 is gone).
     UI.inviteButton = O.textButton(f, "邀請", function() G.inviteGuild() end)
     UI.infoButton = O.textButton(f, "公會", function() UI.openGuildInfo() end)

@@ -422,7 +422,7 @@ return function(T)
         ok(-UI.FILTER_Y >= -UI.TOOL_Y + ns.BUTTON_H + 4, "收集組 under the switches")
         -- The words: no jokes on the switches themselves.
         for _, t in ipairs({ UI.SWITCH_STATE.on, UI.SWITCH_STATE.off, UI.AUTO_TEXT, UI.MANUAL_TEXT,
-            UI.SWITCH_HELP.auto.text, UI.SWITCH_HELP.manual.text }) do
+            UI.SWITCH_HELP.auto.text }) do -- GF-UI-S: 手動刊登's 說明 is gone
             ok(ns.labelWidth(t) < 120, "short: " .. t)
         end
     end))
@@ -434,10 +434,12 @@ return function(T)
         UI.autoBox.help._scripts.OnClick(UI.autoBox.help)
         local f = UI.card("auto")
         ok(f and f:IsShown(), "the card opens next to the switch")
-        eq(f.title._text, "自動集料說明", "title")
-        local all = table.concat((function() local t = {} for i, fs in ipairs(f.lines) do t[i] = fs._text end return t end)(), "\n")
-        for _, word in ipairs({ "會做什麼", "資料從哪來", "分享什麼", "不會做什麼", "不公開背包", "交易", "關掉", "實驗功能", "預設關" }) do
-            ok(all:find(word, 1, true), "says: " .. word)
+        -- GF-UI-S: the card is 集料項目 (the items only); its sentences moved to the 說明 mode.
+        eq(f.title._text, "集料項目", "title")
+        eq(#f.lines, 0, "no sentences on the card")
+        local all = ns.Help.TEXT.supply_auto[2]
+        for _, word in ipairs({ "任務進度", "不公開背包", "交易", "實驗功能", "預設關" }) do
+            ok(all:find(word, 1, true), "說明 mode says: " .. word)
         end
         -- Every item of every usable rule, in the rule's order, nothing else.
         local want = {}
@@ -465,18 +467,16 @@ return function(T)
         ok(not f:IsShown(), "gone with the page")
     end))
 
-    test("GF-FIX-F 手動刊登 card: what turning it off does", done(function()
+    test("GF-FIX-F 手動刊登: what turning it off does (GF-UI-S: in the 說明 mode)", done(function()
         local ns = login({})
         local UI = ns.SupplyUI
         ns.Framework.open("supply")
-        local f = UI.openCard("manual", UI.manualBox.help)
-        eq(f.title._text, "手動刊登說明", "title")
-        local all = {}
-        for _, fs in ipairs(f.lines) do all[#all + 1] = fs._text end
-        all = table.concat(all, "\n")
-        for _, word in ipairs({ "關掉後", "不再分享你的刊登", "也不顯示別人的刊登", "再打開就恢復分享" }) do
+        -- GF-UI-S: no 手動刊登說明 card; what it said is in the 說明 mode.
+        eq(UI.manualBox.help, nil, "no 說明 button")
+        eq(UI.openCard("manual"), nil, "no card")
+        local all = ns.Help.TEXT.supply_manual[2]
+        for _, word in ipairs({ "關掉後", "不分享也不顯示刊登", "再打開就恢復" }) do
             ok(all:find(word, 1, true), "says: " .. word)
         end
-        eq(#f.itemRows, 0, "no item list")
     end))
 end

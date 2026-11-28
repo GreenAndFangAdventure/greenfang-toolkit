@@ -1156,7 +1156,7 @@ local function buildForm()
     f:SetPoint("CENTER", 0, 60)
     f:EnableMouse(true)
     ns.exclusivePopup(f)
-    if f.TitleText then f.TitleText:SetText("申領黑箱物品") end
+    if f.TitleText then f.TitleText:SetText("申領臨時黑箱物品") end
     local names = { "物品", "保管人", "數量", "用途", "備註" }
     local X = O.controlX(names)
     local function y(i) return -50 - (i - 1) * 50 end
@@ -1306,7 +1306,7 @@ function UI.stockChanged() if panel and panel:IsShown() then UI.refresh() end en
 
 ns.Framework.register({
     id = UI.ID,
-    title = "臨時秘密黑箱",
+    title = "臨時黑箱",
     short = "黑箱",
     subTitle = "臨時黑箱",
     entry = "logistics",

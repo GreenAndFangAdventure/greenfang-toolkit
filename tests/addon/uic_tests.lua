@@ -139,12 +139,12 @@ return function(T)
         local ns = login({ guildPerms = ALL, myRankIndex = 1 })
         ns.Framework.open("roster")
         eq(ns.UI.gameGuildButton, nil, "遊戲公會 gone")
-        for _, b in ipairs({ ns.UI.inviteButton, ns.UI.infoButton, ns.UI.syncIndicator }) do
+        -- GF-UI-S: 診斷 is gone (its colour is on the version).
+        for _, b in ipairs({ ns.UI.inviteButton, ns.UI.infoButton }) do
             ok(b:IsShown(), plain(b._text) .. " shown")
             ok(not b._text:find("|T", 1, true), plain(b._text) .. ": no icon")
         end
-        eq(ns.UI.syncIndicator._text, "診斷", "診斷")
-        for _, b in ipairs(ns.Diag.smallButtons()) do eq(b._text, "診斷", "every page: 診斷") end
+        eq(ns.UI.syncIndicator, nil, "no 診斷")
     end)
 
     test("GF-UI-C 6 guild info: the whole text (scrolls); 編輯 opens a large multi-line editor with 儲存 / 取消", function()
