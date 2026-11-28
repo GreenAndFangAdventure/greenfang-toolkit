@@ -181,8 +181,8 @@ return function(T)
         ok(not grid.quest:IsShown(), "GF-002-H R-16.26: no quest cell in the grid (its own button)")
         local tf = _G[U.TICKET_NAME]
         grid:Hide()
-        ok(tf.pickQuest:IsShown() and not tf.pickQuest.disabled, "the 任務 button")
-        wow.click(tf.pickQuest)
+        ok(tf.destQuest:IsShown() and not tf.destQuest.disabled, "the 任務 button")
+        wow.click(tf.destQuest) -- GF-UI-O: the 活動 row's 任務
         local qp = U.questPickerFrame()
         ok(qp:IsShown(), "quest picker open"); ok(not grid:IsShown(), "grid closed")
         U.pickDestination(UIParent)
@@ -192,7 +192,7 @@ return function(T)
         ok(U.picker():IsShown() and not grid:IsShown(), "the time picker closes the grid")
         GetNumQuestLogEntries, GetQuestLogTitle = nil, nil
         U.drawTicket()
-        ok(tf.pickQuest.disabled, "no quest log: 任務 is greyed")
+        ok(tf.destQuest.disabled, "no quest log: 任務 is greyed")
         ok(d, "draft")
     end)
 
