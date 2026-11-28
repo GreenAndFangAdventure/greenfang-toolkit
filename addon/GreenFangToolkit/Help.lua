@@ -7,6 +7,14 @@
 -- for. Press 「結束說明」 again, ESC, another page, closing the window or
 -- combat ends it. The layer takes every click, so nothing under it is pressed.
 --
+-- GF-UI-T (owner, 0.16.22: 「按下說明應說明文字要直接有」): the words are on
+-- screen at once, no mouse needed: a 「號碼對照」 panel lists every number with
+-- its name and line (「1 搜尋：打配方或物品的名字…」). It sits beside the window
+-- when the screen has room; else in an empty part of the window; else inside
+-- the largest frame (right part, below that frame's number), so it never
+-- covers another part or number. A long list
+-- scrolls (wheel or bar); the mouse on a line lights its frame.
+--
 -- What each page has: HelpText.lua (H.TEXT the words, H.register the parts),
 -- one table per page; a part not on screen at that moment is skipped.
 --
@@ -22,7 +30,7 @@ local H = {}
 ns.Help = H
 
 H.BUTTON_TEXT, H.STOP_TEXT = "說明", "結束說明"
-H.BUTTON_TIP = "標出這個視窗每個功能的用途；滑鼠移到框上看說明"
+H.BUTTON_TIP = "標出這個視窗每個功能，旁邊直接列出每個號碼的說明"
 H.STOP_TIP = "再按一次、按 ESC 或切換頁面都會結束說明"
 H.COMBAT_TEXT = "戰鬥中不能開說明，脫離戰鬥後再按一次「說明」。"
 H.ICONS = { "Interface\\FriendsFrame\\InformationIcon", "Interface\\Common\\help-i", "Interface\\Icons\\INV_Misc_QuestionMark" }
@@ -33,11 +41,22 @@ H.TAG_H = 20       -- the number's box
 H.TAG_GAP = 2      -- a number outside its frame keeps this gap
 H.DIM = 0.45       -- the dark layer's alpha
 H.LEVEL = 200      -- the layer is this many levels above its window (above the page's own buttons)
+-- GF-UI-T: the 「號碼對照」 panel.
+H.LEGEND_TITLE = "號碼對照（每個框上的號碼是什麼）"
+H.LEGEND_W = 300       -- beside the window
+H.LEGEND_MAX_W = 460   -- inside a frame: at most this wide, at most LEGEND_SHARE of the frame
+H.LEGEND_SHARE = 0.5
+H.LEGEND_MIN_W = 240
+H.LEGEND_MIN_H = 150
+H.LEGEND_GAP = 6       -- from the window / inside the frame
+H.LEGEND_PAD = 8
+H.LEGEND_TITLE_H = 24
+H.LEGEND_ROW_GAP = 6
 
 H.pages = {}       -- page key -> { { key = text key, get = function, area = function, when = function } }
 H.TEXT = H.TEXT or {} -- text key -> { name, line } (HelpText.lua)
 H.POPUP = {}       -- pop-up frame name -> page key (HelpText.lua)
-H.made = { buttons = 0, overlays = 0, boxes = 0, tags = 0 } -- frames ever made (tests: none until used)
+H.made = { buttons = 0, overlays = 0, boxes = 0, tags = 0, legends = 0 } -- frames ever made (tests: none until used)
 H.active = nil     -- { root, key, boxes = { ... } } while help is shown
 
 -- Add parts to a page (several calls add up). entry: key = H.TEXT key;
@@ -196,6 +215,97 @@ function H.placeTags(R, boxes, sizes, gap, obstacles)
     return tags
 end
 
+-- GF-UI-T: where the 「號碼對照」 panel goes (screen pixels). R the window, S
+-- the screen (nil = unknown), boxes / tags from above; o: w (width beside the
+-- window), maxW, share, minW, minH, gap, skip (the space a number takes at a
+-- frame's top), heightAt(w) -> the height the panel wants at width w. Pure.
+-- o.obstacles: more rects to keep clear (the 說明 button).
+-- Returns rect, where ("side" | "free" | "frame" | "corner"), host (the frame's index).
+function H.placeLegend(R, S, boxes, tags, o)
+    local gap, minH = o.gap or 0, o.minH or 0
+    -- 1. Beside the window: right, left (as tall as the window at most), then below, above.
+    if S then
+        local w = o.w
+        local h = math.min(o.heightAt(w), R.t - R.b)
+        for _, l in ipairs({ R.r + gap, R.l - gap - w }) do
+            local c = { l = l, r = l + w, t = R.t, b = R.t - h }
+            if inside(c, S) then return c, "side" end
+        end
+        local below = R.b - gap - S.b
+        if below >= minH then
+            local c = { l = R.l, r = R.l + w, t = R.b - gap, b = R.b - gap - math.min(h, below) }
+            if inside(c, S) then return c, "side" end
+        end
+        local above = S.t - (R.t + gap)
+        if above >= minH then
+            local c = { l = R.l, r = R.l + w, b = R.t + gap, t = R.t + gap + math.min(h, above) }
+            if inside(c, S) then return c, "side" end
+        end
+    end
+    -- 2. An empty part of the window (touches no frame, number or obstacle): the
+    -- tallest one (up to what the panel wants), tops and lefts taken from the edges.
+    local free, freeH
+    do
+        local w = math.min(o.w, R.r - R.l - 2 * gap)
+        local want = o.heightAt(w)
+        local obs = {}
+        for _, b in ipairs(boxes) do obs[#obs + 1] = b.rect end
+        for _, t in pairs(tags or {}) do obs[#obs + 1] = t end
+        for _, x in ipairs(o.obstacles or {}) do obs[#obs + 1] = x end
+        local lefts, tops = { R.r - gap - w, R.l + gap }, { R.t - gap }
+        for _, x in ipairs(obs) do
+            lefts[#lefts + 1] = x.r + gap; lefts[#lefts + 1] = x.l - gap - w
+            tops[#tops + 1] = x.b - gap
+        end
+        local best, bestH
+        for _, l in ipairs(lefts) do
+            if l >= R.l + gap - 0.01 and l + w <= R.r - gap + 0.01 then
+                for _, t in ipairs(tops) do
+                    if t <= R.t - gap + 0.01 then
+                        local floor, ok = R.b + gap, true
+                        for _, x in ipairs(obs) do
+                            if x.l < l + w and l < x.r then
+                                if x.t > t and x.b < t then ok = false; break end
+                                if x.t <= t then floor = math.max(floor, x.t + gap) end
+                            end
+                        end
+                        local h = math.min(t - floor, want)
+                        if ok and h >= minH and h > (bestH or 0) + 0.5 then best, bestH = { l = l, r = l + w, t = t, b = t - h }, h end
+                    end
+                end
+            end
+        end
+        free, freeH = best, bestH
+        if free and freeH >= want - 0.5 then return free, "free" end
+    end
+    -- 3. Inside the largest frame that holds it: its right part, below its number
+    -- (when the empty part found above is much shorter).
+    local best, bestArea, host
+    for i, b in ipairs(boxes) do
+        local r = b.rect
+        local inner = { l = r.l + gap, r = r.r - gap, t = r.t - gap - (o.skip or 0), b = r.b + gap }
+        local iw, ih = inner.r - inner.l, inner.t - inner.b
+        if iw >= o.minW and ih >= minH and iw * ih > (bestArea or 0) then best, bestArea, host = inner, iw * ih, i end
+    end
+    if best then
+        local w = math.max(o.minW, math.min(o.maxW, (best.r - best.l) * (o.share or 1)))
+        w = math.min(w, best.r - best.l)
+        local h = math.min(o.heightAt(w), best.t - best.b)
+        local c = { l = best.r - w, r = best.r, t = best.t, b = best.t - h }
+        local clear = true
+        for _, t in pairs(tags or {}) do if overlaps(c, t) then clear = false end end
+        -- An empty part shows at least two thirds of what the frame would: it wins
+        -- (it covers nothing).
+        if free and freeH * 1.5 >= h then return free, "free" end
+        if clear then return c, "frame", host end
+    end
+    if free then return free, "free" end
+    -- 4. Last: the window's bottom right corner.
+    local w = math.min(o.w, R.r - R.l - 2 * gap)
+    local h = math.min(o.heightAt(w), (R.t - R.b) / 2)
+    return { l = R.r - gap - w, r = R.r - gap, b = R.b + gap, t = R.b + gap + h }, "corner"
+end
+
 ---------------------------------------------------------------------------
 -- The button
 ---------------------------------------------------------------------------
@@ -345,6 +455,117 @@ local function tagAt(ov, i)
     return t
 end
 
+-- GF-UI-T: the 「號碼對照」 panel (one per layer, its lines pooled).
+local function legendFor(ov)
+    if ov.legend then return ov.legend end
+    local Th = ns.Theme
+    local lg = CreateFrame("Frame", nil, ov)
+    if lg.SetFrameLevel and ov.GetFrameLevel then
+        local lv = num(ov:GetFrameLevel())
+        if lv then lg:SetFrameLevel(lv + 10) end
+    end
+    lg.fill = Th.fill(lg, Th.C.form, "BACKGROUND")
+    lg.edges = Th.border(lg, Th.C.gold, "BORDER")
+    lg:EnableMouse(true) -- a click on it stops here too
+    lg.title = label(lg, H.LEGEND_TITLE, Th.FONT.chosen or ns.FIELD_FONT)
+    lg.title:SetPoint("TOPLEFT", lg, "TOPLEFT", H.LEGEND_PAD, -H.LEGEND_PAD)
+    lg.rows, lg.offset = {}, 0
+    lg.bar = ns.Widgets.scrollBar(lg, 100, function(o) lg.offset = o; H.layoutLegend(lg) end)
+    lg.bar:SetPoint("TOPRIGHT", lg, "TOPRIGHT", -4, -(H.LEGEND_PAD + H.LEGEND_TITLE_H))
+    if lg.EnableMouseWheel then lg:EnableMouseWheel(true) end
+    lg:SetScript("OnMouseWheel", function(_, delta) lg.bar.scrollBy(-(tonumber(delta) or 0)) end)
+    lg:Hide()
+    ov.legend = lg
+    H.made.legends = H.made.legends + 1
+    return lg
+end
+
+local function legendRow(lg, i)
+    local r = lg.rows[i]
+    if r then return r end
+    r = CreateFrame("Frame", nil, lg)
+    r.text = r:CreateFontString(nil, "OVERLAY", ns.LABEL_FONT)
+    r.text:SetPoint("TOPLEFT", r, "TOPLEFT", 0, 0)
+    if r.text.SetJustifyH then r.text:SetJustifyH("LEFT") end
+    if r.text.SetJustifyV then r.text:SetJustifyV("TOP") end
+    if r.text.SetWordWrap then r.text:SetWordWrap(true) end
+    r:EnableMouse(true)
+    -- The mouse on a line lights its frame.
+    r:SetScript("OnEnter", function(self) if self.gfBox and self.gfBox.gfLit then ns.Theme.color(self.gfBox.gfLit, ns.Theme.C.gold, 0.18) end end)
+    r:SetScript("OnLeave", function(self) if self.gfBox then boxLeave(self.gfBox) end end)
+    lg.rows[i] = r
+    return r
+end
+
+-- The line of number i: 「1 名稱：說明」, the number and name in gold.
+function H.legendLine(i, key)
+    local t = H.TEXT[key] or { key, "" }
+    local line = "|cffcfb77e" .. tostring(i) .. "  " .. str(t[1]) .. "|r"
+    if str(t[2]) ~= "" then line = line .. "：" .. t[2] end
+    return line
+end
+
+-- Fill the lines for the shown frames; each line's height at the text width w.
+local function fillLegend(lg, boxes, w)
+    lg.count, lg.heights = #boxes, {}
+    for i, b in ipairs(boxes) do
+        local r = legendRow(lg, i)
+        r.gfBox = b
+        r.text:SetWidth(w)
+        r.text:SetHeight(0) -- measure the whole wrapped text
+        r.text:SetText(H.legendLine(i, b.gfKey))
+        local h = math.ceil(ns.textHeight(r.text, w))
+        r.text:SetHeight(h)
+        r:SetSize(w, h)
+        lg.heights[i] = h
+    end
+    for i = #boxes + 1, #lg.rows do lg.rows[i]:Hide(); lg.rows[i].gfBox = nil end
+end
+
+-- The panel's whole height at text width w (title and padding included).
+local function legendHeight(lg, boxes, w)
+    fillLegend(lg, boxes, w)
+    local h = 2 * H.LEGEND_PAD + H.LEGEND_TITLE_H
+    for i = 1, lg.count do h = h + lg.heights[i] + H.LEGEND_ROW_GAP end
+    return h
+end
+
+local function textWidthFor(w) return w - 2 * H.LEGEND_PAD - ns.Widgets.SCROLL_W - 4 end
+
+-- Show the lines from lg.offset that fit; the bar scrolls when they do not all fit.
+function H.layoutLegend(lg)
+    local room = (lg.gfH or 0) - 2 * H.LEGEND_PAD - H.LEGEND_TITLE_H
+    local n = lg.count or 0
+    -- The last start that still shows the end of the list.
+    local maxOff, used = math.max(0, n - 1), 0 -- the last line always can be reached
+    for i = n, 1, -1 do
+        used = used + lg.heights[i] + H.LEGEND_ROW_GAP
+        if used > room + H.LEGEND_ROW_GAP then break end
+        maxOff = i - 1
+    end
+    lg.offset = math.max(0, math.min(lg.offset or 0, maxOff))
+    local y = -(H.LEGEND_PAD + H.LEGEND_TITLE_H)
+    local shown = 0
+    for i = 1, n do
+        local r = lg.rows[i]
+        local h = lg.heights[i]
+        if i > lg.offset and (i == lg.offset + 1 or (-y + h) <= (lg.gfH - H.LEGEND_PAD) + 0.5) then
+            r:ClearAllPoints()
+            r:SetPoint("TOPLEFT", lg, "TOPLEFT", H.LEGEND_PAD, y)
+            r:Show()
+            y = y - h - H.LEGEND_ROW_GAP
+            shown = shown + 1
+        else
+            r:Hide()
+        end
+    end
+    lg.bar.setHeight(math.max(40, room))
+    lg.bar.sync(lg.offset, n, n - maxOff)
+    if maxOff > 0 then lg.bar:Show() else lg.bar:Hide() end
+    lg.shown = shown
+    return shown
+end
+
 ---------------------------------------------------------------------------
 -- On and off
 ---------------------------------------------------------------------------
@@ -420,6 +641,29 @@ function H.start(root)
     end
     for i = #placed + 1, #ov.boxes do ov.boxes[i]:Hide(); ov.boxes[i].gfRect = nil end
     for i = #placed + 1, #ov.tags do ov.tags[i]:Hide(); ov.tags[i].gfRect = nil end
+    -- GF-UI-T: the words on screen at once (the 「號碼對照」 panel).
+    if R and #placed > 0 then
+        local lg = legendFor(ov)
+        local shownBoxes = {}
+        for i = 1, #placed do shownBoxes[i] = ov.boxes[i] end
+        local S = H.rectOf(UIParent)
+        local lr, where, host = H.placeLegend(R, S, placed, tags, {
+            w = H.LEGEND_W * s, maxW = H.LEGEND_MAX_W * s, share = H.LEGEND_SHARE, minW = H.LEGEND_MIN_W * s,
+            minH = H.LEGEND_MIN_H * s, gap = H.LEGEND_GAP * s, skip = (H.TAG_H + H.TAG_GAP) * s,
+            heightAt = function(w) return legendHeight(lg, shownBoxes, textWidthFor(w / s)) * s end,
+            obstacles = (root.gfHelpButton and H.rectOf(root.gfHelpButton)) and { H.rectOf(root.gfHelpButton) } or nil,
+        })
+        local lw, lh = (lr.r - lr.l) / s, (lr.t - lr.b) / s
+        fillLegend(lg, shownBoxes, textWidthFor(lw))
+        lg:ClearAllPoints()
+        lg:SetPoint("TOPLEFT", ov, "TOPLEFT", (lr.l - R.l) / s, (lr.t - R.t) / s)
+        lg:SetSize(lw, lh)
+        lg.gfH, lg.gfRect, lg.gfWhere, lg.gfHost, lg.offset = lh, lr, where, host, 0
+        lg:Show()
+        H.layoutLegend(lg)
+    elseif ov.legend then
+        ov.legend:Hide()
+    end
     H.active = { root = root, key = key, overlay = ov, count = #placed, window = R }
     if root.gfHelpButton then paintButton(root.gfHelpButton, true) end
     return true
@@ -432,6 +676,7 @@ function H.stop()
     local ov = a.overlay
     for _, b in ipairs(ov.boxes) do b:Hide() end
     for _, t in ipairs(ov.tags) do t:Hide() end
+    if ov.legend then ov.legend:Hide() end
     if ov:IsShown() then ov:Hide() end
     if a.root.gfHelpButton then paintButton(a.root.gfHelpButton, false) end
     if GameTooltip then GameTooltip:Hide() end
@@ -450,6 +695,7 @@ function H.inUse()
     if a then
         for _, b in ipairs(a.overlay.boxes) do if b:IsShown() then n = n + 1 end end
         for _, t in ipairs(a.overlay.tags) do if t:IsShown() then n = n + 1 end end
+        if a.overlay.legend and a.overlay.legend:IsShown() then n = n + 1 end
     end
     return n
 end
