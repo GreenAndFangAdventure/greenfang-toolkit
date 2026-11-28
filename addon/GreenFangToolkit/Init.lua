@@ -128,6 +128,7 @@ local function handleSlash(msg)
         local id, copper = rest:match("^fake%s+(%d+)%s+(%d+)")
         Prices.fake(id, copper)
         ns.Diag.open()
+    elseif cmd == "probe" and rest:lower():match("^share") then Comm.probeShare() -- GF-001-D15
     elseif cmd == "probe" and ns.Probe then ns.Probe.command(rest) -- GF-PROBE
     elseif ns.Framework.get(cmd) then
         ns.Framework.open(cmd)
@@ -220,8 +221,18 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
             Sync.recordRecipeNames()
         end
     elseif event == "CHAT_MSG_ADDON" then
-        if arg1 == Share.PREFIX then Share.onMessage(arg1, arg2, arg3, arg4)
-        elseif not Ledger.dispatch(arg1, arg2, arg3, arg4) then Comm.onMessage(arg1, arg2, arg3, arg4) end
+        -- GF-001-D15: every result is counted for 同步與診斷 (Comm.noteRx).
+        local result
+        if arg1 == Share.PREFIX then result = Share.onMessage(arg1, arg2, arg3, arg4)
+        else
+            local took, r = Ledger.dispatch(arg1, arg2, arg3, arg4)
+            if took then result = r
+            else
+                local stored, why = Comm.onMessage(arg1, arg2, arg3, arg4)
+                result = stored and "ok" or why
+            end
+        end
+        Comm.noteRx(arg1, arg4, result)
     elseif event == "ZONE_CHANGED_NEW_AREA" then
         Share.ownChanged(true)
     elseif event == "TRADE_SKILL_SHOW" or event == "TRADE_SKILL_LIST_UPDATE"

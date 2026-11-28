@@ -898,6 +898,7 @@ drain = function()
             else
                 r = ns.call(C_ChatInfo.SendAddonMessage, Share.PREFIX, item.msg, "GUILD")
             end
+            ns.Comm.noteSend(Share.PREFIX, r) -- GF-001-D15
             if throttledCode(r) then
                 allowance = 0; stats.throttled = stats.throttled + 1
                 break
@@ -1796,9 +1797,7 @@ function Share.systemFilter(_, _, text, ...)
 end
 
 function Share.register()
-    if C_ChatInfo and type(C_ChatInfo.RegisterAddonMessagePrefix) == "function" then
-        ns.call(C_ChatInfo.RegisterAddonMessagePrefix, Share.PREFIX)
-    end
+    ns.Comm.registerPrefix(Share.PREFIX) -- GF-001-D15: the result shows in 同步與診斷
     -- FA relocated.md: ChatFrame_AddMessageEventFilter is a Blizzard_Deprecated
     -- shim on Forever; ChatFrameUtil.AddMessageEventFilter is the current name.
     if not Share.filterAdded then

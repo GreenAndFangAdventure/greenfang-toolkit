@@ -298,7 +298,7 @@ return function(T)
         ok(not O.ledger:get(me, "W").v:find(gone, 1, true), "gone from my W record")
         wow.click(ns.Diag.clearButton)
         eq(wow.popup(), nil, "nothing left: no box")
-        eq(ns.Diag.clearButton:GetText(), "沒有紀錄", "says so on the button")
+        eq(ns.Diag.clearButton:GetText(), "沒有結案", "says so on the button")
     end)
 
     ---------------------------------------------------------------------------

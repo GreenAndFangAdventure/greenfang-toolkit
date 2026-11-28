@@ -12,6 +12,8 @@ local Diag = {}
 ns.Diag = Diag
 
 Diag.WINDOW_NAME = "GreenFangToolkit_DiagWindow"
+Diag.CLEAR_LABEL = "清除結案" -- GF-001-D15 (was 清除紀錄; buttons stay 2-4 characters, GF-UI-A §2.11)
+Diag.CLEAR_TIP = "只刪你已經結束（成交或取消）的委託紀錄，進行中的委託不會動。按下去會先問一次。"
 local window
 local lines = {}
 
@@ -34,6 +36,8 @@ function Diag.shareText()
     if #skipped > 0 then
         text = text .. "｜專業視窗有篩選，配方沒有更新：" .. table.concat(skipped, "、")
     end
+    -- GF-001-D15: what this session heard and the send / prefix checks.
+    if ns.Comm.rxText then text = text .. "\n" .. ns.Comm.rxText() end
     return text
 end
 
@@ -259,7 +263,7 @@ local function create()
         lines[i] = body
     end
     -- GF-UI-C (item 12): text only.
-    -- 匯出 [TSV] [JSON]  [更新]  [小地圖]  [清除紀錄]  [ ] 測試
+    -- 匯出 [TSV] [JSON]  [更新]  [小地圖]  [清除結案]  [ ] 測試
     f.exportLabel = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
     f.exportLabel:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 20, 22)
     f.exportLabel:SetText("匯出")
@@ -273,7 +277,14 @@ local function create()
         ns.after(3, function() self:SetText("小地圖") end)
     end)
     -- GF-UI-C (owner): delete my closed orders, after the game's confirm box.
-    Diag.clearButton, x = button(f, "清除紀錄", x, function() Diag.askClearOrders() end)
+    -- GF-001-D15 (owner did not understand 「清除紀錄」): says what it deletes.
+    Diag.clearButton, x = button(f, Diag.CLEAR_LABEL, x, function() Diag.askClearOrders() end)
+    Diag.clearButton:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine(Diag.CLEAR_TIP, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    Diag.clearButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
     Diag.minimapButton:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("重置")
@@ -302,19 +313,19 @@ local function create()
     return f
 end
 
--- 清除紀錄: the game's confirm box with how many; nothing to delete = nothing asked.
+-- 清除結案: the game's confirm box with how many; nothing to delete = nothing asked.
 function Diag.askClearOrders()
     local O = ns.Orders
     if not O then return nil end
     local n = O.closedCounts()
     if n.total == 0 then
         if Diag.clearButton then
-            Diag.clearButton:SetText("沒有紀錄")
-            ns.after(3, function() Diag.clearButton:SetText("清除紀錄") end)
+            Diag.clearButton:SetText("沒有結案")
+            ns.after(3, function() Diag.clearButton:SetText(Diag.CLEAR_LABEL) end)
         end
         return nil
     end
-    return ns.GuildAdmin.confirm(string.format("清除已結案的訂單紀錄？\n我下的 %d、我接的 %d、測試 %d、歷史 %d",
+    return ns.GuildAdmin.confirm(string.format("清除你已經結束的委託紀錄？進行中的委託不會動。\n我下的 %d、我接的 %d、測試 %d、歷史 %d",
         n.w, n.j, n.test, n.history), function()
         O.clearClosed()
         Diag.refresh()

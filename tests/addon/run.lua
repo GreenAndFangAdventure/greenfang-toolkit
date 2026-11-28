@@ -4861,6 +4861,10 @@ assert(loadfile(ROOT .. "/tests/addon/gfuir_tests.lua"))()({ test = test, eq = e
 assert(loadfile(ROOT .. "/tests/addon/gfuis_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint, shareLogin = shareLogin, shareFrom = shareFrom,
     rMsg = rMsg, leatherWindow = leatherWindow, PEER = PEER, A_PEER = A_PEER, A_THIRD = A_THIRD })
+-- GF-001-D15: sharing between two players (bare roster names vs Name-Realm senders),
+-- the receive counts in 同步與診斷, /gftk probe share, 清除結案 (tests/addon/gf001d15_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf001d15_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0
