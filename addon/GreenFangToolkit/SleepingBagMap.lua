@@ -333,11 +333,43 @@ local function resolve(step, index)
     return { mapID = M.mapFor(step), step = step, index = index or 1, list = list }
 end
 
--- The page's step changed: the pins move with it (or go).
+-- GF-008-E: our waypoint (only the waypoint fallback sets one): the first
+-- point on the step's own map; cleared when the guide no longer has a step.
+local function firstOwn(cur)
+    for _, at in ipairs(cur.list) do if at.mapID == cur.mapID then return at end end
+    return cur.list[1]
+end
+local function setWaypoint(cur)
+    local at = firstOwn(cur)
+    if not at then return false end
+    local point = call(UiMapPoint.CreateFromCoordinates, at.mapID, at.x / 100, at.y / 100)
+    if not point then return false end
+    call(C_Map.SetUserWaypoint, point)
+    if type(rawget(_G, "C_SuperTrack")) == "table" and fn(C_SuperTrack, "SetSuperTrackedUserWaypoint") then
+        call(C_SuperTrack.SetSuperTrackedUserWaypoint, true)
+    end
+    return at
+end
+local function clearWaypoint()
+    local cm = rawget(_G, "C_Map")
+    if fn(cm, "ClearUserWaypoint") then call(cm.ClearUserWaypoint) end
+end
+M.clearWaypoint = clearWaypoint
+
+-- The page's step changed: the pins (and our waypoint) move with it, or go.
+-- GF-008-E: nothing of the old step stays; nothing is drawn before 看地圖 was
+-- pressed once (M.current is nil until then).
 function M.update(step, index)
-    if M.current and M.current.step ~= step then
-        M.current = (step and M.hasPin(step) and M.canShow(step) and #pins > 0) and resolve(step, index) or nil
-        if M.current then makePins(#M.current.list) end
+    local old = M.current
+    if old and (old.step ~= step or old.index ~= index) then
+        if step and M.hasPin(step) and M.canShow(step) then
+            M.current = resolve(step, index)
+            if #pins > 0 then makePins(#M.current.list) end
+            if old.waypoint then M.current.waypoint = setWaypoint(M.current) and true or nil end
+        else
+            M.current = nil
+            if old.waypoint then clearWaypoint() end
+        end
     end
     placePins()
 end
@@ -378,17 +410,10 @@ function M.show(step, index)
         return "canvas"
     end
     -- The waypoint: the first point on the step's own map.
-    local first
-    for _, at in ipairs(cur.list) do if at.mapID == mapID then first = at; break end end
-    first = first or cur.list[1]
+    local first = setWaypoint(cur)
     if not first then return false, "none" end
+    cur.waypoint = true
     M.current = cur
-    local point = call(UiMapPoint.CreateFromCoordinates, first.mapID, first.x / 100, first.y / 100)
-    if not point then return false, "none" end
-    call(C_Map.SetUserWaypoint, point)
-    if type(rawget(_G, "C_SuperTrack")) == "table" and fn(C_SuperTrack, "SetSuperTrackedUserWaypoint") then
-        call(C_SuperTrack.SetSuperTrackedUserWaypoint, true)
-    end
     openMap(first.mapID)
     return "waypoint"
 end

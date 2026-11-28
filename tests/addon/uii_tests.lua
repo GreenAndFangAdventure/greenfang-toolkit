@@ -94,7 +94,7 @@ return function(T)
         -- GF-UI-K (owner): 「刊登」 with no ＋, at the list's left edge over the header.
         eq(pt[4], UI.LIST_X, "刊登 starts at the list's left edge")
         eq(pt[5], UI.TOOL_Y, "on the tool row, over the column header")
-        eq(UI.postButton._text, "刊登", "its name")
+        eq(UI.postButton._text, "＋刊登", "its name (GF-UI-P: ＋ in front again, owner 2026-11-28)")
         -- The 時效 header cell moves to the right end; 物品 gets the room.
         local fresh = UI.header.cells[4]._points[1]
         eq(fresh[4] + UI.COL.fresh.w, UI.LIST_W_WIDE - (UI.LIST_W - UI.COL.fresh.x - UI.COL.fresh.w), "時效 at the right end")

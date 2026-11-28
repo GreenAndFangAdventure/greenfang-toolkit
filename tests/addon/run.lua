@@ -131,7 +131,7 @@ test("fresh install creates schema v2 defaults", function()
     local db = GreenFangToolkitDB
     eq(db.schema, "gf.toolkit", "schema")
     eq(db.schemaVersion, 2, "schemaVersion")
-    eq(db.addonVersion, "0.16.18", "addonVersion")
+    eq(db.addonVersion, "0.16.19", "addonVersion")
     eq(db.sync.enabled, true, "sync.enabled default")
     eq(db.sync.noticeShown, false, "noticeShown before login")
     eq(#db.sync.outbox, 0, "outbox empty")
@@ -157,7 +157,7 @@ test("TOC declares the agreed names and loads every file", function()
     ok(toc:find("## Interface: 16001", 1, true), "Interface")
     ok(toc:find("## Title: 綠皮冒險工具箱", 1, true), "Title")
     ok(toc:find("## Author: 綠皮與獠牙冒險事務所", 1, true), "Author")
-    ok(toc:find("## Version: 0.16.18", 1, true), "Version")
+    ok(toc:find("## Version: 0.16.19", 1, true), "Version")
     ok(toc:find("## SavedVariables: GreenFangToolkitDB\r?\n"), "SavedVariables")
     local listed = {}
     for line in toc:gmatch("[^\r\n]+") do
@@ -429,7 +429,7 @@ test("unknown fields in an existing v2 table are preserved", function()
         sync = { enabled = false, noticeShown = true, outbox = {} },
     } })
     eq(GreenFangToolkitDB.futureModule.keep, true, "unknown field kept")
-    eq(GreenFangToolkitDB.addonVersion, "0.16.18", "addonVersion updated")
+    eq(GreenFangToolkitDB.addonVersion, "0.16.19", "addonVersion updated")
     eq(GreenFangToolkitDB.sync.enabled, true, "old off ignored (D-015)")
 end)
 
@@ -479,7 +479,7 @@ test("TSV/JSON export keep the v0.3.1 format", function()
     local s = ns.Roster.current()
     local json = ns.Export.jsonParts(s)
     eq(#json, 1, "one part")
-    ok(json[1]:find('^{"schema":"gfguildroster.report","schemaVersion":1,"addonVersion":"0.16.18"'), "json header")
+    ok(json[1]:find('^{"schema":"gfguildroster.report","schemaVersion":1,"addonVersion":"0.16.19"'), "json header")
     ok(json[1]:find('"part":1,"partCount":1', 1, true), "parts")
     ok(json[1]:find('"onlineAtCapture":true', 1, true), "member online in manual export")
     ok(not json[1]:find('"guid":', 1, true), "no guid in v1 export")
@@ -627,18 +627,17 @@ test("sleepingbag: Horde route data is complete and marked unverified", function
     wow.reset()
     local ns = wow.loadAddon(ADDON_DIR)
     local route = ns.SleepingBagRoutes.Horde
-    ok(route and #route.steps >= 8, "route has steps")
+    ok(route and #route.steps >= 5, "route has steps") -- GF-008-E: five steps
     local first3 = {}
     for _, st in ipairs(route.steps) do
         ok(type(st.id) == "string" and st.id ~= "", "id")
-        ok(st.zone and st.landmark and st.action and st.travel and st.guards
-            and st.noFlightPath and st.rpgHint, "required fields on " .. st.id)
+        ok(st.zone and st.landmark and st.action and st.rpgHint, "required fields on " .. st.id) -- GF-008-E: travel / guards folded into action / tip
         eq(st.verified, false, "unverified: " .. st.id)
         ok(st.questID == nil, "no quest IDs yet")
-        if st.round == 1 and st.x and not st.approx then first3[#first3 + 1] = st.zone end -- GF-008-C: the guide's coordinates
+        if st.x and not st.approx then first3[#first3 + 1] = st.zone end -- GF-008-E: every step has a place
     end
     ok(table.concat(first3, ">"):find("^貧瘠之地>西部荒野"), "round-1 stops with coordinates start Barrens then Westfall") -- GF-008-D: Stonetalon has sourced coordinates now
-    eq(route.steps[5].zone, "石爪山脈", "third stop is Stonetalon")
+    eq(route.steps[3].zone, "石爪山脈", "third stop is Stonetalon")
 end)
 
 test("sleepingbag: module visible for Horde, hidden for Alliance", function()
@@ -668,10 +667,10 @@ test("sleepingbag: RPG hides coordinates until revealed; normal shows all", func
     ok(SB.pageText():find("貧瘠之地（46, 74）", 1, true), "coordinates after reveal")
     SB.setMode("normal")
     text = SB.pageText()
-    ok(text:find("【全部步驟】", 1, true), "full list in normal mode")
-    ok(text:find("西部荒野（37, 50）", 1, true), "other steps' coordinates listed")
-    ok(text:find("地圖不標位置", 1, true), "GF-008-C: a step without a pin says why")
-    ok(text:find("沒有飛行點時", 1, true), "alternative route shown")
+    -- GF-008-E: only the current step, with one reminder.
+    ok(text:find("【第 1／5 步】", 1, true), "the current step in normal mode")
+    ok(not text:find("西部荒野（37, 50）", 1, true), "other steps not listed")
+    ok(text:find("提醒：", 1, true), "the reminder shown")
 end)
 
 test("sleepingbag: modes share progress per character and survive relog", function()
@@ -682,8 +681,7 @@ test("sleepingbag: modes share progress per character and survive relog", functi
     eq(SB.state().step, 3, "two steps done in RPG")
     SB.setMode("normal")
     eq(SB.state().step, 3, "same progress in normal mode")
-    ok(SB.pageText():find("＞ 3.", 1, true), "current step marked")
-    ok(SB.pageText():find("完成 1.", 1, true), "done step marked")
+    ok(SB.pageText():find("【第 3／5 步】", 1, true), "current step shown") -- GF-008-E
     local saved = wow.logout()
     wow.reset({ now = 1763380000 })
     ns = wow.login(ADDON_DIR, saved)
@@ -863,25 +861,27 @@ test("minimap: 31px button, border/background/icon anchored TOPLEFT", function()
     end
 end)
 
-test("minimap: icon is the adventure bag, with INV_Misc_Bag_08 fallback", function()
+-- GF-UI-P (owner 2026-11-28): a wrench (was the adventure bag); the engineering icon as the fallback.
+test("minimap: icon is the wrench, with Trade_Engineering fallback", function()
     wow.reset()
     wow.login(ADDON_DIR)
     local b = _G.GreenFangToolkit_MinimapButton
-    eq(textureByLayer(b, "ARTWORK")._texture, "Interface\\Icons\\INV_Misc_Bag_10", "chosen icon")
+    eq(textureByLayer(b, "ARTWORK")._texture, "Interface\\Icons\\INV_Misc_Wrench_01", "chosen icon")
     local f = assert(io.open(ADDON_DIR .. "/GreenFangToolkit.toc", "rb"))
     local toc = f:read("*a"); f:close()
-    ok(toc:find("## IconTexture: Interface\\Icons\\INV_Misc_Bag_10", 1, true), "TOC IconTexture")
+    ok(toc:find("## IconTexture: Interface\\Icons\\INV_Misc_Wrench_01", 1, true), "TOC IconTexture")
     ok(not toc:find("Book_09", 1, true), "old book icon gone from TOC")
+    ok(not toc:find("Bag_10", 1, true), "the bag is gone from the TOC")
     -- Missing file detected through GetFileIDFromPath.
-    wow.reset({ fileIDs = true, missingFiles = { ["Interface\\Icons\\INV_Misc_Bag_10"] = true } })
+    wow.reset({ fileIDs = true, missingFiles = { ["Interface\\Icons\\INV_Misc_Wrench_01"] = true } })
     wow.login(ADDON_DIR)
     b = _G.GreenFangToolkit_MinimapButton
-    eq(textureByLayer(b, "ARTWORK")._texture, "Interface\\Icons\\INV_Misc_Bag_08", "fallback via GetFileIDFromPath")
+    eq(textureByLayer(b, "ARTWORK")._texture, "Interface\\Icons\\Trade_Engineering", "fallback via GetFileIDFromPath")
     -- Missing file reported by SetTexture returning false.
-    wow.reset({ missingFiles = { ["Interface\\Icons\\INV_Misc_Bag_10"] = true } })
+    wow.reset({ missingFiles = { ["Interface\\Icons\\INV_Misc_Wrench_01"] = true } })
     wow.login(ADDON_DIR)
     b = _G.GreenFangToolkit_MinimapButton
-    eq(textureByLayer(b, "ARTWORK")._texture, "Interface\\Icons\\INV_Misc_Bag_08", "fallback via SetTexture")
+    eq(textureByLayer(b, "ARTWORK")._texture, "Interface\\Icons\\Trade_Engineering", "fallback via SetTexture")
 end)
 
 test("minimap: saved angle is kept, default stays 215", function()
@@ -2678,7 +2678,7 @@ test("D10 diag window: sections, sharing stats, export moved here, /gftk sync st
     ok(has(all, "GF Sync 只是補充來源"), "site note")
     ok(has(all, "記錄 ") and has(all, "這次登入：送出"), "sharing statistics")
     ok(has(all, "掃描時間："), "roster scan")
-    ok(has(all, "工具箱 0.16.18"), "version")
+    ok(has(all, "工具箱 0.16.19"), "version")
     wow.click(ns.Diag.exportJSONButton)
     ok(_G.GreenFangToolkit_ExportWindow and _G.GreenFangToolkit_ExportWindow:IsShown(), "export from the window")
     GreenFangToolkitDB.settings.minimapAngle = 10
@@ -4203,9 +4203,11 @@ test("D21 tooltips: recipe tooltip next to the row's name; roster icon tooltip o
     row._scripts.OnEnter(row)
     eq(GameTooltip._anchor, "ANCHOR_NONE", "not the default (screen corner) anchor")
     local pt = GameTooltip._points[1]
-    eq(pt[1] .. ">" .. pt[3], "BOTTOMLEFT>TOPLEFT", "just above the row")
+    -- GF-UI-P: every list row's tooltip comes from Widgets.rowTip (next to the mouse, beside
+    -- the row); the mock has no row edges, so it takes its plain place right under the row.
+    local want = ns.Widgets.tipPlace(row)
+    eq(pt[1] .. ">" .. pt[3], want.point .. ">" .. want.relPoint, "Widgets.rowTip's place")
     eq(pt[2], row, "on the hovered row")
-    eq(pt[4], 300, "next to the name, towards the middle")
     sendFrom(ns, PEER, peerData())
     ns.Framework.open("roster")
     local peer = rowFor(ns, PEER)
@@ -4824,6 +4826,14 @@ assert(loadfile(ROOT .. "/tests/addon/gf012d_tests.lua"))()({ test = test, eq = 
 -- GF-017: the game's guild bank, gold only: reading while open, merging, sharing (GB), the 公會銀行 view
 -- (tests/addon/gf017_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gf017_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-UI-P: the owner's 0.16.18 screenshots: the wrench icon, text buttons on adventure rows, my own
+-- status words, row tooltips by the mouse, the adventure filters, the guild bank under its buttons,
+-- ＋ on add buttons, one scroll bar for every list (tests/addon/gfuip_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gfuip_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-008-E: the sleeping-bag guide in five steps, 上一步 / 下一步, the remembered step, pins follow (tests/addon/gf008e_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf008e_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 

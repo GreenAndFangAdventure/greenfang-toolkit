@@ -114,7 +114,7 @@ local function bizRow(p, i)
     -- it, the personnel file stays and the tooltip says so.
     local function tip(self)
         if not self.item then return end
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        ns.Widgets.rowTip(self) -- GF-UI-P: next to the mouse, beside the row
         GameTooltip:AddLine(self.item.title)
         GameTooltip:AddLine(ProfileUI.KIND[self.item.kind].name .. "｜" .. self.item.role .. "｜" .. self.item.stateName, 0.85, 0.85, 0.85)
         if self.missing == self.item.id then

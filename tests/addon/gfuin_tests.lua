@@ -75,7 +75,8 @@ return function(T)
         end
         ok(wRow and tRow, "both rows shown")
         ok(wRow.delete:IsShown() and tRow.delete:IsShown(), "both have the far-right button")
-        eq(wRow.delete.label._text .. "," .. tRow.delete.label._text, "移除,刪除", "移除 (worker ticket), 刪除 (ticket)")
+        -- GF-UI-P: text buttons (the word inside the frame).
+        eq(wRow.delete.gfTextText._text .. "," .. tRow.delete.gfTextText._text, "移除,刪除", "移除 (worker ticket), 刪除 (ticket)")
         eq(pointX(wRow.delete), pointX(tRow.delete), "at the same x")
         eq(wRow.buttons[1].flowX, C.buttons, "worker row: 編輯 starts on the line")
         eq(tRow.buttons[1].flowX, C.buttons, "ticket row: its first button starts on the line")

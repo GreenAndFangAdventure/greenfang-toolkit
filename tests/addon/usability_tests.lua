@@ -201,7 +201,8 @@ return function(T)
         ns.Adventure.pendingInvites = function() return { "x" } end
         ns.AdventureUI.refresh()
         eq(ns.AdventureUI.nextInvite._shown, true, "shown while names wait")
-        eq(ns.AdventureUI.nextInvite.label._text, "下一位", "with its name (GF-UI-A §2.4: 2-4 characters)")
+        -- GF-UI-P: a text button now (its icon and name inside the frame).
+        ok(plain(ns.AdventureUI.nextInvite:GetText()):find("下一位", 1, true), "with its name (GF-UI-A §2.4: 2-4 characters)")
         ns.Adventure.pendingInvites = real
         ns.AdventureUI.refresh()
         eq(ns.AdventureUI.nextInvite._shown, false, "hidden again")

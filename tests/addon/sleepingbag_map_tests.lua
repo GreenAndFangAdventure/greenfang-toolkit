@@ -65,7 +65,7 @@ return function(T)
         open(ns)
         eq(SB.viewMode(), "normal", "normal shown")
         local text = SB.pageText()
-        ok(text:find("【全部步驟】", 1, true) and text:find("貧瘠之地（46, 74）", 1, true), "the normal page")
+        ok(text:find("【第 1／5 步】", 1, true) and text:find("貧瘠之地（46, 74）", 1, true), "the normal page (GF-008-E: one step)")
         ok(text:find("狀態：待實地驗證", 1, true), "still 待實地驗證")
         -- The RPG text is still there for later.
         ok(not SB.pageText("rpg"):find("46, 74", 1, true), "RPG text kept (hides coordinates)")
@@ -79,7 +79,7 @@ return function(T)
         eq(SB.state().mode, "rpg", "saved mode untouched")
         eq(SB.state().step, 3, "the step kept")
         eq(SB.viewMode(), "normal", "shown as normal")
-        ok(SB.pageText():find("＞ 3.", 1, true), "normal page at step 3")
+        ok(SB.pageText():find("【第 3／5 步】", 1, true), "normal page at step 3")
         for _, f in ipairs(wow.state.frames) do
             local t = f._text or ""
             if t:find("目前：", 1, true) or t == "顯示座標與走法" then ok(f._shown == false, "hidden: " .. t) end
@@ -109,17 +109,17 @@ return function(T)
         ok(pin._shown, "back on 貧瘠之地")
         wm:Hide(); ok(not pin._shown, "map closed: no pin")
         wm:Show(); ok(pin._shown, "map open again")
-        -- Step 2 (GF-008-C: 格羅姆高營地, approximate): the pin moves there.
+        -- GF-008-E: step 2 is 西部荒野 37, 50 (Grom'gol is its second point).
         SB.complete()
-        ok(b._shown ~= false, "GF-008-C: step 2 has a map too")
-        eq(SB.showMap(), "canvas", "step 2 drawn")
-        eq(wm:GetMapID(), 1434, "荊棘谷")
-        -- Step 3 (西部荒野 37, 50): the button again.
-        SB.complete()
-        ok(b._shown ~= false, "button on step 3")
+        ok(b._shown ~= false, "button on step 2")
         eq(SB.showMap(), "canvas", "drawn")
         eq(wm:GetMapID(), 1436, "西部荒野")
         ok(math.abs(pin.px - 0.371 * W) < 0.01, "at 37.1 (GF-008-D)")
+        -- Step 3 (石爪山脈).
+        SB.complete()
+        ok(b._shown ~= false, "button on step 3")
+        eq(SB.showMap(), "canvas", "step 3 drawn")
+        eq(wm:GetMapID(), 1442, "石爪山脈")
         -- Nothing saved or sent by the map.
         eq(ns.db.sleepingbagMap, nil, "no saved map data")
         clearMap()

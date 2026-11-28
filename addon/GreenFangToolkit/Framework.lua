@@ -684,8 +684,12 @@ F.MINIMAP_RIM_OFFSET = 10      -- button centre this far outside the minimap edg
 F.MINIMAP_BORDER = { texture = "Interface\\Minimap\\MiniMap-TrackingBorder", size = 53, x = 0, y = 0 }
 F.MINIMAP_BACKGROUND = { texture = "Interface\\Minimap\\UI-Minimap-Background", size = 20, x = 7, y = -5 }
 F.MINIMAP_ICON_LAYOUT = { size = 17, x = 7, y = -6 }
-F.MINIMAP_ICON = "Interface\\Icons\\INV_Misc_Bag_10"          -- 冒險背包 (owner's choice)
-F.MINIMAP_ICON_FALLBACK = "Interface\\Icons\\INV_Misc_Bag_08"
+-- GF-UI-P (owner 2026-11-28: the bag does not look like a toolkit): the toolkit's
+-- own icon (this button and the TOC's IconTexture) is a wrench (the game's
+-- Arclight Spanner icon); the fallback is the engineering icon (already on 診斷,
+-- so 16001 has it). Other candidates: INV_Misc_Wrench_02, Trade_BlackSmithing.
+F.MINIMAP_ICON = "Interface\\Icons\\INV_Misc_Wrench_01"
+F.MINIMAP_ICON_FALLBACK = "Interface\\Icons\\Trade_Engineering"
 
 -- Radius from the minimap centre to the button centre: on the rim, not
 -- floating outside it. Uses the real minimap size (16001 may differ from 140).

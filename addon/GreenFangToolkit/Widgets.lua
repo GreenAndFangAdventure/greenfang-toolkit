@@ -61,6 +61,9 @@ W.STATE_ART = { open = "state_open", final = "state_final", formed = "state_form
     worker = "state_worker", closed = "state_ended" }
 W.STATE_COLOR = { open = "white", final = "gold", formed = "formed", done = "good", ended = "disabled",
     unfinished = "warn", cancel = "disabled", worker = "white", closed = "disabled" }
+-- GF-UI-P: my own status on someone else's ticket (Adventure.myStatus): art and color.
+W.MINE_ART = { i = "invite", p = "wait", m = "yes", w = "clock" }
+W.MINE_COLOR = { i = "gold", p = "white", m = "good", w = "muted" }
 W.BADGE_ICON, W.BADGE_W = 20, 90
 W.CHECK_ICON = 16
 W.ITEM_MAX = 6 -- characters of an item's name (R-17.11)
@@ -98,9 +101,15 @@ function W.checklistLines(why, opts)
     opts = opts or {}
     local out = {}
     if not why then return out end
-    for _, g in ipairs(why.groups or {}) do
-        out[#out + 1] = { text = G().markup(W.STATE_ART[g.state] or "state_open", W.CHECK_ICON) .. " " .. str(g.name),
+    -- GF-UI-P: my own status first (你的狀態), then the ticket's (冒險單：…), so the two never mix.
+    if why.mine then
+        out[#out + 1] = { text = G().markup(W.MINE_ART[why.mine] or "person", W.CHECK_ICON) .. " " .. W.TEXT.mine .. str(why.name),
             color = W.COLOR.gold }
+        if why.mineTip then out[#out + 1] = { text = "   " .. str(why.mineTip), color = W.COLOR.white } end
+    end
+    for gi, g in ipairs(why.groups or {}) do
+        out[#out + 1] = { text = G().markup(W.STATE_ART[g.state] or "state_open", W.CHECK_ICON) .. " "
+            .. ((why.mine and gi == 1) and W.TEXT.ticket or "") .. str(g.name), color = W.COLOR.gold }
         for _, it in ipairs(g.items or {}) do
             if it.sep then
                 out[#out + 1] = { text = "   " .. str(it.text), color = W.COLOR.muted }
@@ -149,8 +158,8 @@ function W.statusBadge(parent)
     function b.set(why, opts)
         b.why, b.opts = why, opts
         if not why then b:Hide(); return end
-        G().set(b.icon, W.STATE_ART[why.state] or "state_open")
-        local c = W.color(why.state)
+        G().set(b.icon, (why.mine and W.MINE_ART[why.mine]) or W.STATE_ART[why.state] or "state_open")
+        local c = why.mine and (W.COLOR[W.MINE_COLOR[why.mine] or "white"] or W.COLOR.white) or W.color(why.state)
         b.text:SetText(str(why.name))
         b.text:SetTextColor(c[1], c[2], c[3])
         local grey = why.state == "ended" or why.state == "cancel" or why.state == "closed"
@@ -404,6 +413,7 @@ function W.confirmFrame() return confirm end
 W.ITEM_ICON, W.ITEM_ROW_H = 36, 44
 W.ITEM_PLACEHOLDER = { "Interface\\Icons\\INV_Misc_QuestionMark", "Interface\\RaidFrame\\ReadyCheck-Waiting" }
 W.TEXT = {
+    mine = "你的狀態：", ticket = "冒險單：", -- GF-UI-P: the checklist's first lines
     itemLoading = "物品資料載入中",
     itemMissing = "找不到這個物品", -- GF-FIX-F: the server said no such item
     empty = "目前沒有資料", loading = "載入中", unknown = "狀態未知", stale = "資料過期", error = "暫時無法讀取",
@@ -532,7 +542,7 @@ end
 
 function W.itemTooltip(owner, info)
     if not (owner and info) then return end
-    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+    W.rowTip(owner) -- GF-UI-P: next to the mouse, beside the row
     local shown = false
     if info.link and fnc(GameTooltip.SetHyperlink) then shown = pcall(GameTooltip.SetHyperlink, GameTooltip, info.link) end
     if not shown and info.loaded and info.id and fnc(GameTooltip.SetItemByID) then
@@ -970,4 +980,169 @@ function W.dropdown(parent, w, onChoose)
     b:SetScript("OnClick", function() dd.toggle() end)
     b:HookScript("OnHide", function() dd.close() end)
     return dd
+end
+
+---------------------------------------------------------------------------
+-- GF-UI-P (owner 2026-11-28: 「提示離滑鼠很遠、蓋住右邊的按鈕」): one place
+-- for every list row's tooltip. W.rowTip(owner) sets GameTooltip's owner and
+-- anchors it next to the row the mouse is on: one edge at the cursor's x (it
+-- grows to the right on the left half of the screen, to the left on the right
+-- half) and just above the row on the lower half of the screen, just below it
+-- on the upper half, so it never covers the row and its buttons, and turns
+-- around near a screen edge. The cursor is read once, when the mouse enters:
+-- nothing runs every frame. Then add lines and call GameTooltip:Show() as before.
+--   row:SetScript("OnEnter", function(self) ns.Widgets.rowTip(self); GameTooltip:AddLine("…"); GameTooltip:Show() end)
+---------------------------------------------------------------------------
+
+W.TIP_GAP = 2       -- between the row and the tooltip
+W.TIP_CURSOR = 12   -- the tooltip's edge this far beside the cursor's tip
+
+local function numOf(o, method)
+    local f = o and o[method]
+    if type(f) ~= "function" then return nil end
+    local okv, v = pcall(f, o)
+    return okv and ns.num(v) or nil
+end
+
+-- Where the tooltip goes: { point, relPoint, x, y, above, right }.
+function W.tipPlace(owner)
+    local gap = W.TIP_GAP
+    local fallback = { point = "TOPLEFT", relPoint = "BOTTOMLEFT", x = 0, y = -gap, above = false, right = true }
+    if not owner then return fallback end
+    local uw, uh = numOf(UIParent, "GetWidth"), numOf(UIParent, "GetHeight")
+    local l, r = numOf(owner, "GetLeft"), numOf(owner, "GetRight")
+    local t, b = numOf(owner, "GetTop"), numOf(owner, "GetBottom")
+    if not (uw and uh and l and r and t and b and uw >= 300 and uh >= 300 and r > l) then return fallback end
+    local s = numOf(owner, "GetEffectiveScale") or 1
+    local u = numOf(UIParent, "GetEffectiveScale") or 1
+    local tt = (GameTooltip and numOf(GameTooltip, "GetEffectiveScale")) or u
+    if s <= 0 or u <= 0 or tt <= 0 then return fallback end
+    -- The row in UIParent's units; the cursor (screen pixels) in the same units.
+    local L, R, T, B = l * s / u, r * s / u, t * s / u, b * s / u
+    local cx
+    if type(GetCursorPosition) == "function" then
+        local okc, x = pcall(GetCursorPosition)
+        cx = okc and ns.num(x) or nil
+    end
+    cx = cx and (cx / u) or (L + R) / 2
+    if cx < L then cx = L elseif cx > R then cx = R end
+    local above = (T + B) / 2 < uh / 2   -- lower half of the screen: above the row
+    local right = cx <= uw / 2           -- left half: the tooltip grows to the right
+    local vp, ownerV = above and "BOTTOM" or "TOP", above and "TOP" or "BOTTOM"
+    local x = (cx - L) * u / tt + (right and W.TIP_CURSOR or -W.TIP_CURSOR)
+    return { point = vp .. (right and "LEFT" or "RIGHT"), relPoint = ownerV .. "LEFT", x = x,
+        y = above and gap or -gap, above = above, right = right }
+end
+
+function W.rowTip(owner)
+    if not (GameTooltip and owner) then return nil end
+    GameTooltip:SetOwner(owner, "ANCHOR_NONE")
+    GameTooltip:ClearAllPoints()
+    local p = W.tipPlace(owner)
+    GameTooltip:SetPoint(p.point, owner, p.relPoint, p.x, p.y)
+    if GameTooltip.SetClampedToScreen then GameTooltip:SetClampedToScreen(true) end
+    owner.tipPoint = p.point
+    return p
+end
+
+---------------------------------------------------------------------------
+-- GF-UI-P (owner 2026-11-28: 「所有可以捲動的清單都要看得到捲動條」): one
+-- scroll bar for the lists that refill the same rows (臨時黑箱 庫存 / 申領 /
+-- 保管人, 公會銀行, 調貨所, 通知). The game's own art, as on 業務大廳 (the
+-- game's scroll frame): an up arrow, the track with the knob, a down arrow.
+--   local bar = ns.Widgets.scrollBar(parent, height, function(offset) myOffset = offset; redraw() end)
+--   bar:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)   -- W.SCROLL_W wide, right of the rows
+--   bar.sync(offset, total, visible)                    -- at the end of every draw
+-- A list within one page: the arrows and the knob go grey and do nothing
+-- (as the game's scroll frames); the bar keeps its own column beside the
+-- rows, never on them. The wheel stays where each list had it.
+---------------------------------------------------------------------------
+
+W.SCROLL_W = 16
+W.SCROLL_ARROW = 16
+W.SCROLL_ART = "Interface\\Buttons\\UI-ScrollBar-Scroll"
+W.SCROLL_KNOB = "Interface\\Buttons\\UI-ScrollBar-Knob"
+W.SCROLL_DIM = 0.35 -- the knob of a list that does not scroll
+W.SCROLL_GAP = 6    -- between the rows' right edge and the bar (as the game's scroll frame)
+
+local function scrollArrow(f, dir)
+    local b = CreateFrame("Button", nil, f)
+    b:SetSize(W.SCROLL_ARROW, W.SCROLL_ARROW)
+    local base = W.SCROLL_ART .. dir .. "Button-"
+    if b.SetNormalTexture then
+        b:SetNormalTexture(base .. "Up"); b:SetPushedTexture(base .. "Down")
+        b:SetDisabledTexture(base .. "Disabled"); b:SetHighlightTexture(base .. "Highlight")
+    end
+    b.gfDir = dir
+    return b
+end
+
+local function arrowEnabled(b, on)
+    b.gfEnabled = on and true or false
+    if on then if b.Enable then b:Enable() end elseif b.Disable then b:Disable() end
+end
+
+function W.scrollBar(parent, height, onScroll)
+    local f = CreateFrame("Frame", nil, parent)
+    f:SetSize(W.SCROLL_W, height or 200)
+    f.gfScrollBar = true
+    f.offset, f.total, f.visible = 0, 0, 0
+    f.up = scrollArrow(f, "Up")
+    f.up:SetPoint("TOP", f, "TOP", 0, 0)
+    f.down = scrollArrow(f, "Down")
+    f.down:SetPoint("BOTTOM", f, "BOTTOM", 0, 0)
+    local bar = CreateFrame("Slider", nil, f)
+    f.bar = bar
+    bar:SetPoint("TOP", f.up, "BOTTOM", 0, 0)
+    bar:SetPoint("BOTTOM", f.down, "TOP", 0, 0)
+    bar:SetWidth(W.SCROLL_W)
+    if bar.SetOrientation then bar:SetOrientation("VERTICAL") end
+    if bar.SetThumbTexture then bar:SetThumbTexture(W.SCROLL_KNOB) end
+    local thumb = bar.GetThumbTexture and bar:GetThumbTexture() or nil
+    if type(thumb) == "table" or type(thumb) == "userdata" then
+        if thumb.SetSize then thumb:SetSize(18, 24) end
+        if thumb.SetTexCoord then thumb:SetTexCoord(0.2, 0.8, 0.125, 0.875) end
+        f.thumb = thumb
+    end
+    if bar.SetValueStep then bar:SetValueStep(1) end
+    if bar.SetObeyStepOnDrag then bar:SetObeyStepOnDrag(true) end
+    f.track = bar:CreateTexture(nil, "BACKGROUND")
+    f.track:SetAllPoints()
+    f.track:SetColorTexture(0, 0, 0, 0.35)
+    bar:SetMinMaxValues(0, 0)
+    bar:SetValue(0)
+    local function go(o)
+        local max = math.max(0, (f.total or 0) - (f.visible or 0))
+        o = math.max(0, math.min(max, math.floor((tonumber(o) or 0) + 0.5)))
+        if o == f.offset then return false end
+        f.offset = o
+        if onScroll then onScroll(o) end
+        return true
+    end
+    f.scrollTo = go
+    function f.scrollBy(n) return go((f.offset or 0) + (tonumber(n) or 0)) end
+    bar:SetScript("OnValueChanged", function(_, value)
+        if f.syncing then return end
+        go(value)
+    end)
+    f.up:SetScript("OnClick", function() f.scrollBy(-1) end)
+    f.down:SetScript("OnClick", function() f.scrollBy(1) end)
+    if f.EnableMouseWheel then f:EnableMouseWheel(true) end
+    f:SetScript("OnMouseWheel", function(_, delta) f.scrollBy(-(tonumber(delta) or 0)) end)
+    function f.setHeight(h) f:SetHeight(h) end
+    -- What the list shows now: the first row (0-based), how many rows, how many fit.
+    function f.sync(offset, total, visible)
+        f.syncing = true
+        f.offset, f.total, f.visible = tonumber(offset) or 0, tonumber(total) or 0, tonumber(visible) or 0
+        local max = math.max(0, f.total - f.visible)
+        bar:SetMinMaxValues(0, max)
+        bar:SetValue(math.min(f.offset, max))
+        f.scrollable = max > 0
+        arrowEnabled(f.up, f.scrollable and f.offset > 0)
+        arrowEnabled(f.down, f.scrollable and f.offset < max)
+        if bar.EnableMouse then bar:EnableMouse(f.scrollable) end
+        if f.thumb and f.thumb.SetAlpha then f.thumb:SetAlpha(f.scrollable and 1 or W.SCROLL_DIM) end
+        f.syncing = false
+    end
+    return f
 end

@@ -15,7 +15,9 @@ local Th, W = ns.Theme, ns.Widgets
 UI.ID = "supply"
 UI.ROW_H, UI.ICON = 44, 36
 UI.ROWS = 11
-UI.LIST_X, UI.LIST_W = 22, 540
+-- GF-UI-P: the narrow list gives 22 px to its scroll bar (it ends before the divider at 570).
+UI.LIST_X, UI.LIST_W = 22, 518
+UI.BAR_GAP = 4 -- between a list's rows and its scroll bar (the wide list and the detail end at 1078)
 -- GF-UI-I (owner 0.16.2: 中間一條直線、右半邊空著): with nothing to show on
 -- the right (no row chosen, or a row without matches) the list takes the
 -- whole width and the divider goes away; the extra width goes to 物品.
@@ -94,7 +96,9 @@ UI.ENDED_ALPHA = 0.55
 -- GF-UI-K: 交易條件 / 備註 lines of my listing: label 4..80, value from 84.
 UI.LISTING_VALUE_X, UI.LISTING_VALUE_W = 84, 400
 UI.POST_W = 96
-UI.POST_TEXT = "刊登" -- GF-UI-K (owner): no 「＋」
+-- GF-UI-K (owner) had no 「＋」; GF-UI-P (owner 2026-11-28): 「＋」 in front, as ＋冒險單 /
+-- ＋職工單 / ＋下單, so it reads as adding one.
+UI.POST_TEXT = "＋刊登"
 UI.HEAD_Y, UI.HEAD_H = -128, 28
 UI.TOP = UI.HEAD_Y - UI.HEAD_H - 4
 UI.EXPAND = 16
@@ -102,10 +106,11 @@ UI.EXPAND = 16
 UI.COL = {
     expand = { x = 4, w = 16 },
     icon = { x = 24, w = 36 },
-    name = { x = 66, w = 180 },
-    qty = { x = 252, w = 92 },
-    match = { x = 356, w = 96 },
-    fresh = { x = 460, w = 72 },
+    -- GF-UI-P: 22 px less for the scroll bar, taken from 物品 (the others move left).
+    name = { x = 66, w = 158 },
+    qty = { x = 230, w = 92 },
+    match = { x = 334, w = 96 },
+    fresh = { x = 438, w = 72 },
 }
 -- The detail list: who, how many, online, how fresh, where from, 聯絡.
 UI.DETAIL_HEAD_Y = UI.HEAD_Y - 52
@@ -311,7 +316,7 @@ UI.setItemIcon = setItemIcon
 local function itemTooltip(owner, itemID, extra)
     if not GameTooltip then return end
     owner.gfSupplyTip = true
-    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+    ns.Widgets.rowTip(owner) -- GF-UI-P: next to the mouse, beside the row
     local shown = false
     if itemID and type(GameTooltip.SetItemByID) == "function" then shown = pcall(GameTooltip.SetItemByID, GameTooltip, itemID) end
     if not shown then GameTooltip:AddLine((Supply.itemLabel(itemID))) end
@@ -556,6 +561,7 @@ function UI.drawList()
             r:Hide()
         end
     end
+    if UI.listBar then UI.listBar.sync(state.offset, #list, UI.ROWS) end
     UI.drawState()
 end
 
@@ -724,7 +730,7 @@ local function newDetailRow(i)
     r:SetScript("OnEnter", function(self)
         if not (self.tipLines and #self.tipLines > 0 and GameTooltip) then return end
         self.gfSupplyTip = true
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        ns.Widgets.rowTip(self) -- GF-UI-P
         for i, line in ipairs(self.tipLines) do
             if i == 1 then GameTooltip:AddLine(line, 1, 0.82, 0) else GameTooltip:AddLine(line, 1, 1, 1, true) end
         end
@@ -776,6 +782,10 @@ function UI.applyLayout()
         UI.placeCells(header, header.cells, w)
     end
     if statePanel then statePanel:SetWidth(w) end
+    if UI.listBar then
+        UI.listBar:ClearAllPoints()
+        UI.listBar:SetPoint("TOPLEFT", panel, "TOPLEFT", UI.LIST_X + w + UI.BAR_GAP, UI.TOP)
+    end
     if postButton then
         postButton:ClearAllPoints()
         postButton:SetPoint("TOPLEFT", panel, "TOPLEFT", UI.POST_X, UI.TOOL_Y)
@@ -796,8 +806,10 @@ function UI.drawDetail()
         listingButtons(nil)
         hideDetailRows(1)
         if detail.more then detail.more:Hide() end
+        if UI.detailBar then UI.detailBar:Hide() end
         return
     end
+    if UI.detailBar then UI.detailBar:Hide() end -- shown again below for a list of people
     setItemIcon(detail.icon, data.itemID)
     detail.name:SetText((Supply.itemLabel(data.itemID)))
     if data.listing then
@@ -879,6 +891,10 @@ function UI.drawDetail()
     end
     hideDetailRows(used + 1)
     state.detailShown = used
+    if UI.detailBar then
+        UI.detailBar:Show()
+        UI.detailBar.sync(state.detailOffset, #list, math.max(used, 1))
+    end
     local rest = #list - state.detailOffset - used
     if detail.more then
         if rest > 0 then
@@ -1291,6 +1307,15 @@ local function build(p)
     UI.divider:ClearAllPoints()
     UI.divider:SetPoint("TOPLEFT", p, "TOPLEFT", UI.DETAIL_X - 16, UI.HEAD_Y)
     UI.divider:SetHeight(UI.HEAD_Y - (UI.TOP - UI.ROWS * UI.ROW_H))
+    -- GF-UI-P: the scroll bars (Widgets.scrollBar) of the list and of the people on the right.
+    UI.listBar = W.scrollBar(p, UI.ROWS * UI.ROW_H, function(o) state.offset = o; UI.drawList() end)
+    UI.listBar:SetPoint("TOPLEFT", p, "TOPLEFT", UI.LIST_X + UI.LIST_W + UI.BAR_GAP, UI.TOP)
+    UI.detailBar = W.scrollBar(p, UI.DETAIL_TOP - UI.DETAIL_BOTTOM - UI.MORE_H, function(o)
+        state.detailOffset = o
+        UI.drawDetail()
+    end)
+    UI.detailBar:SetPoint("TOPLEFT", p, "TOPLEFT", UI.DETAIL_X + UI.DETAIL_W + UI.BAR_GAP, UI.DETAIL_TOP)
+    UI.detailBar:Hide()
     detail.icon = p:CreateTexture(nil, "ARTWORK")
     detail.icon:SetSize(40, 40)
     detail.icon:SetPoint("TOPLEFT", p, "TOPLEFT", UI.DETAIL_X, UI.HEAD_Y)
