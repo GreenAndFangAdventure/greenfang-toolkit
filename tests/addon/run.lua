@@ -4846,6 +4846,9 @@ assert(loadfile(ROOT .. "/tests/addon/gf006d_tests.lua"))()({ test = test, eq = 
     rMsg = rMsg, leatherWindow = leatherWindow, PEER = PEER, A_PEER = A_PEER, A_THIRD = A_THIRD })
 -- GF-010-C: 職工檔案 「清除定位」 and the roster's toolkit wrench and filter (tests/addon/gf010c_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gf010c_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+-- GF-008-F: the guide's text size (A－ / A＋), the legend in its colours, places as map links,
+-- the step the quest log says (tests/addon/gf008f_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf008f_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 

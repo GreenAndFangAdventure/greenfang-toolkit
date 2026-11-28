@@ -1146,3 +1146,65 @@ function W.scrollBar(parent, height, onScroll)
     end
     return f
 end
+
+---------------------------------------------------------------------------
+-- GF-008-F: A－ / A＋ for a reading page's text size (any guide can use it).
+--   local sizer = ns.Widgets.textSizer(parent, {
+--       get = function() return size end,          -- the saved size (px)
+--       set = function(size) save(size); redraw() end,
+--   })
+--   sizer.minus:SetPoint(...); sizer.plus:SetPoint(...)
+--   sizer.sync()                                    -- lights / dims the two buttons
+-- The sizes are ns.Theme.READ_SIZES; a saved size not in the list counts as
+-- the default. No frame beyond the two buttons, nothing per frame.
+---------------------------------------------------------------------------
+
+W.SIZER_W = 46
+
+function W.textSizeIndex(size)
+    local sizes = ns.Theme.READ_SIZES
+    for i, s in ipairs(sizes) do if s == size then return i end end
+    for i, s in ipairs(sizes) do if s == ns.Theme.READ_DEFAULT then return i end end
+    return 1
+end
+
+function W.textSizer(parent, opts)
+    local sizes = ns.Theme.READ_SIZES
+    local sizer = {}
+    local function current() return W.textSizeIndex(opts.get and opts.get()) end
+    local function step(d)
+        local i = current() + d
+        if i < 1 or i > #sizes then return false end
+        if opts.set then opts.set(sizes[i]) end
+        sizer.sync()
+        return true
+    end
+    local function make(text, d, tip)
+        local b = ns.Theme.button(parent, nil, W.SIZER_W, ns.BUTTON_H)
+        b:SetText(text)
+        b:SetScript("OnClick", function() step(d) end)
+        b.tip = tip
+        if b.HookScript then
+            b:HookScript("OnEnter", function(self)
+                if not GameTooltip then return end
+                GameTooltip:SetOwner(self, "ANCHOR_TOP")
+                GameTooltip:AddLine(self.tip, 1, 1, 1)
+                GameTooltip:AddLine(string.format("目前 %d 級（共 %d 級）", current(), #sizes), 0.8, 0.8, 0.8)
+                GameTooltip:Show()
+            end)
+            b:HookScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+        end
+        return b
+    end
+    sizer.minus = make("A－", -1, "字變小")
+    sizer.plus = make("A＋", 1, "字變大")
+    sizer.smaller = function() return step(-1) end
+    sizer.bigger = function() return step(1) end
+    function sizer.sync()
+        local i = current()
+        sizer.minus:SetEnabled(i > 1)
+        sizer.plus:SetEnabled(i < #sizes)
+    end
+    sizer.sync()
+    return sizer
+end
