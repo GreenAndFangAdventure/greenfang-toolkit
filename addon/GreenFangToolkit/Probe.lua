@@ -847,7 +847,8 @@ end
 Probe.WINDOW_NAME = "GreenFangToolkit_ProbeWindow"
 local window, edit
 
-function Probe.showCopy()
+-- GF-001-D15: text (optional) replaces the probe report (/gftk probe share).
+function Probe.showCopy(text)
     if not window then
         local f = ns.popupWindow(Probe.WINDOW_NAME, 760, 520)
         f:SetPoint("CENTER", 0, 10)
@@ -876,7 +877,7 @@ function Probe.showCopy()
         scroll:SetScrollChild(edit)
         window = f
     end
-    local text = Probe.text()
+    text = type(text) == "string" and text or Probe.text()
     edit:SetText(text)
     local lines = 1
     for _ in text:gmatch("\n") do lines = lines + 1 end
