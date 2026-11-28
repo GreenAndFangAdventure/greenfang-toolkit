@@ -20,6 +20,8 @@ TOC_FILES[#TOC_FILES + 1] = "SleepingBagMap.lua" -- GF-008-B (appended, like the
 TOC_FILES[#TOC_FILES + 1] = "RecipeLink.lua" -- GF-009-10 (appended, like the TOC)
 TOC_FILES[#TOC_FILES + 1] = "BankStock.lua" -- GF-012-B (appended, like the TOC)
 TOC_FILES[#TOC_FILES + 1] = "BankRequests.lua" -- GF-012-D (appended, like the TOC)
+TOC_FILES[#TOC_FILES + 1] = "GuildBank.lua" -- GF-017 (appended, like the TOC)
+TOC_FILES[#TOC_FILES + 1] = "GuildBankUI.lua"
 wow.TOC_FILES = TOC_FILES
 
 ---------------------------------------------------------------------------

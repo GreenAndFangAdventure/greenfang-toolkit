@@ -4821,6 +4821,10 @@ assert(loadfile(ROOT .. "/tests/addon/gfuio_tests.lua"))()({ test = test, eq = e
 -- revoked lists, the delivered snapshot, addView, the 申領 page and form, combat, 審核幹部 (tests/addon/gf012d_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gf012d_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-017: the game's guild bank, gold only: reading while open, merging, sharing (GB), the 公會銀行 view
+-- (tests/addon/gf017_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf017_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0
