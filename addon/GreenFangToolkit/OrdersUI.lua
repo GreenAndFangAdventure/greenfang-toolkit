@@ -86,7 +86,8 @@ end
 function UI.totalText(est, fee)
     local t = (est and est.total or 0) + (fee or 0)
     local s = UI.money(t)
-    if est and est.unknown then s = "＞" .. s end
+    -- GF-006-D: also while the material list is not known yet (only the fee is in it).
+    if est and (est.unknown or est.noList) then s = "＞" .. s end
     return s
 end
 
@@ -270,6 +271,34 @@ local function itemTooltip(owner, itemID)
     GameTooltip:Show()
 end
 
+-- GF-006-D: the count on a material icon of an order row (the customer brings
+-- part of it), in the game's item-count font at the bottom right; nil hides it.
+function UI.matCount(b, text)
+    if not b.countText then
+        if not text then return end
+        b.countText = b:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+        b.countText:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", -1, 1)
+    end
+    b.countText:SetText(text or "")
+    if text then b.countText:Show() else b.countText:Hide() end
+end
+
+-- GF-006-D: a material icon on an order row: the item, then who brings how many.
+function UI.matTip(b)
+    if ns.Widgets.rowTip then ns.Widgets.rowTip(b) else GameTooltip:SetOwner(b, "ANCHOR_RIGHT") end
+    local shown = b.itemID and type(GameTooltip.SetItemByID) == "function" and pcall(GameTooltip.SetItemByID, GameTooltip, b.itemID)
+    if not shown then GameTooltip:AddLine("#" .. tostring(b.itemID or "?")) end
+    local need, own = b.need or 0, b.own or 0
+    local line
+    if own >= need and need > 0 then line = "下單人全部自帶（" .. need .. " 個）"
+    elseif own > 0 then line = "下單人自帶 " .. own .. " 個，工匠準備 " .. (need - own) .. " 個（共需 " .. need .. " 個）"
+    else line = "工匠準備（共需 " .. need .. " 個）" end
+    GameTooltip:AddLine(line, 1, 0.82, 0, true)
+    GameTooltip:AddLine("打勾＝下單人全部自帶；角落數字＝下單人自帶的個數；沒有記號＝工匠準備", 0.85, 0.85, 0.85, true)
+    GameTooltip:Show()
+    b.matLine = line
+end
+
 local function memberOf(a) return a and S().memberFor(a) or nil end
 local function shortOf(a)
     local m = memberOf(a)
@@ -377,7 +406,7 @@ local function newRow(i)
     for k = 1, 5 do
         local m = iconButton(row, ns.ROW_ICON, "unknown", nil)
         m:SetPoint("LEFT", row, "LEFT", 312 + (k - 1) * 30, 0)
-        m:SetScript("OnEnter", function(self) itemTooltip(self, self.itemID) end)
+        m:SetScript("OnEnter", function(self) UI.matTip(self) end)
         ns.Theme.infoOnly(m)
         row.mats[k] = m
     end
@@ -474,13 +503,20 @@ local function fillRow(row, data, i)
     -- Materials the customer gives (ticked) and the ones the crafter gives.
     local r = v.recipe and P().cachedReagents(v.recipe)
     local k = 0
+    local crafts = r and math.ceil(v.qty / math.max(1, r.yield or 1)) or 1
     for _, x in ipairs(r and r.list or {}) do
         k = k + 1
         local m = row.mats[k]
         if not m then break end
         itemIcon(m.tex, x.id)
         m.itemID = x.id
-        if v.mats[x.id] then setIcon(m.badge, "deal") else m.badge:Hide() end
+        -- GF-006-D: ✓ = the customer brings all of it; a number = brings that many
+        -- (part of it); nothing = the crafter provides it. Old orders wrote the
+        -- whole need, so they still show ✓.
+        local need, own = x.n * crafts, v.mats[x.id] or 0
+        m.need, m.own = need, own
+        if own >= need then setIcon(m.badge, "deal") else m.badge:Hide() end
+        UI.matCount(m, own > 0 and own < need and tostring(own) or nil)
         m:Show()
     end
     for j = k + 1, #row.mats do row.mats[j]:Hide() end
@@ -846,7 +882,94 @@ end
 
 UI.POPUP_NAME = "GreenFangToolkit_OrderPopup"
 local popup
-local draft -- { recipe, skill, item, qty, crafter (author or "*"), mats = { [id] = true }, fee, feeQuoted, crafters }
+-- draft = { recipe, skill, item, qty, crafter (author or "*"), crafters, reagents,
+--   mats = { [itemID] = true (I bring all) | count (GF-006-D: I bring that many) },
+--   fee, feeQuoted, feeEdited }
+local draft
+
+---------------------------------------------------------------------------
+-- GF-006-D (owner, 0.16.19: 「每種材料應該是要可以設定 是否自帶多少數量」
+-- 「目前的圖示看不出作用，應該要有滑鼠放上的輔助說明」「材料費的計算與行情
+-- 功能看起來有問題」): the order form has one row per material (icon, name,
+-- needed, in my bags, 「自帶」 count, the cost of the rest); every icon has a
+-- hint by the mouse (Widgets.rowTip); 材料費 names the materials without a
+-- price, 行情 says when there is no market data yet and how to get it.
+---------------------------------------------------------------------------
+
+UI.MAT_ROWS = 4      -- material rows in view; more scroll (a recipe has at most 12)
+UI.MAT_ROW_H = 34
+UI.TEXT = {
+    productLoading = "物品資料載入中",
+    noList = "還不知道要哪些材料：已向線上會友詢問，有人回答就會自動補上",
+    noPrice = "沒有價格",
+    bringAll = "自帶",
+    missing = "沒有價格：",
+    lowerBound = "（＞＝至少：有材料沒有價格，沒算進去）",
+    noMarket = "還沒有行情資料：到拍賣場按旁邊的掃描鈕，或等會友掃描後分享過來",
+    marketSingle = "只有 1 位會友回報過，僅供參考",
+    marketOld = "天前的價格",
+}
+UI.HINT = {
+    product = { "成品", "這張單要做的東西。滑鼠移上去看物品說明。" },
+    guild = { "公會單", "所有會做這個配方的會友都看得到，最先接單的人負責做。點一下改成公會單。" },
+    named = { "指定工匠", "只有你選的那位工匠會收到這張單。點一下從會做的人裡選一位。",
+        "角落的小錘子＝這位工匠目前有開「接單」。" },
+    mat = { "點圖示：全部自帶／全部不帶，切換。", "「自帶」填你自己準備、交易時交給工匠的數量；沒自帶的部分由工匠準備，算進材料費。" },
+    matsCost = { "材料費", "沒自帶的材料，照價格估的費用（給工匠的材料錢）。",
+        "價格依序從這裡找：1. 商人賣的價格（你逛過賣它的商人）；2. 拍賣插件；3. 公會的拍賣掃描（7 天內）。",
+        "前面有「＞」＝有材料查不到價格，沒算進去，實際會更多。" },
+    fee = { "工錢", "給工匠的手工費，可以自己改。",
+        "紅色問號＝工匠沒填工錢；禮物＝工匠寫免費。" },
+    total = { "合計", "材料費＋工錢。前面有「＞」＝有材料沒有價格，實際會更多。" },
+    market = { "行情", "這個成品在拍賣場最近的價格，用來和合計比較，看自己做划不划算。",
+        "來源：拍賣插件，或公會的拍賣掃描（在拍賣場按旁邊的掃描鈕；會友掃描的也會分享過來）。" },
+}
+
+-- A tooltip by the mouse (Widgets.rowTip) with a white first line and wrapped lines under it.
+function UI.hint(owner, lines, extra)
+    if not (owner and lines) then return end
+    if ns.Widgets and ns.Widgets.rowTip then ns.Widgets.rowTip(owner) else GameTooltip:SetOwner(owner, "ANCHOR_TOP") end
+    for i, l in ipairs(lines) do
+        if i == 1 then GameTooltip:AddLine(l, 1, 1, 1) else GameTooltip:AddLine(l, 0.85, 0.85, 0.85, true) end
+    end
+    for _, l in ipairs(extra or {}) do GameTooltip:AddLine(l, 1, 0.82, 0, true) end
+    GameTooltip:Show()
+    owner.hintShown = lines
+end
+
+-- An icon that only explains (no click): a small button holding the texture.
+function UI.hintIcon(parent, size, lines)
+    local b = CreateFrame("Button", nil, parent)
+    b:SetSize(size, size)
+    b.tex = b:CreateTexture(nil, "ARTWORK")
+    b.tex:SetAllPoints()
+    b.hintLines = lines
+    b:SetScript("OnEnter", function(self) UI.hint(self, self.hintLines, self.hintExtra) end)
+    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    ns.Theme.infoOnly(b)
+    return b
+end
+
+-- The item's name in the client's language, or nil while it is loading (it is asked for).
+function UI.itemName(id)
+    if not id then return nil end
+    local info = ns.Widgets.itemInfo(id)
+    return info.name
+end
+
+-- How many of a material I bring: true = all of need, a count (at most need), nil = none.
+function UI.bringOf(d, id, need)
+    local m = d.mats[id]
+    if m == true then return need end
+    return math.max(0, math.min(need, math.floor(tonumber(m) or 0)))
+end
+-- Set it: need or more = all (true, it follows the quantity), 0 = none (nil).
+function UI.setBring(d, id, n, need)
+    n = math.floor(tonumber(n) or 0)
+    if n <= 0 then d.mats[id] = nil
+    elseif need and n >= need then d.mats[id] = true
+    else d.mats[id] = n end
+end
 
 -- Prefilled draft (pure): crafters = members who know the recipe (sorted active first).
 function UI.newDraft(opts)
@@ -874,15 +997,30 @@ function UI.newDraft(opts)
     end
     local d = { recipe = recipe, skill = skill, qty = 1, crafter = target or "*", mats = {}, crafters = crafters }
     local r = P().reagents(recipe)
+    d.item = opts.item
+    UI.fillReagents(d, r)
+    UI.applyFee(d)
+    return d
+end
+
+-- The reagent list is known (at once, or when a member answered): the
+-- product and the materials I already have enough of are ticked (R-5.2).
+function UI.fillReagents(d, r)
     d.reagents = r
-    d.item = r and r.output or opts.item
-    -- Materials I already have enough of are ticked (R-5.2).
-    for _, x in ipairs(r and r.list or {}) do
+    if not r then return end
+    d.item = r.output or d.item
+    for _, x in ipairs(r.list or {}) do
         local have = ns.Delivery.countOf(x.id) or 0
         if have >= x.n then d.mats[x.id] = true end
     end
-    UI.applyFee(d)
-    return d
+end
+
+-- Orders.onCustom stored a list a member sent: the open window waiting for it fills in.
+function UI.reagentsArrived(recipe)
+    if not (draft and draft.recipe == recipe and not draft.reagents) then return false end
+    UI.fillReagents(draft, P().cachedReagents(recipe))
+    if popup and popup:IsShown() then UI.drawPopup() end
+    return true
 end
 
 -- The fee field follows the chosen crafter's quote (R-4.5): nil -> 0, marked unset.
@@ -898,19 +1036,20 @@ end
 
 function UI.estimateOf(d)
     local rk = P().homeKey()
-    local mine = {}
-    for id, on in pairs(d.mats) do if on then mine[id] = true end end
-    return P().estimate(d.reagents, d.qty, mine, function(id) return (P().priceOf(id, rk)) end)
+    return P().estimate(d.reagents, d.qty, d.mats, function(id) return (P().priceOf(id, rk)) end)
 end
 
 -- Place the draft. Returns the order id.
 function UI.submit(d)
     d = d or draft
     if not d then return nil end
+    -- GF-006-D: the count I bring of each material (all, or part of it) in the
+    -- order's mats (itemID -> count, the contract's field); none = not written.
     local mats = {}
     local crafts = d.reagents and math.ceil(d.qty / math.max(1, d.reagents.yield or 1)) or 1
     for _, x in ipairs(d.reagents and d.reagents.list or {}) do
-        if d.mats[x.id] then mats[x.id] = x.n * crafts end
+        local n = UI.bringOf(d, x.id, x.n * crafts)
+        if n > 0 then mats[x.id] = n end
     end
     local est = UI.estimateOf(d)
     -- Review 5-1 (contract): no quote when it cannot be computed (no list, or a price missing).
@@ -978,41 +1117,166 @@ local function moneyBoxes(parent, x, y, onChange)
 end
 UI.moneyBoxes = moneyBoxes
 
-local function drawPopup()
-    if not (popup and draft) then return end
-    local d = draft
-    itemIcon(popup.item.tex, d.item, d.skill)
-    popup.qty:SetText(tostring(d.qty))
-    setIcon(popup.guild.badge, "deal")
-    if d.crafter == "*" then popup.guild.badge:Show(); popup.named.badge:Hide()
-    else popup.guild.badge:Hide(); setIcon(popup.named.badge, "deal") end
-    local m = d.crafter ~= "*" and memberOf(d.crafter) or nil
-    if m and Icons.setClassIcon(popup.named.tex, m.classToken) then popup.named.tex:Show() else setIcon(popup.named.tex, "unknown") end
-    popup.named.tip = m and ns.shortName(m.name) or "指定工匠"
-    popup.namedActive:Hide()
-    if m and O().isActive(m.guid, d.skill) then setIcon(popup.namedActive, "hammer") end
-    local est = UI.estimateOf(d)
-    for i, b in ipairs(popup.mats) do
-        local row = est.mats[i]
-        if row then
-            itemIcon(b.tex, row.id)
-            b.itemID = row.id
-            if row.mine then setIcon(b.badge, "bag") elseif row.unknown then setIcon(b.badge, "unknown") else b.badge:Hide() end
-            setLabel(b, "x" .. row.need)
-            b:Show()
-        else
-            b:Hide()
+-- 材料費: the amount ("＞" when a price is missing) and which materials have none.
+function UI.matsCostText(est)
+    if est.noList then return UI.TEXT.noList end
+    local s = (est.unknown and "＞" or "") .. UI.money(est.total)
+    if est.unknown then
+        local names = {}
+        for _, id in ipairs(est.missing or {}) do names[#names + 1] = UI.itemName(id) or ("#" .. tostring(id)) end
+        s = s .. "   " .. UI.TEXT.missing .. table.concat(names, "、")
+    end
+    return s
+end
+
+-- 行情 of the product: the text, and how it was found ("addon", "scan", "single", "none").
+function UI.marketText(item)
+    if not item then return UI.TEXT.noMarket, "none" end
+    local m = P().marketOf(item)
+    if m then
+        local s = UI.money(m.price)
+        local r = m.source == "scan" and P().reference(P().homeKey(), item) or nil
+        if m.grey and r and r.newestDay then
+            s = s .. "   （" .. (P().today() - r.newestDay) .. " " .. UI.TEXT.marketOld .. "）"
+        end
+        return s, m.source
+    end
+    local r = P().reference(P().homeKey(), item)
+    if r and r.single then return UI.money(r.price) .. "   （" .. UI.TEXT.marketSingle .. "）", "single" end
+    return UI.TEXT.noMarket, "none"
+end
+
+-- One material row of the form (made once, reused while scrolling).
+local function matRow(f, i)
+    local r = CreateFrame("Frame", nil, f.matBox)
+    r:SetSize(f.matW, UI.MAT_ROW_H)
+    r:SetPoint("TOPLEFT", f.matBox, "TOPLEFT", 0, -(i - 1) * UI.MAT_ROW_H)
+    r.bg = r:CreateTexture(nil, "BACKGROUND"); r.bg:SetAllPoints()
+    r.icon = iconButton(r, ns.ROW_ICON, "unknown", nil, function()
+        local row = r
+        if not (draft and row.id) then return end
+        local all = UI.bringOf(draft, row.id, row.need) >= row.need
+        UI.setBring(draft, row.id, all and 0 or row.need, row.need)
+        UI.drawPopup()
+    end)
+    r.icon:SetPoint("LEFT", r, "LEFT", 2, 0)
+    r.icon:SetScript("OnEnter", function(self)
+        local row = r
+        if ns.Widgets.rowTip then ns.Widgets.rowTip(self) end
+        local shown = row.id and type(GameTooltip.SetItemByID) == "function" and pcall(GameTooltip.SetItemByID, GameTooltip, row.id)
+        if not shown then GameTooltip:AddLine(UI.itemName(row.id) or UI.TEXT.productLoading, 1, 1, 1) end
+        GameTooltip:AddLine("需要 " .. tostring(row.need or 0) .. " 個，你背包有 " .. tostring(row.have or 0) .. " 個", 1, 0.82, 0)
+        for _, l in ipairs(UI.HINT.mat) do GameTooltip:AddLine(l, 0.85, 0.85, 0.85, true) end
+        GameTooltip:Show()
+        self.hintShown = UI.HINT.mat
+    end)
+    r.name = r:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
+    r.name:SetPoint("LEFT", r, "LEFT", 36, 0); r.name:SetWidth(168); r.name:SetJustifyH("LEFT"); r.name:SetWordWrap(false)
+    r.needText = r:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
+    r.needText:SetPoint("LEFT", r, "LEFT", f.matCol.need, 0); r.needText:SetWidth(50); r.needText:SetJustifyH("LEFT")
+    r.haveText = r:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
+    r.haveText:SetPoint("LEFT", r, "LEFT", f.matCol.have, 0); r.haveText:SetWidth(54); r.haveText:SetJustifyH("LEFT")
+    r.box = ns.Theme.editBox(r, 48, 26)
+    r.box:SetPoint("LEFT", r, "LEFT", f.matCol.bring, 0)
+    if r.box.SetNumeric then r.box:SetNumeric(true) end
+    r.box:SetMaxLetters(4)
+    r.box.fieldNamed = "自帶"
+    r.box:SetScript("OnTextChanged", function(self, user)
+        if f.filling or user == false or not (draft and r.id) then return end
+        local n = tonumber(str(self:GetText())) or 0
+        if n > r.need then n = r.need; f.filling = true; self:SetText(tostring(n)); f.filling = false end
+        UI.setBring(draft, r.id, n, r.need)
+        UI.drawPopup(true)
+    end)
+    r.box:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    r.box:SetScript("OnEnter", function(self)
+        UI.hint(self, { "自帶", "你自己準備、交易時交給工匠的數量（0 到 " .. tostring(r.need or 0) .. "）。", "沒自帶的部分由工匠準備，算進材料費。" })
+    end)
+    r.box:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    r.cost = ns.freeText(r:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
+    r.cost:SetPoint("LEFT", r, "LEFT", f.matCol.cost, 0); r.cost:SetJustifyH("LEFT")
+    f.matRows[i] = r
+    return r
+end
+
+local function drawMats(f, d, est, keepBoxes)
+    local list = est.mats or {}
+    local n = UI.MAT_ROWS
+    f.matOffset = math.max(0, math.min(f.matOffset or 0, math.max(0, #list - n)))
+    for i = 1, n do
+        local row = list[f.matOffset + i]
+        local r = f.matRows[i] or (row and matRow(f, i)) or nil
+        if r then
+            if row then
+                ns.stripe(r.bg, f.matOffset + i)
+                r.id, r.need = row.id, row.need
+                r.have = ns.Delivery.countOf(row.id) or 0
+                itemIcon(r.icon.tex, row.id)
+                r.name:SetText(UI.itemName(row.id) or UI.TEXT.productLoading)
+                r.needText:SetText("x" .. row.need)
+                r.haveText:SetText(tostring(r.have))
+                if not (keepBoxes and r.box.HasFocus and r.box:HasFocus()) then
+                    f.filling = true
+                    r.box:SetText(tostring(row.own or 0))
+                    f.filling = false
+                end
+                if row.buy == 0 then r.cost:SetText(UI.TEXT.bringAll); ns.setTextColor(r.cost, "good")
+                elseif row.unknown then r.cost:SetText(UI.TEXT.noPrice); ns.setTextColor(r.cost, "warn")
+                else r.cost:SetText(UI.money(row.total)); r.cost:SetTextColor(0.9, 0.9, 0.9) end
+                r:Show()
+            else
+                r:Hide(); r.id = nil
+            end
         end
     end
-    popup.matsCost:SetText(est.noList and "" or ((est.unknown and "＞" or "") .. UI.money(est.total)))
+    f.matBar.sync(f.matOffset, #list, n)
+    if #list > n then f.matBar:Show() else f.matBar:Hide() end
+    f.matEmpty:SetText(est.noList and UI.TEXT.noList or "")
+end
+
+local function drawPopup(keepBoxes)
+    if not (popup and draft) then return end
+    local d = draft
+    if not d.reagents then UI.fillReagents(d, P().cachedReagents(d.recipe)) end
+    -- 成品: the icon and the item's name (the recipe's name until the item is known).
+    itemIcon(popup.item.tex, d.item, d.skill)
+    local name = d.item and UI.itemName(d.item) or nil
+    if not name then name = d.item and UI.TEXT.productLoading or ns.Recipes.name(d.recipe) end
+    setLabel(popup.item, name)
+    popup.qty:SetText(tostring(d.qty))
+    -- 對象: the chosen one glows, the other is dimmed (UI.setSelected).
+    popup.guild.badge:Hide(); popup.named.badge:Hide()
+    UI.setSelected(popup.guild, d.crafter == "*")
+    UI.setSelected(popup.named, d.crafter ~= "*")
+    local m = d.crafter ~= "*" and memberOf(d.crafter) or nil
+    if m and Icons.setClassIcon(popup.named.tex, m.classToken) then popup.named.tex:Show() else setIcon(popup.named.tex, "unknown") end
+    setLabel(popup.named, m and ("指定工匠：" .. ns.shortName(m.name)) or "指定工匠")
+    if popup.named.label then popup.named.label:SetAlpha(1) end
+    popup.namedActive:Hide()
+    if m and O().isActive(m.guid, d.skill) then setIcon(popup.namedActive, "hammer") end
+    popup.guild.hintExtra = d.crafter == "*" and { "目前選的是這個" } or nil
+    popup.named.hintExtra = m and { "目前選的是：" .. ns.shortName(m.name) } or nil
+    local est = UI.estimateOf(d)
+    drawMats(popup, d, est, keepBoxes)
+    popup.matsCost:SetText(UI.matsCostText(est))
+    popup.matsIcon.hintExtra = est.unknown and { UI.TEXT.lowerBound } or nil
     if not d.feeEdited then popup.fee.set(d.fee) end
+    if not Icons.setProfessionIcon(popup.feeIcon.tex, { skillLineID = d.skill }) then setIcon(popup.feeIcon.tex, "making") end
     local kind = UI.feeKind(d.feeEdited and d.fee or d.feeQuoted)
     popup.feeKind:Hide()
-    if kind == "unset" and not d.feeEdited then setIcon(popup.feeKind, "unknown") popup.feeKind.tip = "工匠沒有填工錢"
-    elseif kind == "free" and not d.feeEdited then setIcon(popup.feeKind, "free") popup.feeKind.tip = "免費" end
+    popup.feeIcon.hintExtra = nil
+    if kind == "unset" and not d.feeEdited then
+        setIcon(popup.feeKind, "unknown"); popup.feeKind.tip = "工匠沒有填工錢"
+        popup.feeIcon.hintExtra = { "這位工匠沒填工錢：先和工匠談好再填。" }
+    elseif kind == "free" and not d.feeEdited then
+        setIcon(popup.feeKind, "free"); popup.feeKind.tip = "免費"
+        popup.feeIcon.hintExtra = { "工匠寫了免費。" }
+    end
     popup.total:SetText(UI.totalText(est, d.fee))
-    local market = d.item and P().marketOf(d.item)
-    popup.market:SetText(market and UI.money(market.price) or "")
+    local text, source = UI.marketText(d.item)
+    popup.market:SetText(text)
+    popup.marketSource = source
+    if source == "none" or source == "single" then ns.setTextColor(popup.market, "muted") else popup.market:SetTextColor(1, 1, 1) end
 end
 UI.drawPopup = drawPopup
 
@@ -1040,26 +1304,38 @@ end
 
 -- GF-UI-C (owner: one grid): 行情 has its own row under 合計 (it is compared with it),
 -- every field name at FIELD_X, every control at the same X.
+-- GF-006-D: 材料 is a small table (one row per material) between 對象 and 材料費.
 UI.ORDER_FIELDS = { "成品", "數量", "對象", "材料", "材料費", "工錢", "合計", "行情" }
+UI.POPUP_W = 720
 local function createPopup()
     if popup then return popup end
-    local f = ns.popupWindow(UI.POPUP_NAME, 660, 552)
-    f:SetPoint("CENTER", 0, 60)
+    local f = ns.popupWindow(UI.POPUP_NAME, UI.POPUP_W, 640)
+    f:SetPoint("CENTER", 0, 40)
     f:EnableMouse(true)
     ns.exclusivePopup(f)
     if f.TitleText then f.TitleText:SetText("下單") end
     local X = UI.controlX(UI.ORDER_FIELDS) -- where the controls start, after the field names
-    local function y(i) return -44 - (i - 1) * UI.ROW_STEP end
+    f.controlX = X
+    local MAT_Y = -44 - 3 * UI.ROW_STEP          -- 材料: the column names
+    local LIST_Y = MAT_Y - 26                     -- the material rows
+    local AFTER = LIST_Y - UI.MAT_ROWS * UI.MAT_ROW_H - 12
+    local function y(i)
+        if i <= 3 then return -44 - (i - 1) * UI.ROW_STEP end
+        return AFTER - (i - 5) * UI.ROW_STEP
+    end
     UI.fieldLabel(f, "成品", UI.FIELD_X, y(1) - 8)
     f.item = iconButton(f, ns.ICON, "unknown", nil, nil, "成品")
     f.item:SetPoint("TOPLEFT", f, "TOPLEFT", X, y(1))
-    f.item:SetScript("OnEnter", function(self) itemTooltip(self, draft and draft.item) end)
-    UI.fieldLabel(f, "行情", UI.FIELD_X, y(8) - 8)
-    f.marketIcon = f:CreateTexture(nil, "ARTWORK"); f.marketIcon:SetSize(20, 20)
-    f.marketIcon:SetPoint("TOPLEFT", f, "TOPLEFT", X, y(8) - 6)
-    Icons.set(f.marketIcon, UI.ICON.gold)
-    f.market = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
-    f.market:SetPoint("LEFT", f.marketIcon, "RIGHT", 4, 0)
+    f.item:SetScript("OnEnter", function(self)
+        if ns.Widgets.rowTip then ns.Widgets.rowTip(self) end
+        local id = draft and draft.item
+        local shown = id and type(GameTooltip.SetItemByID) == "function" and pcall(GameTooltip.SetItemByID, GameTooltip, id)
+        if not shown then GameTooltip:AddLine(UI.HINT.product[1], 1, 1, 1) end
+        GameTooltip:AddLine(UI.HINT.product[2], 0.85, 0.85, 0.85, true)
+        GameTooltip:Show()
+        self.hintShown = UI.HINT.product
+    end)
+    ns.Theme.infoOnly(f.item)
     -- Quantity: the game's previous / next page arrows (GF-002-C).
     UI.fieldLabel(f, "數量", UI.FIELD_X, y(2) - 8)
     f.minus = UI.arrowButton(f, "prev", "－"); f.minus:SetPoint("TOPLEFT", f, "TOPLEFT", X, y(2)); f.minus.fieldNamed = "數量"
@@ -1072,36 +1348,53 @@ local function createPopup()
     end
     f.minus:SetScript("OnClick", function() step(-1) end)
     f.plus:SetScript("OnClick", function() step(1) end)
+    for _, b in ipairs({ f.minus, f.plus }) do
+        b.hintLines = { "數量", b == f.minus and "少做一份。" or "多做一份。", "一次做出好幾個的配方，一格就是一次做出的數量。" }
+        b:SetScript("OnEnter", function(self) UI.hint(self, self.hintLines) end)
+        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
     -- Guild order or a named crafter.
     UI.fieldLabel(f, "對象", UI.FIELD_X, y(3) - 8)
-    f.guild = iconButton(f, ns.ICON, "guild", "公會單", function() draft.crafter = "*"; UI.applyFee(draft); drawPopup() end, "公會單")
-    f.named = iconButton(f, ns.ICON, "unknown", "指定工匠", function(self) UI.pickCrafter(self) end, "指定工匠")
+    f.guild = iconButton(f, ns.ICON, "guild", nil, function() draft.crafter = "*"; UI.applyFee(draft); drawPopup() end, "公會單")
+    f.named = iconButton(f, ns.ICON, "unknown", nil, function(self) UI.pickCrafter(self) end, "指定工匠")
     UI.flow(f, { f.guild, f.named }, X, y(3), 28)
+    f.guild.hintLines, f.named.hintLines = UI.HINT.guild, UI.HINT.named
+    for _, b in ipairs({ f.guild, f.named }) do
+        b:SetScript("OnEnter", function(self) UI.hint(self, self.hintLines, self.hintExtra) end)
+    end
     f.namedActive = f:CreateTexture(nil, "OVERLAY"); f.namedActive:SetSize(14, 14)
     f.namedActive:SetPoint("TOPRIGHT", f.named, "TOPRIGHT", 4, 4)
-    -- Materials: click = I give it (ticked) / you give it. The count is the name.
-    UI.fieldLabel(f, "材料", UI.FIELD_X, y(4) - 8)
-    f.mats = {}
-    for i = 1, 6 do
-        local b = iconButton(f, ns.ICON, "unknown", nil, function(self)
-            draft.mats[self.itemID] = not draft.mats[self.itemID] or nil
-            drawPopup()
-        end, "x1")
-        b:SetPoint("TOPLEFT", f, "TOPLEFT", X + (i - 1) * 86, y(4))
-        b:SetScript("OnEnter", function(self) itemTooltip(self, self.itemID) end)
-        b.count = b.label
-        f.mats[i] = b
+    -- 材料: one row per material; the column names above them.
+    UI.fieldLabel(f, "材料", UI.FIELD_X, MAT_Y - 4)
+    f.matW = UI.POPUP_W - X - 24 - ns.Widgets.SCROLL_W - ns.Widgets.SCROLL_GAP
+    f.matCol = { need = 212, have = 266, bring = 324, cost = 386 }
+    f.matHead = {}
+    for key, text in pairs({ need = "需要", have = "背包", bring = "自帶", cost = "材料費" }) do
+        local h = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT))
+        h:SetPoint("TOPLEFT", f, "TOPLEFT", X + f.matCol[key], MAT_Y)
+        h:SetText(text)
+        f.matHead[key] = h
     end
+    f.matBox = CreateFrame("Frame", nil, f)
+    f.matBox:SetSize(f.matW, UI.MAT_ROWS * UI.MAT_ROW_H)
+    f.matBox:SetPoint("TOPLEFT", f, "TOPLEFT", X, LIST_Y)
+    f.matRows, f.matOffset = {}, 0
+    f.matBar = ns.Widgets.scrollBar(f, UI.MAT_ROWS * UI.MAT_ROW_H, function(o) f.matOffset = o; drawPopup(true) end)
+    f.matBar:SetPoint("TOPLEFT", f.matBox, "TOPRIGHT", ns.Widgets.SCROLL_GAP, 0)
+    f.matBar:Hide()
+    if f.matBox.EnableMouseWheel then f.matBox:EnableMouseWheel(true) end
+    f.matBox:SetScript("OnMouseWheel", function(_, delta) f.matBar.scrollBy(-(tonumber(delta) or 0)) end)
+    f.matEmpty = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT))
+    f.matEmpty:SetPoint("TOPLEFT", f.matBox, "TOPLEFT", 4, -8)
     UI.fieldLabel(f, "材料費", UI.FIELD_X, y(5) - 8)
-    f.matsIcon = f:CreateTexture(nil, "ARTWORK"); f.matsIcon:SetSize(22, 22)
+    f.matsIcon = UI.hintIcon(f, 22, UI.HINT.matsCost)
     f.matsIcon:SetPoint("TOPLEFT", f, "TOPLEFT", X, y(5) - 6)
-    Icons.set(f.matsIcon, UI.ICON.bag)
+    Icons.set(f.matsIcon.tex, UI.ICON.bag)
     f.matsCost = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
     f.matsCost:SetPoint("LEFT", f.matsIcon, "RIGHT", 6, 0)
     UI.fieldLabel(f, "工錢", UI.FIELD_X, y(6) - 8)
-    f.feeIcon = f:CreateTexture(nil, "ARTWORK"); f.feeIcon:SetSize(22, 22)
+    f.feeIcon = UI.hintIcon(f, 22, UI.HINT.fee)
     f.feeIcon:SetPoint("TOPLEFT", f, "TOPLEFT", X, y(6) - 6)
-    Icons.setProfessionIcon(f.feeIcon, { skillLineID = 164 })
     f.fee = UI.moneyBoxes(f, X + 54, y(6) - 2, function()
         if not draft then return end
         draft.fee, draft.feeEdited = f.fee.get() or 0, true
@@ -1114,12 +1407,25 @@ local function createPopup()
     f.sumIcon:SetPoint("TOPLEFT", f, "TOPLEFT", X, y(7) - 6); f.sumIcon:SetText("")
     f.total = ns.freeText(f:CreateFontString(nil, "ARTWORK", "GameFontHighlightLarge"))
     f.total:SetPoint("TOPLEFT", f, "TOPLEFT", X, y(7) - 6)
+    UI.fieldLabel(f, "行情", UI.FIELD_X, y(8) - 8)
+    f.marketIcon = UI.hintIcon(f, 20, UI.HINT.market)
+    f.marketIcon:SetPoint("TOPLEFT", f, "TOPLEFT", X, y(8) - 6)
+    Icons.set(f.marketIcon.tex, UI.ICON.gold)
+    f.market = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
+    f.market:SetPoint("LEFT", f.marketIcon, "RIGHT", 6, 0)
     f.send = UI.textButton(f, "下單", function() UI.submit() end, 110)
     f.send:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -20, 16)
+    f:SetHeight(-y(8) + 30 + 16 + ns.BUTTON_H + 16)
+    -- An item's name arrived (Widgets asked the client for it): redraw the open form.
+    -- (Registered here: Widgets.lua loads after this file.)
+    ns.Widgets.onItemAnswer(function()
+        if popup and popup:IsShown() and draft then drawPopup(true) end
+    end)
     f:Hide()
     popup = f
     return f
 end
+
 
 -- Choose a crafter: active ones first (R-4.2), each with their fee.
 function UI.pickCrafter(owner)
@@ -1148,6 +1454,7 @@ function UI.openOrder(opts)
     end
     draft = UI.newDraft(opts)
     createPopup():Show()
+    popup.matOffset = 0
     drawPopup()
     return draft
 end
@@ -1308,91 +1615,227 @@ UI.PICKER_NAME = "GreenFangToolkit_RecipePicker"
 UI.PICKER_ROWS = 10
 UI.PICKER_DELAY = 0.15
 
+---------------------------------------------------------------------------
+-- GF-006-D (owner, 0.16.19: 「下單的介面…並有篩選器，可以捲動」): one filter
+-- row (搜尋, 專業, 工匠: 全部／接單中／在線, 工錢: Recipes.FEE_OPTIONS), as the
+-- adventure page's; the list scrolls (Widgets.scrollBar, the same 10 row
+-- frames refilled). The filtered list is kept until the guild's recipes,
+-- the roster, the crafters' services (the GFTKO ledger), a filter or the
+-- search text change.
+---------------------------------------------------------------------------
+
+UI.PICKER_W = 780
+UI.PICKER_ROW_W = 712
+UI.PICKER_WHO = { { value = "all", text = "全部" }, { value = "active", text = "接單中" }, { value = "online", text = "在線" } }
+UI.PICKER_EMPTY = { none = "找不到配方", filtered = "沒有符合的配方，換個篩選試試" }
+UI.pickerFilter = { skill = "all", who = "all", fee = nil }
+UI.pickerStats = { built = 0, hits = 0 }
+local pickerCache = {}
+
+function UI.pickerFiltersOn()
+    local p = UI.pickerFilter
+    return p.skill ~= "all" or p.who ~= "all" or p.fee ~= nil
+end
+
 function UI.pickerRows(query)
     local index = ns.Recipes and ns.Recipes.index()
     if not index then return {} end
+    query = query or ""
+    local p = UI.pickerFilter
+    local test = O().testOn()
+    local ver = O().ledger and O().ledger.version or 0
+    local c = pickerCache
+    if c.rows and c.index == index and c.ver == ver and c.query == query and c.skill == p.skill
+        and c.who == p.who and c.fee == p.fee and c.test == test then
+        UI.pickerStats.hits = UI.pickerStats.hits + 1
+        return c.rows
+    end
+    UI.pickerStats.built = UI.pickerStats.built + 1
     local skills = ns.Recipes.professionsInIndex(index)
+    if p.skill ~= "all" then skills = index[p.skill] and { p.skill } or {} end
     -- GF-UI-B: in the test mode my own recipes too (a test order to myself).
-    return ns.Recipes.rowsFor(index, skills, query or "", nil, { who = not O().testOn() and "others" or nil })
+    local rows = ns.Recipes.rowsFor(index, skills, query, nil, { who = not test and "others" or nil,
+        active = p.who == "active" or nil, online = p.who == "online" or nil, fee = p.fee })
+    pickerCache = { rows = rows, index = index, ver = ver, query = query, skill = p.skill, who = p.who, fee = p.fee, test = test }
+    return rows
 end
 
-function UI.drawPicker()
+-- The 專業 choices: 全部 and every profession someone in the guild crafts with.
+function UI.pickerSkillItems()
+    local items = { { value = "all", text = "全部" } }
+    local index = ns.Recipes and ns.Recipes.index() or {}
+    for _, skill in ipairs(ns.Recipes.professionsInIndex(index)) do
+        items[#items + 1] = { value = skill, text = ns.Data.skillName(nil, skill) or ("專業 " .. skill) }
+    end
+    return items
+end
+
+function UI.setPickerFilter(key, value)
+    if UI.pickerFilter[key] == value then return false end
+    UI.pickerFilter[key] = value
+    if UI.picker then UI.picker.offset = 0; UI.drawPicker() end
+    return true
+end
+
+-- The fee and the crafters of a row (other members only).
+local function pickerOthers(r)
+    local others = {}
+    for _, m in ipairs(r.crafters) do if not m.self then others[#others + 1] = m end end
+    return others
+end
+
+function UI.drawPickerRows()
     local f = UI.picker
     if not f then return end
-    local rows = UI.pickerRows(f.query)
-    f.list = rows
+    local rows = f.list or {}
+    f.offset = math.max(0, math.min(f.offset or 0, math.max(0, #rows - UI.PICKER_ROWS)))
     for i = 1, UI.PICKER_ROWS do
         local b = f.rows[i]
-        local r = rows[i]
+        local r = rows[f.offset + i]
         if r then
             ns.Recipes.setIcon(b.icon, r.id, r.skill)
             b.name:SetText(r.name)
-            local others = {}
-            for _, m in ipairs(r.crafters) do if not m.self then others[#others + 1] = m end end
-            local fee = O().lowestFee(others, r.skill, r.id)
+            local others = pickerOthers(r)
+            b.who:SetText(ns.Recipes.crafterText(#others > 0 and others or r.crafters, r.skill))
+            local fee = #others > 0 and O().lowestFee(others, r.skill, r.id) or UI.rowFee(r, r.crafters)
             showFee(b.feeTex, b.fee, fee)
             b.fee:SetText(UI.feeText(fee))
+            b.feeValue = fee
             b.data = r
             b:Show()
         else
             b:Hide(); b.data = nil
         end
     end
-    f.empty:SetText(#rows == 0 and "找不到配方" or "")
-    f.count:SetText(#rows > UI.PICKER_ROWS and ("+" .. (#rows - UI.PICKER_ROWS)) or "")
+    f.bar.sync(f.offset, #rows, UI.PICKER_ROWS)
+end
+
+function UI.drawPicker()
+    local f = UI.picker
+    if not f then return end
+    local rows = UI.pickerRows(f.query)
+    if f.list ~= rows then f.list = rows end
+    UI.drawPickerRows()
+    f.empty:SetText(#rows == 0 and (UI.pickerFiltersOn() and UI.PICKER_EMPTY.filtered or UI.PICKER_EMPTY.none) or "")
+    f.count:SetText("")
+end
+
+-- The row tooltip: what the icons say and what a click does.
+function UI.pickerTip(b)
+    local r = b.data
+    if not r then return end
+    if ns.Widgets.rowTip then ns.Widgets.rowTip(b) end
+    GameTooltip:AddLine(r.name, 1, 1, 1)
+    GameTooltip:AddLine((ns.Data.skillName(nil, r.skill) or "") .. "　會做的人：" .. ns.Recipes.crafterText(pickerOthers(r), r.skill), 0.85, 0.85, 0.85, true)
+    local kind = UI.feeKind(b.feeValue)
+    local feeLine = kind == "unset" and "工錢：灰色硬幣＝會做的人都還沒填工錢，下單時可以自己填"
+        or kind == "free" and "工錢：禮物＝有工匠寫免費"
+        or ("工錢：最低 " .. UI.money(b.feeValue))
+    GameTooltip:AddLine(feeLine, 0.85, 0.85, 0.85, true)
+    GameTooltip:AddLine("名字前的小錘子＝這位工匠目前有開「接單」", 0.85, 0.85, 0.85, true)
+    GameTooltip:AddLine("點一下：開始下單", 1, 0.82, 0)
+    GameTooltip:Show()
+    b.hintShown = true
 end
 
 function UI.openPicker()
     if not UI.picker then
-        local f = ns.popupWindow(UI.PICKER_NAME, 640, 540)
+        local f = ns.popupWindow(UI.PICKER_NAME, UI.PICKER_W, 600)
         f:SetPoint("CENTER", 0, 60)
         f:EnableMouse(true)
         ns.exclusivePopup(f)
         if f.TitleText then f.TitleText:SetText("下單：選配方") end
-        UI.fieldLabel(f, "搜尋", UI.FIELD_X, -46)
-        local X = UI.controlX({ "搜尋" })
-        local box = ns.Theme.editBox(f)
-        box:SetSize(300, 30)
-        box:SetPoint("TOPLEFT", f, "TOPLEFT", X + 6, -40)
+        -- The filter row: 搜尋, 專業, 工匠, 工錢 (AdventureUI's filter row).
+        local FY = -44
+        local x = UI.FIELD_X
+        local function label(text)
+            local l = UI.fieldLabel(f, text, x, FY - 6)
+            x = x + ns.labelWidth(text) + 8
+            return l
+        end
+        label("搜尋")
+        local box = ns.Theme.editBox(f, 150, ns.BUTTON_H)
+        box:SetPoint("TOPLEFT", f, "TOPLEFT", x, FY)
+        x = x + 150 + 16
         box:SetAutoFocus(true)
         box:SetMaxLetters(60)
         -- GF-FIX-C (review high-3): the first key redraws at once; keys within
         -- PICKER_DELAY make one more redraw at its end, with the latest text.
         box:SetScript("OnTextChanged", function(self)
-            f.query = str(self:GetText())
+            local q = str(self:GetText())
+            if q ~= f.query then f.offset = 0 end
+            f.query = q
             ns.Recipes.soon("orders-picker", UI.PICKER_DELAY, function() if f:IsShown() then UI.drawPicker() end end)
         end)
         box:SetScript("OnEscapePressed", function(self) self:ClearFocus(); f:Hide() end)
         box:SetScript("OnEnterPressed", function() local r = f.list and f.list[1]; if r then UI.pickRecipe(r) end end)
         f.search = box
+        label("專業")
+        f.skillDrop = ns.Widgets.dropdown(f, 120, function(v) UI.setPickerFilter("skill", v) end)
+        f.skillDrop:SetPoint("TOPLEFT", f, "TOPLEFT", x, FY)
+        x = x + 120 + 16
+        label("工匠")
+        f.whoDrop = ns.Widgets.dropdown(f, 100, function(v) UI.setPickerFilter("who", v) end)
+        f.whoDrop:SetPoint("TOPLEFT", f, "TOPLEFT", x, FY)
+        f.whoDrop.setItems(UI.PICKER_WHO)
+        x = x + 100 + 16
+        label("工錢")
+        -- Recipes.FEE_OPTIONS has nil for 不限: the dropdown needs a value.
+        f.feeItems = {}
+        for _, o in ipairs(ns.Recipes.FEE_OPTIONS) do f.feeItems[#f.feeItems + 1] = { value = o.value or "any", text = o.text } end
+        f.feeDrop = ns.Widgets.dropdown(f, 120, function(v) UI.setPickerFilter("fee", v ~= "any" and v or nil) end)
+        f.feeDrop:SetPoint("TOPLEFT", f, "TOPLEFT", x, FY)
+        f.feeDrop.setItems(f.feeItems)
+        f.filterRight = x + 120
         UI.fieldLabel(f, "配方", UI.FIELD_X, -90)
-        UI.fieldLabel(f, "工錢", 430, -90)
-        f.rows = {}
+        UI.fieldLabel(f, "會做的人", UI.FIELD_X + 330, -90)
+        UI.fieldLabel(f, "工錢", UI.FIELD_X + 556, -90)
+        f.rows, f.offset = {}, 0
         for i = 1, UI.PICKER_ROWS do
             local b = CreateFrame("Button", nil, f)
-            b:SetSize(590, ns.PAGE_ROW)
+            b:SetSize(UI.PICKER_ROW_W, ns.PAGE_ROW)
             b:SetPoint("TOPLEFT", f, "TOPLEFT", UI.FIELD_X, -114 - (i - 1) * (ns.PAGE_ROW + 2))
             if b.SetHighlightTexture then b:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD") end
             b.icon = b:CreateTexture(nil, "ARTWORK"); b.icon:SetSize(ns.ROW_ICON, ns.ROW_ICON); b.icon:SetPoint("LEFT", b, "LEFT", 2, 0)
             b.name = b:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
-            b.name:SetPoint("LEFT", b, "LEFT", 38, 0); b.name:SetWidth(360); b.name:SetJustifyH("LEFT"); b.name:SetWordWrap(false)
-            b.feeTex = b:CreateTexture(nil, "ARTWORK"); b.feeTex:SetSize(18, 18); b.feeTex:SetPoint("LEFT", b, "LEFT", 406, 0)
-            b.fee = ns.freeText(b:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)); b.fee:SetPoint("LEFT", b, "LEFT", 428, 0)
+            b.name:SetPoint("LEFT", b, "LEFT", 38, 0); b.name:SetWidth(284); b.name:SetJustifyH("LEFT"); b.name:SetWordWrap(false)
+            b.who = b:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
+            b.who:SetPoint("LEFT", b, "LEFT", 330, 0); b.who:SetWidth(216); b.who:SetJustifyH("LEFT"); b.who:SetWordWrap(false)
+            b.feeTex = b:CreateTexture(nil, "ARTWORK"); b.feeTex:SetSize(18, 18); b.feeTex:SetPoint("LEFT", b, "LEFT", 556, 0)
+            b.fee = ns.freeText(b:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)); b.fee:SetPoint("LEFT", b, "LEFT", 578, 0)
             b:SetScript("OnClick", function(self) if self.data then UI.pickRecipe(self.data) end end)
+            b:SetScript("OnEnter", function(self) UI.pickerTip(self) end)
+            b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            if b.EnableMouseWheel then b:EnableMouseWheel(true) end
+            b:SetScript("OnMouseWheel", function(_, delta) f.bar.scrollBy(-(tonumber(delta) or 0) * 3) end)
             f.rows[i] = b
         end
+        local listH = UI.PICKER_ROWS * (ns.PAGE_ROW + 2) - 2
+        f.bar = ns.Widgets.scrollBar(f, listH, function(o) f.offset = o; UI.drawPickerRows() end)
+        f.bar:SetPoint("TOPLEFT", f, "TOPLEFT", UI.FIELD_X + UI.PICKER_ROW_W + ns.Widgets.SCROLL_GAP, -114)
+        if f.EnableMouseWheel then f:EnableMouseWheel(true) end
+        f:SetScript("OnMouseWheel", function(_, delta) f.bar.scrollBy(-(tonumber(delta) or 0) * 3) end)
         f.empty = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT))
         f.empty:SetPoint("TOPLEFT", f, "TOPLEFT", UI.FIELD_X, -116)
         f.count = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT))
         f.count:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", UI.FIELD_X, 20)
+        f:SetHeight(114 + listH + 24)
         f:Hide()
         UI.picker = f
     end
-    UI.picker.query = ""
-    UI.picker.search:SetText("")
-    UI.picker:Show()
+    local f = UI.picker
+    f.query, f.offset = "", 0
+    f.search:SetText("")
+    f.skillDrop.setItems(UI.pickerSkillItems())
+    local known = false
+    for _, it in ipairs(f.skillDrop.items) do if it.value == UI.pickerFilter.skill then known = true end end
+    if not known then UI.pickerFilter.skill = "all" end
+    f.skillDrop.setValue(UI.pickerFilter.skill)
+    f.whoDrop.setValue(UI.pickerFilter.who)
+    f.feeDrop.setValue(UI.pickerFilter.fee or "any")
+    f:Show()
     UI.drawPicker()
-    return UI.picker
+    return f
 end
 
 -- A recipe was chosen: the order popup (it replaces the picker: one window at a time).
