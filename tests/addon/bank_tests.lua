@@ -329,20 +329,20 @@ return function(T)
         ns.Framework.open("bank")
         local UI = ns.BankUI
         local c = UI.controls
-        -- GF-012-B: 4 rows (was 8) to make room for the stock list.
-        eq(#c.rows, UI.ROWS, "the pooled rows"); eq(UI.ROWS, 4, "4 rows")
+        -- GF-012-C: 8 rows again (GF-012-B had 4; the stock has its own view now).
+        eq(#c.rows, UI.ROWS, "the pooled rows"); eq(UI.ROWS, 8, "8 rows")
         eq(c.total, 12, "12 on the list")
         local function shown() local n = 0; for _, r in ipairs(c.rows) do if r:IsShown() then n = n + 1 end end return n end
         eq(shown(), UI.ROWS, "all rows shown")
-        eq(c.more:GetText(), "還有 8 位，用滑鼠滾輪往下看", "the more line")
+        eq(c.more:GetText(), "還有 4 位，用滑鼠滾輪往下看", "the more line")
         local first = c.rows[1].entry
         -- The wheel on a row: one down.
         c.rows[1]:GetScript("OnMouseWheel")(c.rows[1], -1)
         eq(c.offset, 1, "one down")
         ok(c.rows[1].entry ~= first, "the next person on top")
-        eq(c.more:GetText(), "還有 7 位，用滑鼠滾輪往下看", "seven more")
+        eq(c.more:GetText(), "還有 3 位，用滑鼠滾輪往下看", "three more")
         for _ = 1, 10 do UI.scroll(-1) end
-        eq(c.offset, 8, "stops at the last person")
+        eq(c.offset, 4, "stops at the last person")
         eq(c.more:GetText(), "", "the last one in view: no line")
         eq(c.rows[UI.ROWS].state:GetText(), "已撤銷", "the revoked ones at the end")
         ok(not UI.scroll(-1), "no further")
@@ -355,6 +355,7 @@ return function(T)
     test("GF-012 page: the master's buttons work; a custodian sees the scope boxes", done(function()
         local ns = asLeaderA()
         ns.Framework.open("bank")
+        ns.BankUI.setView("setup") -- GF-012-C: the list has its own view
         local c = ns.BankUI.controls
         eq(c.appoint.disabled, false, "指定 on")
         c.name:SetText("測試丙")

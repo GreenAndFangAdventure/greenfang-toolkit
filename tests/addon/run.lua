@@ -4810,6 +4810,10 @@ assert(loadfile(ROOT .. "/tests/addon/gf011c_tests.lua"))()({ test = test, eq = 
 -- GF-012-B: 臨時黑箱 stock: scope only, never-seen bank, bound items, two custodians, limits, confirm (tests/addon/gf012b_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gf012b_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-012-C: 臨時黑箱 stock in parts (no 150 limit), 聯絡 picks the custodian, the page's views and filters,
+-- 調貨看板's 黑箱 rows (tests/addon/gf012c_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf012c_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0
