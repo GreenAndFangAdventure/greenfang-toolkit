@@ -830,26 +830,31 @@ function Prices.marketOf(id, rk)
 end
 
 -- reagents = { output, yield, list = { { id, n } } } or nil; qty = items
--- wanted; mine = { [itemID] = true } materials the customer gives;
--- priceOf(id) -> { price } or nil. Returns { mats = { { id, need, unit,
--- total, mine, unknown } }, total, unknown = true when some price is missing,
--- crafts }.
+-- wanted; mine = { [itemID] = true | count } materials the customer gives
+-- (true = all of it; GF-006-D: a count = that many, the rest is bought);
+-- priceOf(id) -> { price } or nil. Returns { mats = { { id, need, own, buy,
+-- unit, total, mine, unknown } }, total, unknown = true when a price is
+-- missing for a material that has to be bought, missing = { itemID... } those
+-- materials, crafts }. Only the part that is not brought is charged.
 function Prices.estimate(reagents, qty, mine, priceOf)
-    local out = { mats = {}, total = 0, unknown = false }
+    local out = { mats = {}, total = 0, unknown = false, missing = {} }
     if not reagents then out.noList = true; return out end
     local crafts = math.ceil(math.max(1, qty or 1) / math.max(1, reagents.yield or 1))
     out.crafts = crafts
     for _, x in ipairs(reagents.list) do
         local need = x.n * crafts
-        local row = { id = x.id, need = need, mine = mine and mine[x.id] == true or false }
-        if not row.mine then
+        local m = mine and mine[x.id]
+        local own = m == true and need or math.max(0, math.min(need, math.floor(tonumber(m) or 0)))
+        local row = { id = x.id, need = need, own = own, buy = need - own, mine = own >= need }
+        if row.buy > 0 then
             local p = priceOf(x.id)
             if p and p.price then
-                row.unit, row.total = p.price, p.price * need
+                row.unit, row.total = p.price, p.price * row.buy
                 out.total = out.total + row.total
             else
                 row.unknown = true
                 out.unknown = true
+                out.missing[#out.missing + 1] = x.id
             end
         end
         out.mats[#out.mats + 1] = row

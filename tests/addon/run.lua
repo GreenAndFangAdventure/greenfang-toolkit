@@ -4835,6 +4835,11 @@ assert(loadfile(ROOT .. "/tests/addon/gfuip_tests.lua"))()({ test = test, eq = e
 -- GF-008-E: the sleeping-bag guide in five steps, 上一步 / 下一步, the remembered step, pins follow (tests/addon/gf008e_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gf008e_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-006-D: ＋下單 complete: the recipe picker filters and scrolls, 自帶 counts per material, a hint on
+-- every icon, 材料費 / 行情 say what is missing (tests/addon/gf006d_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf006d_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint, shareLogin = shareLogin, shareFrom = shareFrom,
+    rMsg = rMsg, leatherWindow = leatherWindow, PEER = PEER, A_PEER = A_PEER, A_THIRD = A_THIRD })
 ---------------------------------------------------------------------------
 
 local passed = 0
