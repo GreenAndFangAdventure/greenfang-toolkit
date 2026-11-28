@@ -96,6 +96,7 @@ return function(T)
         local d = A.draft()
         eq(d.editId, id, "editing that ticket")
         eq(d.dungeon .. "," .. d.roles.d .. "," .. d.note, "smg,3,舊備註", "starts from what it was")
+        A.setTicketMore(true) -- GF-UI-O: the ＋ － are inside 更多設定
         wow.click(f.roleGroups.d.minus); wow.click(f.roleGroups.d.minus) -- 3 → 1 dps seat
         d.note = "新備註"
         wow.click(f.go)
@@ -164,10 +165,10 @@ return function(T)
         local tf = _G[A.TICKET_NAME]
         local w, name = widest(tf)
         ok(w <= 200, "ticket window: widest button " .. w .. " (" .. name .. ")")
-        ok(tf.pickDungeon:IsShown() and tf.pickQuest:IsShown(), "GF-002-H: 地城 / 任務 first (icon buttons, not long ones)")
+        ok(tf.dest:IsShown() and tf.destQuest:IsShown(), "GF-UI-O: 地城 / 任務 (two text buttons of one size)")
+        eq(tf.dest.gfWidth, tf.destQuest.gfWidth, "one size")
         A.draft().dungeon = "smg"; A.drawTicket()
-        eq(plain(tf.dest:GetText()), " 地城", "then the art + name + a small 地城 (change)")
-        ok(not tf.pickDungeon:IsShown(), "the big buttons step aside")
+        eq(plain(tf.dest:GetText()), " 地城", "then the art + name; the same 地城 changes it")
         ok(tf.destIcon:IsShown() and plain(tf.destName:GetText()):find("血色修道院：墓地", 1, true), "the chosen dungeon")
         A.openWorker()
         local wf = _G[A.WORKER_NAME]

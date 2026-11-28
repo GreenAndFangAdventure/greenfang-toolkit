@@ -434,7 +434,7 @@ return function(T)
         end
         eq(#d.slots, 5, "five"); eq(f.addSlot:IsShown(), false, "no ＋時段 at 5")
         ok(f.slotChips[5]:IsShown(), "five chips")
-        ok(f.rowY[3] < -48 - 2 * 52, "the rows below moved down (two lines of chips)")
+        ok(f.rowY[4] < -48 - 3 * 52, "the rows below moved down (two lines of chips)") -- GF-UI-O: 說明 is row 4
         -- Remove slot 3 in its picker.
         local pk = U.pickStart(f.slotChips[3], 3)
         wow.click(pk.remove)
@@ -721,7 +721,7 @@ return function(T)
         offer(ns, B, "T", { { id = "abbb.1", src = "g", ver = 1, cr = t, ds = "", qs = "851", tm = "n", sz = 4, lr = "d", tg = 0, md = "a", st = "o", sa = t } })
         local d = U.openTicket()
         local f = _G[U.TICKET_NAME]
-        wow.click(f.pickQuest)
+        wow.click(f.destQuest)
         local qp = U.questPickerFrame()
         ok(qp:IsShown(), "open")
         -- GF-002-J (R-17.20): the zones first, in log order; then a zone's quests.
@@ -781,7 +781,7 @@ return function(T)
         questLog({ { questID = 1, title = "q1", level = 10 }, { questID = 2, title = "q2", level = 10 }, { questID = 3, title = "q3", level = 10 },
             { questID = 4, title = "q4", level = 10 }, { questID = 5, title = "q5", level = 10 }, { questID = 6, title = "q6", level = 10 } })
         d = U.openTicket()
-        U.pickQuests(f.pickQuest)
+        U.pickQuests(f.destQuest)
         for _, z in ipairs(qp.zoneRows) do if z:IsShown() and z.zone == "其他" then wow.click(z); break end end -- quests without a zone
         for _, r in ipairs(qp.rows) do if r:IsShown() then wow.click(r) end end
         eq(#d.quests, 5, "at most 5")

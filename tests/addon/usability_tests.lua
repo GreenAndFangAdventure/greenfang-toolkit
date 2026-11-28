@@ -150,6 +150,7 @@ return function(T)
         local A, O = ns.AdventureUI, ns.OrdersUI
         A.openTicket()
         local f = _G[A.TICKET_NAME]
+        A.setTicketMore(true) -- GF-UI-O: 錄取 and 標籤 are inside 更多設定
         -- GF-002-G: one 開始 control (the old 現在/今天/之後 buttons are gone).
         ok(f.timeButtons == nil, "no three time buttons")
         eq(overlaps({ f.direct, f.consent }), "", "錄取")
@@ -160,7 +161,7 @@ return function(T)
         ok(tags[#tags].flowX + 32 + 4 + wow.textWidth(tags[#tags].label._text, tags[#tags].label._font) < f.width, "標籤 inside the window")
         -- Field names end before the controls.
         local X = O.controlX(A.TICKET_FIELDS)
-        for _, name in ipairs({ "目的地", "時間", "人數", "錄取", "標籤", "備註" }) do
+        for _, name in ipairs(A.TICKET_FIELDS) do
             ok(O.FIELD_X + wow.textWidth(name, ns.FIELD_FONT) + 8 <= X, "field " .. name .. " ends before the controls")
         end
         local w = A.openWorker()

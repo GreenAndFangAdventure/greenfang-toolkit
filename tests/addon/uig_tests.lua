@@ -151,13 +151,13 @@ return function(T)
         local U = ns.AdventureUI
         local d = U.openTicket()
         local f = ticket(ns)
-        local y3 = f.rowY[3]
+        local y3 = f.rowY[4] -- GF-UI-O: 說明, the first row under 時段
         ok(not (f.slotEdit and f.slotEdit:IsShown()), "folded at first")
         wow.click(f.slotChips[1])
         local e = f.slotEdit
         ok(e and e:IsShown(), "the chip opens the editor in the form")
         eq(e._parent, f, "inside the form")
-        ok(f.rowY[3] < y3, "the rows below make room")
+        ok(f.rowY[4] < y3, "the rows below make room")
         ok(e.nowButton.gfSelected and not e.atButton.gfSelected, "現在 chosen")
         ok(not e.day:IsShown() and not e.time:IsShown(), "現在: no 日期, no 時間")
         ok(e.len:IsShown(), "長度 stays")
@@ -170,7 +170,7 @@ return function(T)
         eq(e.time:GetText(), "14:15", "the next quarter")
         -- A second click on the same chip folds it.
         wow.click(f.slotChips[1])
-        ok(not e:IsShown(), "folded again"); eq(f.rowY[3], y3, "the rows move back")
+        ok(not e:IsShown(), "folded again"); eq(f.rowY[4], y3, "the rows move back")
         ok(plain(f.slotChips[1]:GetText()):find("14:15", 1, true), "the chip shows the time")
     end)
 
