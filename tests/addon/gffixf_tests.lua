@@ -418,7 +418,8 @@ return function(T)
         eq(a._points[1][5], UI.BAR_Y, "自動集料 on the first row"); eq(m._points[1][5], UI.TOOL_Y, "手動刊登 on the second")
         local last = UI.tabs.buttons[#UI.tabs.buttons]
         ok(last._points[1][4] + last._w + 8 <= UI.SWITCH_X.name, "the tabs end before the switches")
-        ok(UI.GROUP_X + 56 + UI.GROUP_W + 8 <= UI.SWITCH_X.name, "收集組 ends before the switches")
+        -- GF-009-16: 收集組 is on the filter row, under the switches' rows.
+        ok(-UI.FILTER_Y >= -UI.TOOL_Y + ns.BUTTON_H + 4, "收集組 under the switches")
         -- The words: no jokes on the switches themselves.
         for _, t in ipairs({ UI.SWITCH_STATE.on, UI.SWITCH_STATE.off, UI.AUTO_TEXT, UI.MANUAL_TEXT,
             UI.SWITCH_HELP.auto.text, UI.SWITCH_HELP.manual.text }) do

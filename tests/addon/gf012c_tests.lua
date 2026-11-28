@@ -585,8 +585,9 @@ return function(T)
         end
         local d = find(1001)
         ok(d, "黑箱 item on the board")
-        ok(d.stockLine and d.stockLine:find("|T" .. UI.STOCK_ICON, 1, true) and d.stockLine:find("黑箱 12 個（2 位保管人）", 1, true), "the mark: " .. tostring(d.stockLine))
-        eq(d.qtyShort, "黑箱", "only 黑箱 has it")
+        -- GF-009-16: my own custody (2) is counted and said; 黑箱 has a column of its own.
+        ok(d.stockLine and d.stockLine:find("|T" .. UI.STOCK_ICON, 1, true) and d.stockLine:find("黑箱 14 個（3 位保管人，含我）", 1, true), "the mark: " .. tostring(d.stockLine))
+        eq(d.cells[3], "14 個", "the 黑箱 column"); eq(d.cells[1] .. d.cells[2], "", "no 徵求／供應")
         ok(find(4001), "C's other item"); eq(find(4444), nil, "not a custodian: not shown")
         -- The list row shows the mark in its own colour.
         local _, idx = find(1001)
@@ -606,21 +607,22 @@ return function(T)
         ok(menu.isOpen(), "the menu")
         local texts = menu.shownTexts()
         ok(texts[1]:find("測試戊", 1, true), "online first: " .. texts[1])
-        eq(#texts, 2, "the two others (my own place is not on 調貨看板)")
+        eq(#texts, 2, "the two others (my own place is its own line, GF-009-16)")
         menu.choose(1)
         eq(G.whispers[#G.whispers].name, "測試戊-測試伺服器", "whispered")
         ok(G.whispers[#G.whispers].text:find("臨時黑箱", 1, true), "the 黑箱 words")
-        -- Filter.
-        ok(UI.stockButton:IsShown(), "filter on 調貨看板")
-        UI.stockButton.choose("none")
-        eq(find(1001), nil, "不看黑箱"); eq(find(4001), nil, "none of it")
-        UI.stockButton.choose("only")
+        -- GF-009-16: my custody is the next line, 聯絡 grey.
+        eq(UI.detailRowList()[2].name:GetText(), UI.STOCK_OWN_NAME, "my own custody line")
+        eq(UI.detailRowList()[2].contact.disabled, true, "聯絡 grey")
+        -- Filter (GF-009-16: 種類 黑箱 in the filter row; was the 黑箱 drop-down).
+        ok(UI.kindDrop:IsShown(), "filter on 調貨看板")
+        UI.kindDrop.choose("stock")
         ok(find(1001) and find(4001), "只看黑箱")
-        for _, x in ipairs(UI.state.items) do ok(x.item.stock, "only 黑箱 rows") end
-        UI.stockButton.choose(nil)
+        for _, x in ipairs(UI.state.items) do ok(UI.stockQty(x.item) > 0, "only 黑箱 rows") end
+        UI.kindDrop.choose("all")
         ok(find(1001), "全部")
-        UI.setTab("need")
-        ok(not UI.stockButton:IsShown(), "not on other tabs")
+        UI.showTab("mine")
+        eq(#UI.kindDrop.items, 3, "no 黑箱 on 我的刊登")
         -- Revoked: off the board too (BankStock.holders' rules).
         UI.setTab("guild")
         wow.advance(5)

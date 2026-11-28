@@ -96,9 +96,11 @@ return function(T)
         eq(pt[5], UI.TOOL_Y, "on the tool row, over the column header")
         eq(UI.postButton._text, "＋刊登", "its name (GF-UI-P: ＋ in front again, owner 2026-11-28)")
         -- The 時效 header cell moves to the right end; 物品 gets the room.
-        local fresh = UI.header.cells[4]._points[1]
-        eq(fresh[4] + UI.COL.fresh.w, UI.LIST_W_WIDE - (UI.LIST_W - UI.COL.fresh.x - UI.COL.fresh.w), "時效 at the right end")
-        eq(UI.header.cells[1]._fixedWidth, UI.COL.name.x + UI.COL.name.w - UI.COL.icon.x + UI.LIST_W_WIDE - UI.LIST_W, "物品 wider")
+        -- GF-009-16: 調貨看板's columns (UI.COLS.guild); 時效 is the sixth cell.
+        local GC = UI.COLS.guild
+        local fresh = UI.header.cells[6]._points[1]
+        eq(fresh[4] + GC[5].w, UI.LIST_W_WIDE - (UI.LIST_W - GC[5].x - GC[5].w), "時效 at the right end")
+        eq(UI.header.cells[1]._fixedWidth, GC.name.x + GC.name.w - UI.COL.icon.x + UI.LIST_W_WIDE - UI.LIST_W, "物品 wider")
     end))
 
     test("GF-UI-I 調貨所: a row with matches = list and detail side by side; the divider stays inside the page", done(function()

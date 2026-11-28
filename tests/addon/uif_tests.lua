@@ -183,20 +183,19 @@ return function(T)
             for _, fs in ipairs(UI.header.cells) do out[#out + 1] = fs._text end
             return table.concat(out, ",")
         end
-        eq(heads(), "物品,數量,可能提供,時效", "我缺的")
-        eq(UI.header.cells[2].gfAlign, "RIGHT", "數量 header right-aligned")
+        -- GF-009-16: 我缺的／我可能有多的 are 範圍 on 調貨看板 (one header): 徵求, 供應, 黑箱 apart.
+        eq(heads(), "物品,徵求,供應,黑箱,在線,時效", "調貨看板 (範圍 我缺的)")
+        eq(UI.header.cells[2].gfAlign, "RIGHT", "徵求 header right-aligned")
         local r = UI.rows and UI.rows() or nil
-        UI.setTab("offer"); eq(heads(), "物品,數量,需要,時效", "我可能有多的")
-        UI.setTab("guild"); eq(heads(), "物品,徵求／供應,在線,時效", "調貨看板")
-        UI.setTab("mine"); eq(heads(), "物品,類型／數量,狀態,時效", "我的刊登 (GF-UI-K: the cell reads 徵求 1)")
+        UI.setTab("mine"); eq(heads(), "物品,類型／數量,狀態,時效,,", "我的刊登 (GF-UI-K: the cell reads 徵求 1)")
         UI.setTab("need")
         local texts = pageTexts(supplyPage(ns))
         ok(not has(texts, UI.CONTACT_TIP), "no sentence on the page")
         for _, t in ipairs(texts) do ok(not t:find("媒合", 1, true), "no footer: " .. t) end
         -- The first missing page has a provider: the detail lists 測試乙 with 聯絡.
         local first = UI.state.items[1]
-        ok(first and first.qtyShort:find("^缺 %d+$"), "quantity cell")
-        eq(first.matchShort, "1 位", "short match cell under 可能提供")
+        ok(first and first.mineText:find("^我缺 %d+$"), "my part on the row (GF-009-16)")
+        eq(first.cells[1], "1 位", "徵求: me (GF-009-16)"); eq(first.cells[2], "1 位", "供應: the provider")
         eq(first.fresh, "近期", "時效 of the best match")
         local found
         for _, o in ipairs(wow.allObjects()) do
@@ -251,7 +250,8 @@ return function(T)
             UI.setTab(t.key)
             shownOn[#shownOn + 1] = t.key .. "=" .. tostring(groupShown())
         end
-        eq(table.concat(shownOn, ","), "need=true,offer=true,guild=false,mine=false", "where 收集組 appears")
+        -- GF-009-16: 收集組 is in 調貨看板's filter row (我缺的／我可能有多的 are 範圍 there now).
+        eq(table.concat(shownOn, ","), "guild=true,mine=false", "where 收集組 appears")
         UI.setTab("need")
         local opts = UI.groupOptions()
         eq(opts[1].text, "全部", "全部 first")
@@ -345,9 +345,11 @@ return function(T)
         G.bagError = false
         -- Empty: a tab with nothing.
         ns.Supply.scanNow()
+        -- GF-009-16: 調貨看板 lists my own shortages too; with 自動集料 off nothing is left.
+        ns.Supply.db().auto = false
         UI.setTab("guild")
         eq(UI.pageState(), "empty", "nothing to match")
-        eq(UI.statePanel.text._text, "目前沒有可配對的公會物資", "the empty words")
+        eq(UI.statePanel.text._text, "目前沒有任何徵求、供應或黑箱物品", "the empty words")
         UI.setTab("mine")
         eq(UI.statePanel.text._text, "還沒有刊登", "我的刊登 empty")
         -- Stale: only expired snapshots.
@@ -358,6 +360,7 @@ return function(T)
         eq(UI.pageState(), "stale", "only old data")
         eq(UI.statePanel.text._text, "資料過期", "資料過期")
         ns.Supply.snapshotCounts = real
+        ns.Supply.db().auto = true
         -- Error: the list itself failed; the page stays up.
         UI.setTab("need")
         local view = ns.Supply.view

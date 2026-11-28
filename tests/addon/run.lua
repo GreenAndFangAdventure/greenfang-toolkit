@@ -4835,6 +4835,10 @@ assert(loadfile(ROOT .. "/tests/addon/gfuip_tests.lua"))()({ test = test, eq = e
 -- GF-008-E: the sleeping-bag guide in five steps, 上一步 / 下一步, the remembered step, pins follow (tests/addon/gf008e_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gf008e_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-009-16: 綠皮調貨所: my own 臨時黑箱 on 調貨看板, 徵求／供應／黑箱 columns, the tabs folded into a
+-- filter row (搜尋, 種類, 範圍, 收集組), kept results (tests/addon/gf00916_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf00916_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0

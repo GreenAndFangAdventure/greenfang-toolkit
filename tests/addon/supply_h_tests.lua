@@ -355,7 +355,7 @@ return function(T)
         local UI = ns.SupplyUI
         local names = {}
         for _, b in ipairs(UI.tabs.buttons) do names[#names + 1] = b.key .. "=" .. tostring(b._text) end
-        eq(table.concat(names, ","), "need=我缺的,offer=我可能有多的,guild=調貨看板,mine=我的刊登", "tab names")
+        eq(table.concat(names, ","), "guild=調貨看板,mine=我的刊登", "tab names (GF-009-16: 我缺的／我可能有多的 are 範圍 filters)")
         UI.setTab("guild")
         eq(UI.state.tab, "guild", "same key")
         local m = { name = PEER_B, online = true }
