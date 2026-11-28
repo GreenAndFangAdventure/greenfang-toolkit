@@ -150,20 +150,23 @@ return function(T)
         local text = SB.pageText()
         ok(text:find(M.LEGEND, 1, true), "the legend line")
         for _, w in ipairs({ "綠色：接任務", "金色：交任務", "藍色：路線點", "灰色：大約位置" }) do ok(M.LEGEND:find(w, 1, true), w) end
-        SB.complete() -- step 2: Grom'gol, approximate
+        -- GF-008-E: step 2 Westfall (gold) with Grom'gol (grey, approximate) on the jungle map.
+        SB.complete()
         SB.showMap()
-        ok(same(M.pin().border._vertex, M.APPROX.color), "step 2: grey")
+        ok(same(M.pin(1).border._vertex, M.KINDS.turnin.color), "step 2: the cart, gold")
+        wm:SetMapID(1434)
+        ok(same(M.pin(2).border._vertex, M.APPROX.color), "Grom'gol: grey")
         ok(SB.pageText():find("（大約：格羅姆高營地的飛艇塔）", 1, true), "and it says 大約")
-        -- Step 5: the camp (gold) and Sun Rock (grey, approximate) together.
-        SB.complete(); SB.complete(); SB.complete()
-        eq(SB.currentStep().id, "stonetalon-litter", "step 5")
+        -- Step 3: the camp and the mound (gold), the path from Sun Rock (blue, one source).
+        SB.complete()
+        eq(SB.currentStep().id, "stonetalon", "step 3")
         SB.showMap()
-        ok(M.pin(1)._shown and M.pin(2)._shown, "two pins")
+        ok(M.pin(1)._shown and M.pin(2)._shown and M.pin(3)._shown, "three pins")
         ok(same(M.pin(1).border._vertex, M.KINDS.turnin.color), "the camp: gold")
-        ok(same(M.pin(2).border._vertex, M.APPROX.color), "Sun Rock: grey")
+        ok(same(M.pin(3).border._vertex, M.KINDS.route.color), "the path: blue")
         ok(SB.pageText():find("石爪山脈（40, 52）（多來源一致）", 1, true), "the camp's line")
-        ok(SB.pageText():find("石爪山脈（47, 61）（大約：烈日石居）", 1, true), "Sun Rock's line")
-        -- Step 6: one point; the second pin goes (and stops).
+        ok(SB.pageText():find("石爪山脈（50, 52）（單一來源）", 1, true), "the path's line")
+        -- Step 4: one point; the other pins go (and stop).
         SB.complete()
         SB.showMap()
         ok(M.pin(1)._shown and not M.pin(2)._shown, "one pin")
@@ -174,8 +177,8 @@ return function(T)
     test("GF-008-D the wall: the cart on Hillsbrad, the bags on the Arathi map", function()
         local ns, calls, wm = login()
         local SB, M = ns.SleepingBag, ns.SleepingBagMap
-        for _ = 1, 8 do SB.complete() end
-        eq(SB.currentStep().id, "thoradin-wall", "step 9")
+        for _ = 1, 4 do SB.complete() end
+        eq(SB.currentStep().id, "thoradin-wall", "step 5 (GF-008-E)")
         eq(SB.showMap(), "canvas", "pinned")
         eq(calls.open[#calls.open], 1424, "opens on Hillsbrad")
         ok(M.pin(1)._shown and not M.pin(2)._shown, "the cart only")
@@ -189,11 +192,11 @@ return function(T)
         local ns = login()
         local route = ns.SleepingBagRoutes.Horde
         eq(route.faction, "Horde", "a faction field")
-        eq(#route.steps, 9, "nine steps (progress indexes stay)")
+        eq(#route.steps, 5, "five steps (GF-008-E; old saved steps are moved over)")
         local count = { multi = 0, single = 0, approx = 0 }
         for i, st in ipairs(route.steps) do
             ok((st.points and #st.points > 0) or st.noPin, "step " .. i .. ": points, or why not")
-            ok(st.action and st.tip and st.travel, "step " .. i .. ": action, tip, travel")
+            ok(st.action and st.tip, "step " .. i .. ": action, tip (GF-008-E: travel folded into action)")
             ok(not st.action:find("\n") and #st.action < 200, "step " .. i .. ": a short action")
             eq(st.verified, false, "step " .. i .. ": 待實地驗證")
             for _, p in ipairs(st.points or {}) do
@@ -205,7 +208,7 @@ return function(T)
                 count[p.conf] = count[p.conf] + 1
             end
         end
-        eq(count.multi .. "/" .. count.single .. "/" .. count.approx, "6/1/2", "多來源一致 / 單一來源 / 大約")
+        eq(count.multi .. "/" .. count.single .. "/" .. count.approx, "6/2/1", "多來源一致 / 單一來源 / 大約 (GF-008-E)")
     end)
 
     test("GF-008-D the route by its faction field; Alliance unchanged (no entry); a later Alliance route is data only", function()

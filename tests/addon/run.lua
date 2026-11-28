@@ -627,18 +627,17 @@ test("sleepingbag: Horde route data is complete and marked unverified", function
     wow.reset()
     local ns = wow.loadAddon(ADDON_DIR)
     local route = ns.SleepingBagRoutes.Horde
-    ok(route and #route.steps >= 8, "route has steps")
+    ok(route and #route.steps >= 5, "route has steps") -- GF-008-E: five steps
     local first3 = {}
     for _, st in ipairs(route.steps) do
         ok(type(st.id) == "string" and st.id ~= "", "id")
-        ok(st.zone and st.landmark and st.action and st.travel and st.guards
-            and st.noFlightPath and st.rpgHint, "required fields on " .. st.id)
+        ok(st.zone and st.landmark and st.action and st.rpgHint, "required fields on " .. st.id) -- GF-008-E: travel / guards folded into action / tip
         eq(st.verified, false, "unverified: " .. st.id)
         ok(st.questID == nil, "no quest IDs yet")
-        if st.round == 1 and st.x and not st.approx then first3[#first3 + 1] = st.zone end -- GF-008-C: the guide's coordinates
+        if st.x and not st.approx then first3[#first3 + 1] = st.zone end -- GF-008-E: every step has a place
     end
     ok(table.concat(first3, ">"):find("^貧瘠之地>西部荒野"), "round-1 stops with coordinates start Barrens then Westfall") -- GF-008-D: Stonetalon has sourced coordinates now
-    eq(route.steps[5].zone, "石爪山脈", "third stop is Stonetalon")
+    eq(route.steps[3].zone, "石爪山脈", "third stop is Stonetalon")
 end)
 
 test("sleepingbag: module visible for Horde, hidden for Alliance", function()
@@ -668,10 +667,10 @@ test("sleepingbag: RPG hides coordinates until revealed; normal shows all", func
     ok(SB.pageText():find("貧瘠之地（46, 74）", 1, true), "coordinates after reveal")
     SB.setMode("normal")
     text = SB.pageText()
-    ok(text:find("【全部步驟】", 1, true), "full list in normal mode")
-    ok(text:find("西部荒野（37, 50）", 1, true), "other steps' coordinates listed")
-    ok(text:find("地圖不標位置", 1, true), "GF-008-C: a step without a pin says why")
-    ok(text:find("沒有飛行點時", 1, true), "alternative route shown")
+    -- GF-008-E: only the current step, with one reminder.
+    ok(text:find("【第 1／5 步】", 1, true), "the current step in normal mode")
+    ok(not text:find("西部荒野（37, 50）", 1, true), "other steps not listed")
+    ok(text:find("提醒：", 1, true), "the reminder shown")
 end)
 
 test("sleepingbag: modes share progress per character and survive relog", function()
@@ -682,8 +681,7 @@ test("sleepingbag: modes share progress per character and survive relog", functi
     eq(SB.state().step, 3, "two steps done in RPG")
     SB.setMode("normal")
     eq(SB.state().step, 3, "same progress in normal mode")
-    ok(SB.pageText():find("＞ 3.", 1, true), "current step marked")
-    ok(SB.pageText():find("完成 1.", 1, true), "done step marked")
+    ok(SB.pageText():find("【第 3／5 步】", 1, true), "current step shown") -- GF-008-E
     local saved = wow.logout()
     wow.reset({ now = 1763380000 })
     ns = wow.login(ADDON_DIR, saved)
@@ -4833,6 +4831,9 @@ assert(loadfile(ROOT .. "/tests/addon/gf017_tests.lua"))()({ test = test, eq = e
 -- status words, row tooltips by the mouse, the adventure filters, the guild bank under its buttons,
 -- ＋ on add buttons, one scroll bar for every list (tests/addon/gfuip_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gfuip_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-008-E: the sleeping-bag guide in five steps, 上一步 / 下一步, the remembered step, pins follow (tests/addon/gf008e_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf008e_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
