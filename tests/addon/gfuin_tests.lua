@@ -208,15 +208,10 @@ return function(T)
     test("GF-UI-N 3 自動集料 card: five short lines in the player's words; the items named by their page", function()
         local ns = login()
         local UI = ns.SupplyUI
-        local lines = UI.cardLines("auto")
-        ok(#lines <= 5, "at most five lines: " .. #lines)
-        for _, l in ipairs(lines) do
-            ok(ns.labelWidth(l) <= 2 * (UI.CARD_W - 2 * ns.Widgets.CARD_PAD), "two lines at most: " .. l)
-            for _, word in ipairs({ "白名單", "四處", "StorageSource", "GFTKS" }) do ok(not has(l, word), "no inside word " .. word) end
-        end
-        for i, head in ipairs({ "會做什麼", "資料從哪來", "分享什麼", "不會做什麼", "為什麼預設關" }) do
-            ok(has(lines[i] or "", head), "line " .. i .. ": " .. head)
-        end
+        -- GF-UI-S: no sentences on the card (集料項目); the 說明 mode has them, in the player's words.
+        eq(#UI.cardLines("auto"), 0, "no card lines")
+        local l = ns.Help.TEXT.supply_auto[2]
+        for _, word in ipairs({ "白名單", "四處", "StorageSource", "GFTKS" }) do ok(not has(l, word), "no inside word " .. word) end
         -- The item rows: the page label is the name.
         C_QuestLog = { IsQuestFlaggedCompleted = function() return false end, IsOnQuest = function() return false end }
         local okRun, err = pcall(function()

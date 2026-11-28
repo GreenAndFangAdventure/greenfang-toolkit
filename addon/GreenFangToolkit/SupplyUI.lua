@@ -46,7 +46,9 @@ UI.SWITCH_X = { name = 586, button = 664, line = 760 } -- line: 8 px after the p
 UI.SWITCH_CELL_W = 44
 UI.SWITCH_W = 2 * UI.SWITCH_CELL_W
 UI.SWITCH_STATE = { on = "開", off = "關" }
-UI.SWITCH_HELP = { auto = { text = "說明與項目", w = 100 }, manual = { text = "說明", w = 62 } }
+-- GF-UI-S (owner 2026-11-28): one button, 集料項目 (the list of what 自動集料 looks at);
+-- 手動刊登's 說明 is gone. What the two cards explained is in the 說明 mode (HelpText.lua).
+UI.SWITCH_HELP = { auto = { text = "集料項目", w = 84 } }
 UI.SWITCH_RIGHT = 1078 -- the detail column's right edge (DETAIL_X + DETAIL_W)
 UI.SWITCH_LINE = {
     auto = { on = "依任務與存貨算缺件並分享", off = "已關閉：不計算、不分享" }, -- GF-009-15
@@ -54,34 +56,15 @@ UI.SWITCH_LINE = {
 }
 UI.SWITCH_TIP = {
     auto = "自動集料（實驗功能，預設關）：依白名單任務的進度和你的行囊、材料袋、銀行、信箱，自動算出缺的和可能多的物品，"
-        .. "只把這些物品的數量分享給公會。按「說明與項目」看完整說明和包含的物品。",
+        .. "只把這些物品的數量分享給公會。按「集料項目」看包含的物品。",
     manual = "手動刊登：自己發布徵求或供應，分享給公會。關掉後不再分享我的刊登，也不顯示別人的刊登。",
 }
--- The cards (W.flowCard frames, built when first opened).
-UI.CARD_NAME = { auto = "GreenFangToolkit_SupplyAutoCard", manual = "GreenFangToolkit_SupplyManualCard" }
+-- The card (a W.flowCard frame, built when first opened). GF-UI-S: only 自動集料's,
+-- 集料項目: 分享的餘料 and the items; its sentences moved to the 說明 mode.
+UI.CARD_NAME = { auto = "GreenFangToolkit_SupplyAutoCard" }
 UI.CARD_W = 640
-UI.CARD_TITLE = { auto = "自動集料說明", manual = "手動刊登說明" }
-UI.CARD_SUB = {
-    auto = "事務所只盯名單上的東西；你背包裡其他見不得光的，我們一概不問。",
-    manual = "想要什麼就開口，想給什麼就喊價；事務所只負責把話傳出去。",
-}
-UI.CARD_LINES = {
-    -- GF-UI-N (owner 0.16.12: 「說明頁過度複雜」): five short lines, one thing each, in
-    -- the player's words; the items below say what 「這些項目」 are.
-    auto = {
-        "會做什麼：照下面這些項目的任務進度，算出你還缺幾個、可能多幾個。",
-        "資料從哪來：行囊、材料袋、銀行、信箱；銀行和信箱用你上次打開時看到的數量。",
-        "分享什麼：只分享這些項目缺幾個、多幾個，不分享東西放在哪裡。",
-        "不會做什麼：不公開背包和銀行，不自動收信、交易或郵寄。",
-        "為什麼預設關：這是實驗功能，還沒在 Forever 實機確認；關掉就不算也不分享。",
-    },
-    manual = {
-        "它會做什麼：讓你自己發布徵求或供應（物品、數量、交易條件、備註），分享給公會。",
-        "分享給公會什麼：只有你刊登中的內容；到期或結束的不再分享。",
-        "不會做什麼：不自動交易、不扣物品；聯絡只會打開密語框，由你自己按送出。",
-        "關掉後：不再分享你的刊登（別人那邊會清空），也不顯示別人的刊登，「刊登」按鈕不能按。你的刊登留在「我的刊登」，再打開就恢復分享。",
-    },
-}
+UI.CARD_TITLE = { auto = "集料項目" }
+UI.CARD_SUB, UI.CARD_LINES = {}, {}
 UI.CARD_ITEMS_TITLE = "包含的項目"
 -- GF-009-15 (owner 2026-11-27): each player chooses what the shared surplus
 -- counts; the same two-cell look as 「開｜關」; default 全部.
@@ -183,7 +166,7 @@ UI.POST_X = 22
 -- is used (valid custodians in the roster, the epoch rule): nothing is read here.
 UI.STOCK_TEXT = "黑箱"
 UI.STOCK_NAME = "臨時黑箱"
-UI.STOCK_OWN_NAME = "我保管的黑箱" -- GF-009-16: my own custody is listed too (聯絡 grey)
+UI.STOCK_OWN_NAME = "我保管的臨時黑箱" -- GF-009-16: my own custody is listed too (聯絡 grey)
 UI.MY_NAME = "我" -- GF-009-16: my own 徵求／供應／缺／多 in the detail (聯絡 grey)
 UI.STOCK_ICON = "Interface\\Icons\\INV_Box_01"
 UI.STOCK_COLOR = { 0.78, 0.55, 1 }
@@ -202,7 +185,7 @@ UI.TABS = {
     { key = "mine", text = "我的刊登" },
 }
 UI.EMPTY = {
-    guild = "目前沒有任何徵求、供應或黑箱物品",
+    guild = "目前沒有任何徵求、供應或臨時黑箱物品",
     mine = "還沒有刊登",
 }
 UI.EMPTY_FILTERED = "沒有符合的項目，換個篩選試試"
@@ -219,7 +202,7 @@ UI.KIND_ITEMS = {
 UI.KIND_TIP = "徵求＝有人在找；供應＝會友可能有多或刊登供應；黑箱＝臨時黑箱的存貨"
 UI.SCOPE_ITEMS = { { value = "all", text = "全部" }, { value = "need", text = "我缺的" }, { value = "offer", text = "我可能有多的" },
     { value = "match", text = "和我有關的" } }
-UI.SCOPE_TIP = "我缺的／我可能有多的：自動集料算出的或我自己刊登的；和我有關的：我缺而有人供應或黑箱有、我多而有人徵求"
+UI.SCOPE_TIP = "我缺的／我可能有多的：自動集料算出的或我自己刊登的；和我有關的：我缺而有人供應或臨時黑箱有、我多而有人徵求"
 -- state.filter: the page's filters; search is lower case, trimmed.
 UI.FILTER_OFF = { search = "", kind = "all", scope = "all" }
 UI.filterStats = { built = 0, hits = 0, base = 0 }
@@ -491,7 +474,7 @@ function UI.boardSub(it)
     local n, o, k = UI.needCount(it), UI.offerCount(it), UI.stockQty(it)
     if n > 0 then parts[#parts + 1] = "徵求 " .. n .. " 位" end
     if o > 0 then parts[#parts + 1] = "供應 " .. o .. " 位" end
-    if k > 0 then parts[#parts + 1] = "黑箱 " .. k .. " 個" end
+    if k > 0 then parts[#parts + 1] = "臨時黑箱 " .. k .. " 個" end
     if #it.others > 0 then parts[#parts + 1] = it.onlineCount > 0 and ("在線 " .. it.onlineCount .. " 位") or "都不在線" end
     return table.concat(parts, "｜")
 end
@@ -538,7 +521,7 @@ function UI.boardRows()
                     if e then avail = avail + (tonumber(ns.BankRequests.itemAvailable(e.stock)) or 0) end
                 end
             end
-            stockLine = UI.stockTag(UI.STOCK_TEXT .. " " .. k .. " 個（" .. holders .. " 位保管人" .. (mineToo and "，含我" or "") .. "）"
+            stockLine = UI.stockTag(UI.STOCK_NAME .. " " .. k .. " 個（" .. holders .. " 位保管人" .. (mineToo and "，含我" or "") .. "）"
                 -- GF-012-D: what may be asked for now (shared − reserved).
                 .. (ns.BankRequests and ("，可申領 " .. avail) or ""))
             tip[#tip + 1] = UI.STOCK_NAME .. "："
@@ -1371,10 +1354,12 @@ local function switchRow(parent, key, text, y, onClick)
     c.line = label(parent, "", ns.LABEL_FONT)
     c.line:SetPoint("TOPLEFT", parent, "TOPLEFT", X.line, y - 6)
     local help = UI.SWITCH_HELP[key]
-    c.help = Th.button(parent, help.text, help.w, ns.BUTTON_H)
-    c.help:SetPoint("TOPLEFT", parent, "TOPLEFT", UI.SWITCH_RIGHT - help.w, y)
-    c.help:SetScript("OnClick", function(self) UI.openCard(key, self) end)
-    c.line:SetWidth(UI.SWITCH_RIGHT - help.w - 8 - X.line)
+    if help then
+        c.help = Th.button(parent, help.text, help.w, ns.BUTTON_H)
+        c.help:SetPoint("TOPLEFT", parent, "TOPLEFT", UI.SWITCH_RIGHT - help.w, y)
+        c.help:SetScript("OnClick", function(self) UI.openCard(key, self) end)
+    end
+    c.line:SetWidth(UI.SWITCH_RIGHT - (help and (help.w + 8) or 0) - X.line)
     if c.line.SetWordWrap then c.line:SetWordWrap(false) end
     function c.setOn(on)
         on = on and true or false
@@ -1450,7 +1435,7 @@ function UI.drawCard(key)
         y = y - ns.textHeight(fs, w) - (gap or 6)
         return fs
     end
-    f.sub = put(UI.CARD_SUB[key], ns.LABEL_FONT, Th.C.muted, 10)
+    if UI.CARD_SUB[key] then f.sub = put(UI.CARD_SUB[key], ns.LABEL_FONT, Th.C.muted, 10) else f.sub = nil end
     if key == "auto" then
         -- GF-009-15: 分享的餘料 全部｜只算身上 (the player's own setting).
         if not f.share then
@@ -1527,8 +1512,8 @@ local function build(p)
     -- GF-FIX-F: two switch rows on the right (was 「啟用：」 + two check boxes).
     autoBox = switchRow(p, "auto", UI.AUTO_TEXT, UI.BAR_Y, function(on) Supply.setAuto(on); UI.refresh() end)
     manualBox = switchRow(p, "manual", UI.MANUAL_TEXT, UI.TOOL_Y, function(on) Supply.setManual(on); UI.refresh() end)
-    autoBox.help.tip, manualBox.help.tip = "自動集料做什麼、分享什麼、包含哪些物品", "手動刊登做什麼、關掉後會怎樣"
-    withTip(autoBox.help); withTip(manualBox.help)
+    autoBox.help.tip = "自動集料會看哪些物品"
+    withTip(autoBox.help)
     tabs = Th.tabStrip(p, (function()
         local items = {}
         for _, t in ipairs(UI.TABS) do items[#items + 1] = { key = t.key, text = t.text } end

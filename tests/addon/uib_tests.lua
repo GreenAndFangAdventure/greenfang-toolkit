@@ -369,11 +369,8 @@ return function(T)
         ns.Framework.open("orders"); heights(ns.Framework.panel("orders"), "orders")
         ns.Framework.open("recipes"); heights(ns.Framework.panel("recipes"), "recipes")
         ns.Diag.open(); heights(ns.Diag.window(), "diag")
-        ok(#ns.Diag.smallButtons() >= 2, "診斷 on the roster and the orders page")
-        for _, b in ipairs(ns.Diag.smallButtons()) do
-            ok(plain(b._text):find("診斷", 1, true) and cjk(b._text) == 2, "診斷")
-            ok(not b._text:find("|T", 1, true), "GF-UI-C: words only")
-        end
+        -- GF-UI-S: the 診斷 buttons are gone (the version opens 同步與診斷).
+        eq(ns.Diag.smallButtons, nil, "no 診斷 buttons")
     end)
 
     test("GF-UI-B ★8 ns.COLOR; the same stripe on the roster, recipes and orders rows", function()

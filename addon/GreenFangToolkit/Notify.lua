@@ -65,8 +65,8 @@ N.MODULES = {
     { key = "adv_update", text = "冒險單改內容或結束", tip = "隊長改了我報名的冒險單，或冒險單過期、未成行（成行不通知）" },
     { key = "adv_remind", text = "冒險單開打提醒", tip = "我參加的冒險單開打前 60 分鐘與 15 分鐘" },
     { key = "adv_leader", text = "我的冒險單待處理", tip = "我開的冒險單快開打還沒定案、成員遞補，或候補的職工單過期離開" },
-    { key = "bank_keeper", text = "黑箱保管人", tip = "會長指定我為保管人，或撤銷我的保管人資格" },
-    { key = "bank_request", text = "黑箱申領", tip = "有申領等我核准或交付，或我的申領被核准、拒絕、數量不足、已交付" }, -- GF-012-D
+    { key = "bank_keeper", text = "臨時黑箱保管人", tip = "會長指定我為保管人，或撤銷我的保管人資格" },
+    { key = "bank_request", text = "臨時黑箱申領", tip = "有申領等我核准或交付，或我的申領被核准、拒絕、數量不足、已交付" }, -- GF-012-D
 }
 N.MODULE_TEXT = {}
 N.DEFAULT_OFF = {} -- GF-014-05: modules that start switched off (default = false)

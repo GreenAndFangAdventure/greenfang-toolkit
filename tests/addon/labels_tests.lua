@@ -102,8 +102,8 @@ return function(T)
         ok(plain(ns.AdventureUI.workerButton:GetText()):find("職工單", 1, true), "＋職工單")
         ns.AdventureUI.openTicket()
         local f = _G[ns.AdventureUI.TICKET_NAME]
-        -- GF-UI-O: 活動 職責 時段 說明 first; 人數 錄取 標籤 inside 更多設定.
-        eq(table.concat(f.fields, ","), "活動,職責,時段,說明,人數,錄取,標籤", "field names (GF-002-H: 時段 chips, each with 開始 and 長度)")
+        -- GF-UI-O: 活動 職責 時段 說明 first; 人數 錄取 標籤 inside 更多設定. GF-UI-S: 說明 is 備註.
+        eq(table.concat(f.fields, ","), "活動,職責,時段,備註,人數,錄取,標籤", "field names (GF-002-H: 時段 chips, each with 開始 and 長度)")
         ok(f.startButton:GetText():find("現在", 1, true), "the first slot says 現在")
         ok(f.dest:IsShown() and f.destQuest:IsShown(), "GF-UI-O: 活動 has 地城 / 任務 (text buttons)")
         eq((plain(f.dest:GetText()):gsub("^%s+", "")) .. "," .. (plain(f.destQuest:GetText()):gsub("^%s+", "")), "地城,任務", "their names")

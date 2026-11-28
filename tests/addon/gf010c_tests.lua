@@ -126,6 +126,7 @@ return function(T)
         local S, R = ns.Share, ns.Roster
         ns.Framework.open("roster")
         local total = #R.current().members
+        wow.click(ns.UI.moreFilterButton) -- GF-UI-S: 工具箱 is in 更多篩選
         wow.click(ns.UI.toolkitCheck)
         ok(ns.UI.filters.toolkit, "on")
         eq(ns.UI.countText:GetText(), "1/" .. total, "only the own character so far")

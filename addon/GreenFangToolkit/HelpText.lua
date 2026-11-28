@@ -16,9 +16,8 @@ H.TEXT = {
     -- The main window (every page)
     nav = { "主入口", "左邊六個主入口，按一下換到那一類業務；最下面的「事務設定」打開同步與診斷。" },
     subtabs = { "分頁", "同一個入口底下的幾頁，金色的是現在這一頁。" },
-    version = { "版本", "目前裝的工具箱版本；按一下打開「同步與診斷」。" },
-    bell = { "業務通知", "別人對你的委託、冒險單或黑箱申領有動作時記在這裡；旁邊的數字是還沒看的則數。" },
-    diag = { "診斷", "打開「同步與診斷」，看資料有沒有正常同步；字的顏色就是同步狀態。" },
+    version = { "版本", "目前裝的工具箱版本；字的顏色就是同步狀態（綠色＝正常記錄中），滑鼠移上去看說明，按一下打開「同步與診斷」。" },
+    bell = { "業務通知", "別人對你的委託、冒險單或臨時黑箱申領有動作時記在這裡；旁邊的數字是還沒看的則數。" },
 
     -- 職工檔案
     char_who = { "角色資料", "你這隻角色的名字、等級、公會和所在地，登入後自動讀取。" },
@@ -37,10 +36,7 @@ H.TEXT = {
     roster_search = { "搜尋", "打名字、職業或專業的字，只列出符合的會友。" },
     roster_skill = { "專業篩選", "勾選專業，只看會這些專業的人；可以複選。" },
     roster_class = { "職業篩選", "勾選職業，只看這些職業；可以複選。" },
-    roster_online = { "在線", "只列出現在在線上的會友。" },
-    roster_active = { "接單中", "只看目前開放接委託的工匠。" },
-    roster_toolkit = { "工具箱", "只看有裝綠皮冒險工具箱、資料會同步過來的會友。" },
-    roster_level = { "等級", "填數字，只看這個等級以上的角色。" },
+    roster_more = { "更多篩選", "打開後可以勾在線、接單中、有裝工具箱，或填等級（只看這個等級以上），可以同時勾好幾個；按鈕上的數字是開著幾項。" },
     roster_clear = { "清除", "把上面的篩選全部清掉，回到完整名冊。" },
     roster_census = { "職責人數", "公會裡坦克、治療、輸出各有幾人；點圖示只看那個職責，再點一次取消。" },
     roster_head = { "欄位名稱", "點欄位名稱依那一欄排序，再點一次反過來排。" },
@@ -50,7 +46,7 @@ H.TEXT = {
     roster_info = { "公會", "看公會訊息與公會資訊；有權限的人可以修改。" },
 
     -- 委託業務｜製作委託
-    orders_new = { "＋下單", "請公會工匠幫你做東西：先選配方，再填數量和工錢送出。" },
+    orders_new = { "＋下單", "請公會工匠幫你做東西：按了切到「工匠配方」，在要的配方那列按「下單」，再填數量和工錢送出。" },
     orders_services = { "我的服務", "設定你接哪些專業的委託、工錢多少。" },
     orders_prof = { "接單設定", "你會的專業：點圖示切換接單或不接，按「工錢」設定收多少。" },
     orders_list = { "委託清單", "你下的單和別人交給你的單都在這裡；每一列右邊是能做的下一步。" },
@@ -64,7 +60,7 @@ H.TEXT = {
     recipes_active = { "接單中", "只看有工匠開放接單的配方。" },
     recipes_fee = { "工錢", "依工錢篩選，例如只看免費的。" },
     recipes_all = { "全部", "現在只看一個人的配方；按這裡回到全部的人。" },
-    recipes_list = { "配方清單", "公會裡有人會做的配方、誰會做、工錢多少；點一列可以直接下單。" },
+    recipes_list = { "配方清單", "公會裡有人會做的配方、誰會做、工錢多少；按列上的「下單」開始下單（在搜尋按 Enter＝第一列下單）。" },
     -- 下單
     form_item = { "成品", "這張單要做的東西；滑鼠移上去看物品說明。" },
     form_qty = { "數量", "要做幾份；一次做出好幾個的配方，一格就是一次的數量。" },
@@ -75,37 +71,31 @@ H.TEXT = {
     form_total = { "合計", "材料費加工錢的總數。" },
     form_market = { "行情", "這個成品在拍賣場大約賣多少，給你比較用。" },
     form_send = { "下單", "確認後送出，工匠會收到通知。" },
-    -- 下單：選配方
-    pick_search = { "搜尋", "打配方或物品的名字找。" },
-    pick_skill = { "專業", "只看某個專業的配方。" },
-    pick_who = { "工匠", "只看接單中或在線的工匠能做的。" },
-    pick_fee = { "工錢", "依工錢篩選。" },
-    pick_list = { "配方清單", "點一列選這個配方，接著填下單內容。" },
 
     -- 物資調度｜綠皮調貨所
-    supply_tabs = { "看板與刊登", "調貨看板看全公會的徵求、供應和黑箱存貨；我的刊登管理你自己發的。" },
-    supply_auto = { "自動集料", "打開後依你的任務和背包算出缺什麼、多什麼，自動分享給公會。" },
-    supply_auto_help = { "說明與項目", "自動集料的完整說明，和它會看哪些物品。" },
-    supply_manual = { "手動刊登", "打開後可以自己發徵求或供應，公會的人看得到。" },
-    supply_manual_help = { "說明", "手動刊登做什麼、關掉後會怎樣。" },
+    supply_tabs = { "看板與刊登", "調貨看板看全公會的徵求、供應和臨時黑箱存貨；我的刊登管理你自己發的。" },
+    -- GF-UI-S: what the 自動集料說明 / 手動刊登說明 cards said, the main points.
+    supply_auto = { "自動集料", "打開後照任務進度和你的行囊、材料袋、銀行、信箱算出缺幾個、多幾個，只分享數量，不公開背包、不自動交易。實驗功能，預設關。" },
+    supply_auto_help = { "集料項目", "列出自動集料會看哪些物品；也可以選分享的餘料要算哪裡。" },
+    supply_manual = { "手動刊登", "打開後可以自己發徵求或供應，公會的人看得到；聯絡只打開密語框，不自動交易。關掉後不分享也不顯示刊登，你的刊登留著，再打開就恢復。" },
     supply_post = { "＋刊登", "自己發一筆徵求（找東西）或供應（有多的）。" },
     supply_search = { "搜尋", "打物品名或職工名，只列出符合的。" },
-    supply_kind = { "種類", "只看徵求、供應或黑箱存貨。" },
+    supply_kind = { "種類", "只看徵求、供應或臨時黑箱存貨。" },
     supply_scope = { "範圍", "只看你缺的、你可能有多的，或和你有關的。" },
     supply_group = { "收集組", "只看某一組收集規則（例如某個任務線）要的物品。" },
     supply_list = { "物品清單", "點一列，右邊會列出誰有、誰要。" },
     supply_detail = { "誰有誰要", "選到的物品有哪些職工徵求或供應、在不在線；你自己的刊登可以在這裡修改、續期或結束。" },
     -- 物資調度｜臨時黑箱
-    bank_views = { "黑箱分頁", "庫存看黑箱裡有什麼；申領處理領取申請；保管人與分享設定管理誰保管；公會銀行看存款與進出。" },
+    bank_views = { "臨時黑箱分頁", "庫存看臨時黑箱裡有什麼；申領處理領取申請；保管人與分享設定管理誰保管；公會銀行看存款與進出。" },
     bank_search = { "搜尋", "打物品名，只列出符合的。" },
     bank_class = { "分類", "只看某一類物品。" },
     bank_holder = { "保管人", "只看某一位保管人身上的東西。" },
     bank_online = { "只看在線", "只看現在在線上的保管人，比較快拿得到。" },
-    bank_stock = { "庫存清單", "黑箱裡的物品；每列右邊「聯絡」找保管人，「申領」填單請保管人給你。" },
+    bank_stock = { "庫存清單", "臨時黑箱裡的物品；每列右邊「聯絡」找保管人，「申領」填單請保管人給你。" },
     bank_todo = { "要我處理的", "別人申領你保管的東西，在這裡同意或拒絕。" },
     bank_mine = { "我的申領", "你送出的申領和目前的狀態。" },
-    bank_status = { "我的身分", "你在黑箱的身分（會長、保管人或一般職工）和能做的事。" },
-    bank_keepers = { "保管人名單", "會長指定的保管人；黑箱的存貨就是他們身上的公產。" },
+    bank_status = { "我的身分", "你在臨時黑箱的身分（會長、保管人或一般職工）和能做的事。" },
+    bank_keepers = { "保管人名單", "會長指定的保管人；臨時黑箱的存貨就是他們身上的公產。" },
     bank_appoint = { "＋保管人", "打名字後按「＋保管人」加入名單（只有會長能用）。" },
     bank_officers = { "審核幹部", "可以幫忙審核申領的人（只有會長能指定）。" },
     bank_scope = { "我的公產範圍", "勾選你背包和銀行裡哪幾格算公產，只有這些會分享出去。" },
@@ -135,7 +125,7 @@ H.TEXT = {
     ticket_dest = { "活動", "選要去的地城或要做的任務。" },
     ticket_roles = { "職責", "這團要幾個坦克、治療、輸出；人數在「更多設定」裡改。" },
     ticket_slots = { "時段", "什麼時候出發；可以加好幾個時段讓大家挑。" },
-    ticket_note = { "說明", "寫給報名的人看的一句話，例如集合地點。" },
+    ticket_note = { "備註", "寫給報名的人看的一句話，例如集合地點。" },
     ticket_more = { "更多設定", "打開後可以改人數、錄取方式和標籤。" },
     ticket_mode = { "錄取", "直接錄取：先報先上；團長同意：你一個一個決定。" },
     ticket_tags = { "標籤", "標出這團的性質，方便別人篩選。" },
@@ -181,12 +171,6 @@ H.TEXT = {
 
 local function panel(id) return F.panel(id) end
 local function withLabel(b) return { b, b and b.label } end
-local function visibleDiag()
-    for _, b in ipairs((ns.Diag and ns.Diag.smallButtons and ns.Diag.smallButtons()) or {}) do
-        if b:IsVisible() then return b end
-    end
-    return nil
-end
 local function popup(name) return name and _G[name] end
 -- Icon buttons with their names (a table of them).
 local function roles(t)
@@ -239,10 +223,7 @@ H.register("roster", {
     { key = "roster_search", get = function() return ns.UI.searchBox end },
     { key = "roster_skill", get = function() return ns.UI.skillChoice end },
     { key = "roster_class", get = function() return ns.UI.classChoice end },
-    { key = "roster_online", get = function() return withLabel(ns.UI.onlineCheck) end },
-    { key = "roster_active", get = function() return withLabel(ns.UI.activeCheck) end },
-    { key = "roster_toolkit", get = function() return withLabel(ns.UI.toolkitCheck) end },
-    { key = "roster_level", get = function() return { ns.UI.levelLabel, ns.UI.levelBox, ns.UI.levelSuffix } end },
+    { key = "roster_more", get = function() return ns.UI.moreFilterButton end },
     { key = "roster_clear", get = function() return ns.UI.clearButton end },
     { key = "roster_census", get = function()
         local c = ns.UI.census
@@ -253,7 +234,6 @@ H.register("roster", {
     { key = "roster_bar", get = function() return ns.UI.actionBar end },
     { key = "roster_invite", get = function() return ns.UI.inviteButton end },
     { key = "roster_info", get = function() return ns.UI.infoButton end },
-    { key = "diag", get = function() return ns.UI.syncIndicator end },
 })
 
 ---------------------------------------------------------------------------
@@ -273,7 +253,6 @@ H.register("orders", {
     { key = "orders_list", get = function() return ns.OrdersUI.scrollFrame() end },
     { key = "orders_paste", get = function() return withLabel(ns.OrdersUI.pasteButton) end },
     { key = "orders_history", get = function() return withLabel(ns.OrdersUI.historyButton) end },
-    { key = "diag", get = visibleDiag },
 })
 
 H.register("recipes", {
@@ -303,15 +282,6 @@ H.register("orderform", {
     { key = "form_send", get = function() return popup(ns.OrdersUI.POPUP_NAME).send end },
 })
 
-H.POPUP[ns.OrdersUI.PICKER_NAME] = "picker"
-H.register("picker", {
-    { key = "pick_search", get = function() return ns.OrdersUI.picker.search end },
-    { key = "pick_skill", get = function() return ns.OrdersUI.picker.skillDrop end },
-    { key = "pick_who", get = function() return ns.OrdersUI.picker.whoDrop end },
-    { key = "pick_fee", get = function() return ns.OrdersUI.picker.feeDrop end },
-    { key = "pick_list", get = function() return ns.OrdersUI.picker.rows end },
-})
-
 ---------------------------------------------------------------------------
 -- 物資調度
 ---------------------------------------------------------------------------
@@ -322,7 +292,6 @@ H.register("supply", {
     { key = "supply_auto_help", get = function() return ns.SupplyUI.autoBox.help end },
     { key = "supply_post", get = function() return ns.SupplyUI.postButton end },
     { key = "supply_manual", get = function() local c = ns.SupplyUI.manualBox; return { c.label, c.cells } end },
-    { key = "supply_manual_help", get = function() return ns.SupplyUI.manualBox.help end },
     { key = "supply_search", get = function() return { ns.SupplyUI.searchLabel, ns.SupplyUI.searchBox } end },
     { key = "supply_kind", get = function() return { ns.SupplyUI.kindLabel, ns.SupplyUI.kindDrop } end },
     { key = "supply_scope", get = function() return { ns.SupplyUI.scopeLabel, ns.SupplyUI.scopeDrop } end },
@@ -394,7 +363,6 @@ H.register("adventure", {
     { key = "adv_list", get = function() return ns.AdventureUI.scrollFrame() end },
     { key = "adv_clear", get = function() return ns.AdventureUI.clearButton end },
     { key = "adv_next", get = function() return ns.AdventureUI.nextInvite end },
-    { key = "diag", get = visibleDiag },
 })
 
 H.POPUP[ns.AdventureUI.TICKET_NAME] = "ticket"

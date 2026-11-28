@@ -1,7 +1,7 @@
 -- Help (GF-UI-R, owner 2026-11-28: 「我希望整個介面都盡量單純，且有一個說明
 -- 按鈕，按下後會標示介面功能說明」): one 「說明」 button in the title line of
 -- the main window (left of 業務通知) and of the pop-ups that have help
--- (下單, 選配方, 開單, 業務排程, 同步與診斷, the 業務通知 list). A press puts a
+-- (下單, 開單, 業務排程, 同步與診斷, the 業務通知 list). A press puts a
 -- dim layer over that window; every registered part shown there gets a gold
 -- frame and a number, and the mouse on it says in a line or two what it is
 -- for. Press 「結束說明」 again, ESC, another page, closing the window or

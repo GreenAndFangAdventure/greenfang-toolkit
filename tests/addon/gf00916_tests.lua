@@ -215,7 +215,7 @@ return function(T)
         UI.kindDrop.choose("all")
         _, idx = find(UI, STOCKED)
         eq(#UI.peopleOf(UI.state.items[idx]), 2, "全部: 徵求 and my 黑箱")
-        ok(UI.detail.sub:GetText():find("徵求 1 位｜黑箱 5 個", 1, true), "the detail line: " .. UI.detail.sub:GetText())
+        ok(UI.detail.sub:GetText():find("徵求 1 位｜臨時黑箱 5 個", 1, true), "the detail line: " .. UI.detail.sub:GetText())
     end))
 
     ---------------------------------------------------------------------------

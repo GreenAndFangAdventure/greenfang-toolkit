@@ -145,7 +145,7 @@ Diag.SITE_NOTE = "GF Sync 會在你下線後讀取存檔並上傳。公會網站
 
 local SECTIONS = {
     { title = "上傳到公會網站", text = function() return ns.Sync.statusText() end },
-    { title = "說明", text = function() return Diag.SITE_NOTE end },
+    { title = "關於網站", text = function() return Diag.SITE_NOTE end },
     -- GF-UI-L: what the AddOn can see of GF Sync (the same line as the main window's corner).
     { title = "GF Sync 偵測", text = function() return ns.Framework.gfSyncDiagText() end },
     { title = "遊戲內分享（公會成員之間自動轉傳）", text = Diag.shareText },
@@ -340,37 +340,11 @@ function Diag.lines() return lines end
 function Diag.heads() return heads end
 function Diag.window() return window end
 
--- The 「診斷」 button at the bottom right of a page (GF-UI-B, GF-UI-A §2.11
--- item 4: a gear and 2 characters, 30 px; was the 120 x 22 「同步與診斷」).
--- Its name takes the sync status colour (UI.refreshSyncIndicator).
-local smallButtons = {}
-Diag.BUTTON_TEXT = "診斷"
-function Diag.smallButton(parent, point, x, y)
-    -- GF-UI-C (owner): text only.
-    local b = ns.OrdersUI.textButton(parent, Diag.BUTTON_TEXT, Diag.toggle)
-    b:SetPoint(point, parent, point, x, y)
-    b.label = b.GetFontString and b:GetFontString() or nil
-    b:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("同步與診斷")
-        GameTooltip:Show()
-    end)
-    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    smallButtons[#smallButtons + 1] = b
-    if ns.Sync and ns.Sync.statusColor and b.label and b.label.SetTextColor then
-        local c = ns.Sync.statusColor()
-        b.label:SetTextColor(c[1], c[2], c[3])
-    end
-    return b
-end
-function Diag.smallButtons() return smallButtons end
-
+-- GF-UI-S (owner 2026-11-28): the 「診斷」 buttons at the bottom right of
+-- 名冊／委託／冒險 are gone; the sync status colour is on the version at the
+-- top right (Framework.paintInfo), which opens this window too.
 local function onChange()
-    -- GF-UI-B: every page's 診斷 button follows the sync status colour.
-    local c = ns.Sync.statusColor and ns.Sync.statusColor()
-    for _, b in ipairs(smallButtons) do
-        if c and b.label and b.label.SetTextColor then b.label:SetTextColor(c[1], c[2], c[3]) end
-    end
+    if ns.Framework and ns.Framework.paintInfo then ns.Framework.paintInfo() end
     if Diag.isShown() then ns.coalesce("diag", 1, function() if Diag.isShown() then Diag.refresh() end end) end
 end
 ns.Sync.onChange(onChange)

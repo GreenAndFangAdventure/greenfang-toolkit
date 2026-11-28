@@ -756,17 +756,14 @@ test("sync status: player-facing text never mentions commands", function()
     ok(printedContains("/gftk sync：查看同步狀態"), "help lists the sync command")
 end)
 
-test("sync status: the roster's small 「同步與診斷」 button and the window stay current", function()
+test("sync status: the version (top right; GF-UI-S: was the roster's 「診斷」 button) and the window stay current", function()
     wow.reset()
     local ns = wow.login(ADDON_DIR)
     SlashCmdList.GREENFANGTOOLKIT("roster")
-    local ind = ns.UI.syncIndicator
-    ok(ind, "button on the roster page")
-    -- GF-UI-B: a gear and 「診斷」, 30 px.
-    ok(ind:GetText():find("診斷", 1, true), "label")
-    eq(ind._h, 30, "30 px")
+    local ind = ns.Framework.infoButton()
+    ok(ind, "the version on the roster page")
     ind:GetScript("OnEnter")(ind)
-    eq(GameTooltip._lines[1].text, "同步與診斷", "tooltip title")
+    ok(tostring(GameTooltip._lines[#GameTooltip._lines].text):find("同步與診斷", 1, true), "tooltip: a click opens 同步與診斷")
     ind:GetScript("OnLeave")(ind)
     ind:GetScript("OnClick")(ind)
     ok(ns.Diag.isShown(), "window opened")
@@ -777,8 +774,8 @@ test("sync status: the roster's small 「同步與診斷」 button and the windo
     ns.Sync.recordSelf(true)
     wow.advance(1.2)
     ok(first:GetText():find("待上傳 1 筆", 1, true), "updated after an outbox write")
-    ind:GetScript("OnClick")(ind)
-    ok(not ns.Diag.isShown(), "second click closes it")
+    ns.Diag.toggle()
+    ok(not ns.Diag.isShown(), "toggle closes it")
 end)
 
 test("D19 minimap tooltip: only the name; no hints, no sync status", function()
@@ -3886,6 +3883,7 @@ test("D19 roster filters: profession (incl. secondary), class, online, minimum l
     ns.UI.classChoice.setOnly("WARRIOR")
     eq(shown(), "測試乙", "warriors")
     ns.UI.classChoice.selectAll()
+    wow.click(ns.UI.moreFilterButton) -- GF-UI-S: 在線 and 等級 are in 更多篩選
     wow.click(ns.UI.onlineCheck)
     eq(shown(), "測試乙,測試甲", "online only")
     ns.UI.levelBox:SetText("30")
@@ -3941,9 +3939,8 @@ test("D19 player text: no hints or technical lines on the pages", function()
         "分享與轉傳", "在線的在前", "還沒記錄配方", "（點一下切換）", "剛剛記錄", "（本人）" }) do
         ok(not texts:find(gone, 1, true), "no " .. gone)
     end
-    local b = ns.Diag.smallButton(UIParent, "CENTER", 0, 0)
-    b._scripts.OnEnter(b)
-    eq(tipText(), "同步與診斷", "diag button: name only")
+    -- GF-UI-S: no 診斷 button any more (the version opens 同步與診斷).
+    eq(ns.Diag.smallButton, nil, "no diag button")
 end)
 
 test("D19 recipe filters: only mine / only others, only online crafters, search", function()
@@ -4118,10 +4115,8 @@ test("D20 roster filter line: labels and boxes do not overlap", function()
         { "搜尋", x(ns.UI.searchBox), ns.UI.searchBox._w },
         { "專業", x(ns.UI.skillChoice), ns.UI.skillChoice._w },
         { "職業", x(ns.UI.classChoice), ns.UI.classChoice._w },
-        { "在線", x(ns.UI.onlineCheck), 24 + 60 },
-        { "等級", x(ns.UI.levelLabel), 30 },
-        { "等級框", x(ns.UI.levelBox), ns.UI.levelBox._w },
-        { "以上", x(ns.UI.levelSuffix), 26 },
+        -- GF-UI-S: 在線 / 接單中 / 工具箱 / 等級 are inside 更多篩選.
+        { "更多篩選", x(ns.UI.moreFilterButton), ns.UI.moreFilterButton._w },
         { "清除", x(ns.UI.clearButton), ns.UI.clearButton._w },
     }
     for i = 2, #list do
@@ -4860,6 +4855,12 @@ assert(loadfile(ROOT .. "/tests/addon/gfuiq_tests.lua"))()({ test = test, eq = e
 -- (tests/addon/gfuir_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gfuir_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-UI-S: the owner's seven simplifications (2026-11-28): 臨時黑箱, 備註, 集料項目, 關於網站,
+-- the version's sync colour (no 診斷 buttons), ＋下單 to 工匠配方, 名冊's 更多篩選
+-- (tests/addon/gfuis_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gfuis_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint, shareLogin = shareLogin, shareFrom = shareFrom,
+    rMsg = rMsg, leatherWindow = leatherWindow, PEER = PEER, A_PEER = A_PEER, A_THIRD = A_THIRD })
 ---------------------------------------------------------------------------
 
 local passed = 0
