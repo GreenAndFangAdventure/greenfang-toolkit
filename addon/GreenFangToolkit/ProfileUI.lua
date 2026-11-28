@@ -1,6 +1,6 @@
 -- ProfileUI (GF-010, spec v2.0 §5.1, §5.2): the right half of the personnel
 -- file page (Character.lua builds the page and calls ProfileUI.build):
---   職責定位  主職責 [坦克][治療][輸出][未設定]  可支援 [坦克][治療][輸出]  [ ]分享
+--   職責定位  主職責 [坦克][治療][輸出][清除定位]  可支援 [坦克][治療][輸出]  [ ]分享
 --   我的業務  my orders and adventures (read-only; a click opens the record)
 --   個人需求  only once GF-009 registers a provider (Profile.setNeedsProvider)
 -- and the read-only card of another member (opened from the roster).
@@ -155,7 +155,8 @@ function ProfileUI.build(p)
         c:SetPoint("TOPLEFT", p, "TOPLEFT", x0 + (i - 1) * ProfileUI.ROLE_STEP, Y.can)
         controls.can[r] = c
     end
-    controls.unset = ns.OrdersUI.textButton(p, P().UNSET_NAME, function() P().setMain(nil); ProfileUI.refresh() end)
+    -- GF-010-C: 「清除定位」 is an action (both rows at once, confirmed first), not a role.
+    controls.unset = ns.OrdersUI.textButton(p, P().CLEAR_NAME, function() ProfileUI.askClear() end)
     controls.unset:SetPoint("TOPLEFT", p, "TOPLEFT", x0 + 3 * ProfileUI.ROLE_STEP, Y.main + 1)
     controls.share = ns.checkBox(p, "分享給公會", X, Y.share, function(on) P().setShare(on); ProfileUI.refresh() end)
     controls.bizHead = header(p, "我的業務", X, Y.bizHead)
@@ -176,6 +177,21 @@ function ProfileUI.build(p)
     ProfileUI.controls = controls
 end
 
+-- GF-010-C: anything to clear (a main role or a role in 可支援)?
+function ProfileUI.hasRoles(own)
+    return own ~= nil and (own.main ~= nil or next(own.can or {}) ~= nil)
+end
+
+ProfileUI.CLEAR_ASK = "清除定位：主職責和可支援一起清空"
+-- 「清除定位」: the game-style confirm box; 確定 clears both rows and redraws.
+function ProfileUI.askClear()
+    if not ProfileUI.hasRoles(P().own()) then return nil end
+    return ns.Widgets.confirm(ProfileUI.CLEAR_ASK, function()
+        P().clearRoles()
+        ProfileUI.refresh()
+    end)
+end
+
 function ProfileUI.refresh()
     if not panel then return end
     local Pr = P()
@@ -190,11 +206,10 @@ function ProfileUI.refresh()
         drawRole(controls.can[r], own ~= nil and (own.can[r] == true or isMain), enabled and not isMain, suggested)
         if isMain then ns.OrdersUI.setSelected(controls.can[r], true) end
     end
-    -- GF-UI-K (owner: grey 「未設定」 looked unusable): when no main role is set it
-    -- is the chosen one (gold, like the chosen role icon); it cannot be pressed again.
-    local unsetOn = own ~= nil and own.main == nil
-    ns.Theme.setSelected(controls.unset, unsetOn)
-    if unsetOn then controls.unset:Disable() else controls.unset:Enable() end
+    -- GF-010-C (was GF-UI-K's gold 「未設定」): 「清除定位」 is never drawn as chosen;
+    -- greyed only when there is nothing to clear (or the character is not known yet).
+    ns.Theme.setSelected(controls.unset, false)
+    if ProfileUI.hasRoles(own) then controls.unset:Enable() else controls.unset:Disable() end
     controls.share.set(own ~= nil and own.share == true)
     -- 我的業務
     local items = Pr.myBusiness()

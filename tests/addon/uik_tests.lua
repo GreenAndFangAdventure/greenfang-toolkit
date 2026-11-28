@@ -68,12 +68,14 @@ return function(T)
         eq(items[3].stateName, "已取消", "a cancelled adventure: 已取消 (closed by its state)")
     end)
 
-    test("GF-UI-K A3 主職責 未設定 is the chosen look when no main role is set", function()
+    -- GF-010-C (owner): 「未設定」 became the action 「清除定位」, never drawn as chosen
+    -- (tests/addon/gf010c_tests.lua has the rest).
+    test("GF-UI-K A3 主職責 清除定位 (GF-010-C): never the chosen look; usable once a role is set", function()
         local ns = login()
         SlashCmdList.GREENFANGTOOLKIT("character")
         local c = ns.ProfileUI.controls
         ns.Profile.setMain(nil); ns.ProfileUI.refresh()
-        ok(c.unset.gfSelected, "未設定 chosen (gold)")
+        ok(not c.unset.gfSelected, "not gold with no main role")
         ns.Profile.setMain("t"); ns.ProfileUI.refresh()
         ok(not c.unset.gfSelected, "not chosen once a role is set")
         eq(c.unset.gfEnabled, true, "and it can be pressed")

@@ -4835,6 +4835,9 @@ assert(loadfile(ROOT .. "/tests/addon/gfuip_tests.lua"))()({ test = test, eq = e
 -- GF-008-E: the sleeping-bag guide in five steps, 上一步 / 下一步, the remembered step, pins follow (tests/addon/gf008e_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gf008e_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-010-C: 職工檔案 「清除定位」 and the roster's toolkit wrench and filter (tests/addon/gf010c_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf010c_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0
