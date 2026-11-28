@@ -156,6 +156,8 @@ return function(T)
         local p = F.panel("bank")
         local line = -(F.SUBTAB_Y - ns.BUTTON_H - 4) - F.SUBTAB_H -- the sub-tab line, from the page top
         local c = ns.BankUI.controls
+        -- GF-012-C: the two view buttons took the title's place.
+        c.title = c.views.buttons[1]
         for _, k in ipairs({ "title", "role", "status", "listHead", "scopeHead" }) do
             local pt = c[k]._points[1]
             ok(-pt[5] >= line + 8, k .. " below the sub-tab line with a gap (" .. -pt[5] .. " vs " .. line .. ")")

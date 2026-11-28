@@ -956,8 +956,12 @@ function Supply.view(kind, entries)
         for _, e in ipairs(all) do
             if not e.own then
                 local it = itemFor(e.itemID)
-                local list = e.direction == "need" and it.needs or it.offers
-                list[#list + 1] = e
+                if e.direction == "stock" then
+                    it.stock = e -- GF-012-C: 臨時黑箱 (one entry per item, SupplyUI.stockEntries)
+                else
+                    local list = e.direction == "need" and it.needs or it.offers
+                    list[#list + 1] = e
+                end
                 it.others[#it.others + 1] = e
                 it.rule = it.rule or e.rule
             end

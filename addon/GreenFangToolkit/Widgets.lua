@@ -921,6 +921,7 @@ function W.dropdown(parent, w, onChoose)
     -- Below the button, or above it when the screen ends first (dd.openUp).
     function dd.place()
         local h = math.min(#dd.items, W.DROP_ROWS) * W.DROP_ROW + 2 * W.DROP_PAD
+        local b = dd.anchor or b -- GF-012-C: dd.openAt(frame) opens it under another frame
         local scale = dropScale(b)
         if list.SetScale then list:SetScale(scale) end
         local bottom = ns.num((b.GetBottom and b:GetBottom()))
@@ -941,6 +942,14 @@ function W.dropdown(parent, w, onChoose)
         dd.place()
         list:Show()
         return list
+    end
+    -- GF-012-C: the same list under another frame (臨時黑箱's 聯絡: one
+    -- shared menu for every row; its own button stays hidden).
+    function dd.openAt(frame)
+        dd.anchor = frame
+        local l = dd.open()
+        dd.anchor = nil
+        return l
     end
     function dd.toggle() if list:IsShown() then dd.close() else dd.open() end end
     -- A pick: false for a disabled or unknown item (nothing changes).
