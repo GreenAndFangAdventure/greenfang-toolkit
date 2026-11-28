@@ -4,7 +4,7 @@
 
 安裝：把 `GreenFangToolkit` 資料夾放到 `World of Warcraft\_forever_\Interface\AddOns\`。在遊戲裡按小地圖按鈕，或輸入 `/gftk`（也可以用 `/綠皮`）打開工具箱。
 
-## 下一版
+## 0.16.22（介面精簡：統一叫法、拿掉重複的按鈕、下單併進工匠配方頁）
 
 ### 介面精簡七項（GF-UI-S，owner 2026-11-28 勾選；只做過離線測試，未實機驗證）
 
