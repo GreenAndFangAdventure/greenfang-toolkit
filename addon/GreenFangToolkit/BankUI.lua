@@ -1,12 +1,17 @@
 -- BankUI (GF-012 phase 1, spec v2.0 §8, design GF-012-A §6): 物資調度 →
--- 公會黑庫. Shows who is guild master, the custodian list and its state, the
--- guild master's buttons (指定 / 背包 / 銀行 / 撤銷; everybody else sees them
--- disabled, never lit), a custodian's own 公產 scope and, GF-012-B, the
--- guild's stock (BankStock: one row per item, who holds how many, how long
--- ago, 聯絡; a search box and 6 reused rows with the wheel). The custodian
--- list keeps 4 reused rows (was 8) to make room; it scrolls the same way.
--- Game art only (class icons, the state panel's icons), 16 px text, button
--- names of 2-4 characters.
+-- 臨時黑箱. GF-012-C (owner 2026-11-28): two buttons at the top.
+--   庫存 (the default): the whole page is the guild's stock (BankStock): one
+--     row per item (icon, name, total, who has it, how long ago, 聯絡), as
+--     many reused rows as the page holds, the wheel, and a filter row (name,
+--     item class, custodian, online only; the result is kept until the data
+--     or a filter changes). 聯絡 whispers at once when one custodian has it,
+--     else a small menu of the custodians (online first, the most first).
+--   保管人與分享設定: who is guild master, the custodian list (8 reused rows
+--     again) and its state, the guild master's buttons (指定 / 背包 / 銀行 /
+--     撤銷; everybody else sees them disabled, never lit), a custodian's own
+--     公產 scope, the share switch and what I share.
+-- Game art only (class icons, item icons, the state panel's icons), 16 px
+-- text, button names of 2-4 characters.
 
 local _, ns = ...
 local str = ns.str
@@ -15,25 +20,37 @@ local UI = {}
 ns.BankUI = UI
 
 UI.ID = "bank"
-UI.ROWS, UI.ROW_H, UI.ROW_W = 4, 40, 660 -- GF-012-B: 4 rows (was 8), the stock list below
+UI.ROWS, UI.ROW_H, UI.ROW_W = 8, 40, 660 -- GF-012-C: 8 rows again (the stock has its own view)
 UI.X, UI.RIGHT_X = 20, 720
 -- GF-UI-I (owner 0.16.2: 標題和右邊的字壓到上面的分頁列): the sub-tab row's
 -- line ends 29 px into the page, so everything starts UI.TOP below it.
 UI.TOP = 40
-UI.Y = { title = -UI.TOP, status = -UI.TOP - 32, listHead = -UI.TOP - 68, rows = -UI.TOP - 100, scopeHead = -UI.TOP - 68,
-    stockHead = -UI.TOP - 316, stockRows = -UI.TOP - 352, stock = -UI.TOP - 372 }
--- GF-012-B: the stock list (BankStock).
-UI.STOCK_ROWS, UI.STOCK_ROW_H = 6, 44
+UI.VIEWS = { { key = "stock", text = "庫存" }, { key = "setup", text = "保管人與分享設定" } }
+UI.Y = { views = -UI.TOP, status = -UI.TOP - 44, listHead = -UI.TOP - 76, rows = -UI.TOP - 108, scopeHead = -UI.TOP - 76,
+    filters = -UI.TOP - 44, stockHead = -UI.TOP - 86, stockRows = -UI.TOP - 118 }
+-- GF-012-C: the stock list fills the page: as many 44 px rows as fit above
+-- the 「還有 N 項」 line at the bottom.
+UI.STOCK_ROW_H, UI.STOCK_W = 44, 1060
+UI.STOCK_MORE_H = 26
+UI.STOCK_ROWS = math.floor(((ns.Framework.PANEL_HEIGHT or 680) + UI.Y.stockRows - UI.STOCK_MORE_H - 8) / UI.STOCK_ROW_H)
 UI.STOCK_MORE = "還有 %d 項，用滑鼠滾輪往下看"
+UI.STOCK_COUNT = "共 %d 項"
+-- Columns right of the item name (x from the row's right edge).
+UI.STOCK_COL = { who = 470, ago = 220, contact = 80 }
+UI.STOCK_HEADINGS = { "物品", "總數", "誰有", "多久前看到" }
 UI.STOCK_EMPTY = {
     nobody = { "還沒有保管人", "會長指定保管人後，這裡會列出保管人分享的物品" },
     none = { "保管人還沒分享庫存", "保管人上線並開啟分享後就會出現" },
-    noscope = { "保管人還沒設定公產範圍", "保管人在右邊「我的公產範圍」勾選後就會出現" },
+    noscope = { "保管人還沒設定公產範圍", "保管人在「保管人與分享設定」的「我的公產範圍」勾選後就會出現" },
     unseen = { "保管人還沒打開銀行", "保管人打開銀行後才看得到銀行裡的物品" },
     empty = { "公產範圍裡沒有可交易的物品", "綁定的物品不列入" },
     list = { "還沒有保管人名單", "等會長的名單傳到" },
     search = { "找不到符合的物品", "換個名字試試" },
+    filter = { "沒有符合篩選的物品", "換個分類、保管人，或取消「只看在線的保管人」" },
 }
+UI.SEARCH_DELAY = 0.15 -- owner: typing redraws at most this late
+UI.CLASS_ALL, UI.HOLDER_ALL = "全部分類", "全部保管人"
+UI.ONLINE_LABEL = "只看在線的保管人"
 UI.SHARE_LABEL = "分享庫存給公會"
 -- GF-UI-M (owner): the list scrolls with the wheel (8 pooled rows; up to 10
 -- active + 10 revoked); the same 「還有 N 位」 line as 調貨看板's detail.
@@ -43,6 +60,10 @@ UI.RESULT = {
     same = "沒有變更", invalid = "格式不對", ["last-kind"] = "至少留一種，否則請撤銷", ok = "已更新",
     combat = "戰鬥中，結束後再選", roster = "公會名冊尚未載入",
 }
+-- GF-012-C: 聯絡's menu (one for the whole toolkit, also 調貨看板's 黑箱 row).
+UI.CONTACT_W = 260
+UI.CONTACT_BEST = "（建議）"
+UI.CONTACT_SELF = "（自己）"
 
 local panel
 local c = {}
@@ -113,11 +134,9 @@ function UI.say(result)
     return result
 end
 
-local function build(p)
-    panel = p
+-- 保管人與分享設定 (GF-012-C: its own view; was the top half of the page).
+local function buildSetup(p)
     local X, Y = UI.X, UI.Y
-    c.title = header(p, "臨時秘密黑箱", X, Y.title) -- owner 2026-11-25: was 公會黑庫
-    c.role = text(p, ns.FIELD_FONT, X + 140, Y.title, 300)
     c.status = text(p, ns.LABEL_FONT, X, Y.status, 1040)
     c.listHead = header(p, "保管人名單", X, Y.listHead)
     c.more = text(p, ns.DISABLED_FONT, X + 140, Y.listHead, 520)
@@ -174,45 +193,138 @@ local function build(p)
     c.mine:SetPoint("TOPLEFT", p, "TOPLEFT", UI.RIGHT_X, y - 72)
     c.mine:SetWidth(360); c.mine:SetJustifyH("LEFT")
     if c.mine.SetWordWrap then c.mine:SetWordWrap(true) end
-    -- 庫存
-    c.stockHead = header(p, "庫存", X, Y.stockHead)
-    c.stockMore = text(p, ns.DISABLED_FONT, X + 60, Y.stockHead, 300)
-    c.searchLabel = text(p, ns.FIELD_FONT, X + 410, Y.stockHead)
+end
+
+-- 庫存 (GF-012-C: the whole view): the filter row, the column header, the rows.
+local function buildStock(p)
+    local X, Y = UI.X, UI.Y
+    c.searchLabel = text(p, ns.FIELD_FONT, X, Y.filters - 6)
     c.searchLabel:SetText("搜尋")
-    c.search = ns.Theme.editBox(p, 200, 30)
-    c.search:SetPoint("TOPLEFT", p, "TOPLEFT", X + 460, Y.stockHead + 6)
+    c.search = ns.Theme.editBox(p, 180, 30)
+    c.search:SetPoint("TOPLEFT", p, "TOPLEFT", X + 44, Y.filters)
     if c.search.SetMaxLetters then c.search:SetMaxLetters(40) end
     c.search:SetScript("OnTextChanged", function(self)
         c.query = str(self:GetText())
-        ns.Recipes.soon("bank-stock-search", UI.PICKER_DELAY, function()
+        ns.Recipes.soon("bank-stock-search", UI.SEARCH_DELAY, function()
             if panel and panel:IsShown() then c.stockOffset = 0; UI.drawStock() end
         end)
     end)
     c.search:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    c.classLabel = text(p, ns.FIELD_FONT, X + 244, Y.filters - 6)
+    c.classLabel:SetText("分類")
+    c.classDrop = W().dropdown(p, 160, function(v) UI.setFilter("class", v) end)
+    c.classDrop:SetPoint("TOPLEFT", p, "TOPLEFT", X + 288, Y.filters)
+    c.holderLabel = text(p, ns.FIELD_FONT, X + 468, Y.filters - 6)
+    c.holderLabel:SetText("保管人")
+    c.holderDrop = W().dropdown(p, 180, function(v) UI.setFilter("holder", v) end)
+    c.holderDrop:SetPoint("TOPLEFT", p, "TOPLEFT", X + 528, Y.filters)
+    c.online = ns.checkBox(p, UI.ONLINE_LABEL, X + 730, Y.filters, function(on) UI.setFilter("online", on) end)
+    c.filters = { class = "all", holder = "all", online = false }
+    c.classDrop.setItems({ { value = "all", text = UI.CLASS_ALL } }); c.classDrop.setValue("all")
+    c.holderDrop.setItems({ { value = "all", text = UI.HOLDER_ALL } }); c.holderDrop.setValue("all")
+    -- The column header (the same faint bar as 調貨所's lists).
+    c.stockHead = CreateFrame("Frame", nil, p)
+    c.stockHead:SetPoint("TOPLEFT", p, "TOPLEFT", X, Y.stockHead)
+    c.stockHead:SetSize(UI.STOCK_W, 28)
+    ns.Theme.headerBar(c.stockHead)
+    c.stockHead.cells = {}
+    local cols = { { x = 52, w = 300 }, { right = UI.STOCK_COL.who + 20, w = 80 },
+        { right = UI.STOCK_COL.who, w = 240 }, { right = UI.STOCK_COL.ago, w = 130 } }
+    for i, col in ipairs(cols) do
+        local fs = ns.freeText(c.stockHead:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
+        if col.x then fs:SetPoint("LEFT", c.stockHead, "LEFT", col.x, 0); fs:SetJustifyH("LEFT")
+        elseif i == 2 then fs:SetPoint("RIGHT", c.stockHead, "RIGHT", -col.right, 0); fs:SetJustifyH("RIGHT")
+        else fs:SetPoint("LEFT", c.stockHead, "RIGHT", -col.right, 0); fs:SetJustifyH("LEFT") end
+        fs:SetWidth(col.w)
+        if fs.SetWordWrap then fs:SetWordWrap(false) end
+        fs:SetText(UI.STOCK_HEADINGS[i])
+        c.stockHead.cells[i] = fs
+    end
     c.query, c.stockOffset = "", 0
     c.stockRows = {}
     for i = 1, UI.STOCK_ROWS do c.stockRows[i] = UI.stockRow(p, i) end
-    c.stock = W().statePanel(p, UI.ROW_W, 140)
-    c.stock:SetPoint("TOPLEFT", p, "TOPLEFT", X, Y.stock)
+    local bottom = UI.Y.stockRows - UI.STOCK_ROWS * UI.STOCK_ROW_H
+    c.stockCount = text(p, ns.LABEL_FONT, X + 4, bottom - 6, 200)
+    c.stockMore = text(p, ns.DISABLED_FONT, X + 220, bottom - 6, 500)
+    c.stock = W().statePanel(p, UI.STOCK_W, 140)
+    c.stock:SetPoint("TOPLEFT", p, "TOPLEFT", X, Y.stockRows - 20)
+end
+
+local function build(p)
+    panel = p
+    local function view()
+        local v = CreateFrame("Frame", nil, p)
+        v:SetAllPoints(p)
+        return v
+    end
+    c.stockView, c.setupView = view(), view()
+    c.view = "stock"
+    c.views = ns.Theme.tabStrip(p, UI.VIEWS, UI.X, UI.Y.views, function(key) UI.setView(key) end)
+    c.views.select(c.view)
+    c.role = text(p, ns.FIELD_FONT, UI.RIGHT_X, UI.Y.views - 6, 360)
+    buildSetup(c.setupView)
+    buildStock(c.stockView)
+    c.setupView:Hide()
+    if p.HookScript then p:HookScript("OnHide", function() UI.closeContact() end) end
     UI.controls = c
 end
 
--- GF-012-B: one stock row (Widgets.itemRow): icon, name, total; under the
--- name who holds how many; on the right how long ago and 聯絡.
+-- 庫存 / 保管人與分享設定.
+function UI.setView(key)
+    if key ~= "stock" and key ~= "setup" then return false end
+    c.view = key
+    if c.views then c.views.select(key) end
+    if c.stockView then shown(c.stockView, key == "stock"); shown(c.setupView, key == "setup") end
+    UI.closeContact()
+    UI.refresh()
+    if key == "setup" and K() then K().askIfNeeded() end
+    return true
+end
+
+-- GF-012-B / C: one stock row (Widgets.itemRow): icon, name, total; on the
+-- right who has it, how long ago, 聯絡. The tooltip: each custodian's count
+-- in the bags and the bank.
 function UI.stockRow(p, i)
-    local r = W().itemRow(p, UI.ROW_W, UI.STOCK_ROW_H)
+    local r = W().itemRow(p, UI.STOCK_W, UI.STOCK_ROW_H)
     r:SetPoint("TOPLEFT", p, "TOPLEFT", UI.X, UI.Y.stockRows - (i - 1) * UI.STOCK_ROW_H)
-    r.ago = ns.freeText(r:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
-    r.ago:SetPoint("LEFT", r.right, "LEFT", 0, 0)
-    r.ago:SetWidth(90); r.ago:SetJustifyH("LEFT")
+    local function col(right, w)
+        local fs = ns.freeText(r:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
+        fs:SetPoint("LEFT", r, "RIGHT", -right, 0)
+        fs:SetWidth(w); fs:SetJustifyH("LEFT")
+        if fs.SetWordWrap then fs:SetWordWrap(false) end
+        return fs
+    end
+    r.who = col(UI.STOCK_COL.who, 240)
+    r.ago = col(UI.STOCK_COL.ago, 130)
     r.contact = ns.Theme.button(r, "聯絡", 72, ns.BUTTON_H)
     r.contact:SetPoint("RIGHT", r, "RIGHT", -6, 0)
-    r.contact:SetScript("OnClick", function(self) if self.entry then ns.Supply.contact(self.entry) end end)
-    r.setRightWidth(172)
+    r.contact:SetScript("OnClick", function(self) if self.item then UI.contact(self, self.item) end end)
+    r.setRightWidth(UI.STOCK_COL.who + 4)
+    r:SetScript("OnEnter", function(self)
+        W().itemTooltip(self, self.info)
+        if self.stockItem and GameTooltip then
+            for _, line in ipairs(UI.tipLines(self.stockItem)) do GameTooltip:AddLine(line, 1, 1, 1) end
+            GameTooltip:Show()
+        end
+    end)
     if r.EnableMouseWheel then r:EnableMouseWheel(true) end
     r:SetScript("OnMouseWheel", function(_, delta) UI.scrollStock(delta) end)
     r:Hide()
     return r
+end
+
+-- The tooltip lines of a stock row: one per custodian (背包 / 銀行 / when).
+function UI.tipLines(item)
+    local out = {}
+    for _, p in ipairs(item.places) do
+        local h = p.h
+        local when = {}
+        if p.bags > 0 and h.bagsT then when[#when + 1] = "背包 " .. ns.Recipes.agoText(h.bagsT) end
+        if p.bank > 0 and h.bankT then when[#when + 1] = "銀行 " .. ns.Recipes.agoText(h.bankT) end
+        out[#out + 1] = K().placeText(p) .. (K().isOnline(h) and "（在線）" or "（離線）")
+            .. (#when > 0 and ("｜" .. table.concat(when, "、") .. "看到") or "")
+    end
+    return out
 end
 
 -- GF-012-FIX: a custodian no longer in the roster is shown as 已不在公會
@@ -349,8 +461,16 @@ function UI.refresh()
     if not panel then return end
     local Bk = B()
     local role = Bk.myRole()
-    local manage = Bk.canManage()
     c.role:SetText("身分：" .. (Bk.ROLE_NAME[role] or "?"))
+    -- GF-012-C: the setup view is small (8 rows, nothing read from the game):
+    -- drawn every time; the stock list only while it is the view shown.
+    UI.drawSetup()
+    if c.view == "stock" then UI.drawStock() end
+end
+
+function UI.drawSetup()
+    local Bk = B()
+    local manage = Bk.canManage()
     local cur = Bk.current()
     -- status line
     local active = 0
@@ -429,38 +549,90 @@ function UI.refresh()
     c.share.set(st == "on")
     setEnabled(c.share, isCust and st ~= "noscope")
     c.mine:SetText(isCust and K().mineText() or "")
+end
+
+---------------------------------------------------------------------------
+-- GF-012-C: the stock view's filters
+---------------------------------------------------------------------------
+
+-- What BankStock.filter takes from the filter row now.
+function UI.filterOpts()
+    local f = c.filters or {}
+    return { q = c.query or "", class = f.class ~= "all" and f.class or nil,
+        holder = f.holder ~= "all" and f.holder or nil, online = f.online == true }
+end
+
+function UI.setFilter(key, value)
+    if not c.filters then return end
+    c.filters[key] = value
+    c.stockOffset = 0
+    UI.closeContact()
     UI.drawStock()
 end
 
--- GF-012-B: the stock list (only this part is drawn on a search or the wheel).
+-- The two drop-downs follow what is in stock (only classes there are; every
+-- custodian shown). A choice that is gone goes back to 全部.
+local function drawFilters()
+    local classes = { { value = "all", text = UI.CLASS_ALL } }
+    for _, o in ipairs(K().classOptions()) do classes[#classes + 1] = o end
+    local holders = { { value = "all", text = UI.HOLDER_ALL } }
+    for _, h in ipairs((K().holders())) do
+        holders[#holders + 1] = { value = h.a, text = h.name .. (h.own and UI.CONTACT_SELF or "") }
+    end
+    for key, list in pairs({ class = classes, holder = holders }) do
+        local found = false
+        for _, o in ipairs(list) do if o.value == c.filters[key] then found = true end end
+        if not found then c.filters[key] = "all" end
+    end
+    c.classDrop.items = classes; c.classDrop.setValue(c.filters.class)
+    c.holderDrop.items = holders; c.holderDrop.setValue(c.filters.holder)
+    c.online.set(c.filters.online == true)
+end
+
+-- Any filter besides the name box.
+local function narrowed()
+    local f = c.filters
+    return f.class ~= "all" or f.holder ~= "all" or f.online == true
+end
+
+-- GF-012-B / C: the stock list (only this part is drawn on a search, a
+-- filter or the wheel). Rows are reused; nothing is created here.
 function UI.drawStock()
     if not panel then return end
     local cur = B().current()
     local all, why = K().rows()
-    local rows = (c.query or "") ~= "" and K().search(c.query) or all
+    drawFilters()
+    local opts = UI.filterOpts()
+    local rows = K().filter(opts)
+    c.stockList = rows
     c.stockTotal = #rows
     c.stockOffset = math.max(0, math.min(c.stockOffset or 0, #rows - UI.STOCK_ROWS))
     local rest = #rows - c.stockOffset - UI.STOCK_ROWS
     c.stockMore:SetText(rest > 0 and string.format(UI.STOCK_MORE, rest) or "")
+    c.stockCount:SetText(#rows > 0 and string.format(UI.STOCK_COUNT, #rows) or "")
     for i, r in ipairs(c.stockRows) do
         local item = rows[c.stockOffset + i]
         if item then
-            r.set(item.itemID, item.total, { sub = K().whereText(item), stripe = c.stockOffset + i })
+            r.stockItem = item
+            r.set(item.itemID, item.total, { stripe = c.stockOffset + i })
+            r.who:SetText(K().whoText(item))
             r.ago:SetText(item.t and ns.Recipes.agoText(item.t) or "")
+            r.contact.item = item
             local e = K().contactEntry(item)
-            r.contact.entry = e
             setEnabled(r.contact, e ~= nil and ns.Supply.canContact(e))
         else
-            r.contact.entry = nil
+            r.stockItem, r.contact.item = nil, nil
             r:Hide()
         end
     end
     if #rows > 0 then
         c.stock.set(nil)
+        shown(c.stockHead, true)
     else
-        local key = cur.state ~= "ok" and "list" or (#all > 0 and "search") or why
+        local key = cur.state ~= "ok" and "list" or (#all > 0 and (narrowed() and "filter" or "search")) or why
         local t = UI.STOCK_EMPTY[key] or UI.STOCK_EMPTY.none
         c.stock.set(key == "list" and "unknown" or "empty", t[1], t[2])
+        shown(c.stockHead, false)
     end
 end
 
@@ -469,9 +641,60 @@ function UI.scrollStock(delta)
     local after = math.max(0, math.min((c.stockTotal or 0) - UI.STOCK_ROWS, before - (delta or 0)))
     if after == before then return false end
     c.stockOffset = after
+    UI.closeContact()
     UI.drawStock()
     return true
 end
+
+---------------------------------------------------------------------------
+-- GF-012-C: 聯絡. One custodian: the whisper box at once (as before). More:
+-- one shared menu (Widgets.dropdown, its own button never shown) under the
+-- button: name, how many, online; the first (online first, the most) is
+-- marked （建議）; my own line is grey and cannot be picked.
+---------------------------------------------------------------------------
+
+local contactMenu
+function UI.contactMenu()
+    if not contactMenu then
+        contactMenu = W().dropdown(UIParent, UI.CONTACT_W, function(i)
+            local ch = contactMenu.choices and contactMenu.choices[i]
+            if ch then ns.Supply.contact(ch.entry) end
+        end)
+        contactMenu:Hide()
+    end
+    return contactMenu
+end
+
+-- The menu lines for an item (BankStock.contactChoices): { value, text, disabled }.
+function UI.contactItems(item)
+    local choices = K().contactChoices(item)
+    local out, best = {}, nil
+    for i, ch in ipairs(choices) do
+        local usable = not ch.own and ch.entry.member ~= nil
+        if usable and not best then best = i end
+        local t = ch.name .. (ch.own and UI.CONTACT_SELF or "") .. "　" .. ch.qty .. " 個　" .. (ch.online and "在線" or "離線")
+        if best == i then t = t .. UI.CONTACT_BEST end
+        out[i] = { value = i, text = t, disabled = not usable }
+    end
+    return out, choices, best
+end
+
+-- anchor: the 聯絡 button pressed; item: a stock row (BankStock.rows()).
+function UI.contact(anchor, item)
+    if not item then return false end
+    if K().contactCount(item) <= 1 then
+        local e = K().contactEntry(item)
+        return e ~= nil and ns.Supply.contact(e)
+    end
+    local menu = UI.contactMenu()
+    local items, choices, best = UI.contactItems(item)
+    menu.choices = choices
+    menu.setItems(items)
+    menu.setValue(best)
+    menu.openAt(anchor)
+    return "menu"
+end
+function UI.closeContact() if contactMenu then contactMenu.close() end end
 
 -- The page shows: draw it; a custodian who has not said yes yet is asked once.
 function UI.show()

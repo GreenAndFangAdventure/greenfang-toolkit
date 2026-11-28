@@ -67,9 +67,60 @@ return function(T)
         from(ns, PEER_B, vMsg(ns, B, "K", t, list(ns, t, entries)))
         return t
     end
-    -- Another member's KS record (any length) as if relayed.
+    -- GF-012-C: the stock is a head (KS) and parts (KSB, KS6 .. KS14) now.
+    -- encodeOld(ns, d) turns the old one-record shape { bags, bagItems, bank =
+    -- t | "-", bankItems, unseen } into those values (bank items in tab 6, or
+    -- the first tab not unseen); a plain string is the head alone.
+    local function encodeOld(ns, d)
+        local K = ns.BankStock
+        local out = {}
+        local head = { bags = d.bags, tabs = {} }
+        local unseen = {}
+        for _, t in ipairs(d.unseen or {}) do unseen[t] = true; head.tabs[#head.tabs + 1] = { tab = t, seen = false } end
+        if d.bags == "1" then out[#out + 1] = { g = "KSB", v = (K.encodePart(d.bagItems or {})) } end
+        if type(d.bank) == "number" then
+            local tab = 6
+            while unseen[tab] do tab = tab + 1 end
+            head.tabs[#head.tabs + 1] = { tab = tab, seen = true }
+            out[#out + 1] = { g = K.tabGroup(tab), v = (K.encodePart(d.bankItems or {}, d.bank)) }
+        elseif d.bank == "-" and #head.tabs == 0 then
+            head.tabs[1] = { tab = 6, seen = false }
+        end
+        out[#out + 1] = { g = "KS", v = K.encodeHead(head) }
+        return out
+    end
+    -- Another member's stock records as if relayed (a bundle or a head value).
     local function offerKS(ns, a, v, t)
-        return ns.Share.offer(a, "KS", t or T0(), ns.Share.hash(v), v, true, a)
+        if type(v) == "string" then return ns.Share.offer(a, "KS", t or T0(), ns.Share.hash(v), v, true, a) end
+        local r
+        for _, p in ipairs(v) do r = ns.Share.offer(a, p.g, t or T0(), ns.Share.hash(p.v), p.v, true, a) end
+        return r
+    end
+    -- The old shape back from the records (no epoch rule; tests only).
+    local function snapshot(ns, a)
+        local K = ns.BankStock
+        local head = ns.Share.decoded(a, "KS")
+        if not head then return nil end
+        local d = { bags = head.bags, unseen = {}, bagItems = {}, bankItems = {}, more = 0, empty = head.empty }
+        if head.bags == "1" then
+            local p = ns.Share.decoded(a, "KSB")
+            if p then d.bagItems = p.items; d.more = d.more + p.more end
+        end
+        local oldest
+        for _, tab in ipairs(head.order) do
+            if head.tabs[tab] then
+                local p = ns.Share.decoded(a, K.tabGroup(tab))
+                if p then
+                    for id, q in pairs(p.items) do d.bankItems[id] = (d.bankItems[id] or 0) + q end
+                    d.more = d.more + p.more
+                    if p.seen and (not oldest or p.seen < oldest) then oldest = p.seen end
+                end
+            else
+                d.unseen[#d.unseen + 1] = tab
+            end
+        end
+        if #head.order > 0 then d.bank = oldest or "-" end
+        return d
     end
 
     local function login(opts)
@@ -101,7 +152,7 @@ return function(T)
     local function bagsChanged() wow.fire("BAG_UPDATE_DELAYED"); wow.advance(0.01) end
     local function openBank() G.bankOpen = true; wow.fire("BANKFRAME_OPENED"); wow.advance(0.01) end
     local function closeBank() wow.fire("BANKFRAME_CLOSED"); G.bankOpen = false end
-    local function mine(ns) return ns.Share.decoded(A, "KS") end
+    local function mine(ns) return snapshot(ns, A) end
     local function sentText()
         local out = {}
         for _, m in ipairs(wow.state.sent) do out[#out + 1] = m.msg end
@@ -248,12 +299,15 @@ return function(T)
         for _, v in pairs(G.reads) do total = total + v end
         local per = total / n
         eq(per, 65 + 9 * 98, "every slot of the scope once per bank scan (bags 65 + bank 882)")
-        local rec = ns.Share.get(A, "KS")
-        ok(#rec.v <= ns.BankStock.MAX_VALUE, "value within the limit: " .. #rec.v)
+        -- GF-012-C: no 150 limit any more; every kind is listed (one part per source).
         local d = mine(ns)
-        eq(d.more, 65 + 882 - ns.BankStock.MAX_ITEMS, "the rest counted as 還有 N 項")
-        realPrint(string.format("     [GF-012-B measure] full scope (bags 0-5 = 65 slots, bank tabs 6-14 = 882 slots): %d item reads per bank-open scan, %.2f ms; value %d bytes for %d of %d kinds (more = %d)",
-            per, ms, #rec.v, ns.BankStock.MAX_ITEMS, 65 + 882, d.more))
+        eq(d.more, 0, "nothing left out")
+        local kinds = 0
+        for _ in pairs(d.bagItems) do kinds = kinds + 1 end
+        for _ in pairs(d.bankItems) do kinds = kinds + 1 end
+        eq(kinds, 65 + 882, "every kind listed")
+        realPrint(string.format("     [GF-012-B measure] full scope (bags 0-5 = 65 slots, bank tabs 6-14 = 882 slots): %d item reads per bank-open scan, %.2f ms; all %d kinds listed",
+            per, ms, kinds))
         -- A bag change alone reads only the bags (bank closed).
         closeBank()
         G.reads = {}
@@ -263,42 +317,7 @@ return function(T)
         ok(bagReads == 65, "bags only: " .. bagReads)
     end))
 
-    test("GF-012-B over the limit: the first 150 by item ID, 「還有 N 項沒列出」, value fits Share", done(function()
-        local ns = custodian({ bags = { 0, 1, 2, 3, 4, 5 } })
-        local id = 250000
-        for bag = 0, 5 do
-            G.bags[bag] = {}
-            for slot = 1, G.slots[bag] do id = id + 1; G.bags[bag][slot] = { id, 99999 } end
-        end
-        G.slots[0] = 20
-        bagsChanged()
-        local d = mine(ns)
-        local n = 0
-        for _ in pairs(d.bagItems) do n = n + 1 end
-        eq(n, 65, "65 kinds fit")
-        -- 200 kinds: 150 listed.
-        local v, more = ns.BankStock.encode({ bags = "1", bagItems = (function()
-            local m = {}
-            for i = 1, 200 do m[2000000000 + i] = 99999 end
-            return m
-        end)() })
-        eq(more, 50, "50 left out")
-        ok(#v <= ns.BankStock.MAX_VALUE, "worst case (10-digit IDs, 5-digit counts) fits: " .. #v)
-        local dd = ns.BankStock.decode("KS", v)
-        ok(dd and dd.more == 50, "decodes, more = 50")
-        realPrint(string.format("     [GF-012-B measure] worst value: 150 entries with 10-digit item IDs and 99999 each = %d bytes (limit %d, Share parts of ~210 bytes: %d messages)",
-            #v, ns.BankStock.MAX_VALUE, math.ceil(#v / 210)))
-        -- My page line says it.
-        local ns2 = custodian({ bags = { 0, 1, 2, 3, 4, 5 } })
-        for bag = 0, 5 do G.bags[bag] = {} end
-        id = 300000
-        for bag = 0, 5 do for slot = 1, G.slots[bag] do id = id + 1; G.bags[bag][slot] = { id, 1 } end end
-        G.slots[0] = 20
-        for slot = 21, 120 do id = id + 1; G.bags[0][slot] = { id, 1 } end
-        G.slots[0] = 120
-        bagsChanged()
-        ok(ns2.BankStock.mineText():find("還有 15 項沒列出", 1, true), "mine: " .. ns2.BankStock.mineText())
-    end))
+    -- GF-012-C: the 150-item limit is gone (tests/addon/gf012c_tests.lua has the part limits).
 
     ---------------------------------------------------------------------------
     -- 2. The guild's side
@@ -310,7 +329,7 @@ return function(T)
         G.bags[6] = { { 1001, 2 } }
         openBank(); closeBank()
         local t = T0()
-        local v = ns.BankStock.encode({ bags = "1", bagItems = { [1001] = 5, [1005] = 1 } })
+        local v = encodeOld(ns, { bags = "1", bagItems = { [1001] = 5, [1005] = 1 } })
         eq(offerKS(ns, C, v, t), "new", "C's snapshot")
         local r = rowFor(ns, 1001)
         eq(r.total, 10, "3 + 2 (mine, two places) + 5 (C)")
@@ -318,7 +337,7 @@ return function(T)
         eq(ns.BankStock.whereText(r), "測試甲 背包 3、銀行 2｜測試丙 背包 5", "where (most first, then by id)")
         -- The same record relayed again, and a newer one with the same items: no double count.
         offerKS(ns, C, v, t)
-        from(ns, PEER_B, vMsg(ns, C, "KS", t + 5, v))
+        for _, p in ipairs(v) do from(ns, PEER_B, vMsg(ns, C, p.g, t + 5, p.v)) end
         eq(rowFor(ns, 1001).total, 10, "still 10")
         eq(rowFor(ns, 1005).total, 1, "C's other item")
     end))
@@ -326,14 +345,14 @@ return function(T)
     test("GF-012-B revoked, kinds taken away, left the guild: their stock is gone", done(function()
         local ns = custodian({ bags = { 0 } })
         local t = T0()
-        offerKS(ns, C, ns.BankStock.encode({ bags = "1", bagItems = { [1005] = 4 }, bank = t, bankItems = { [1006] = 9 } }), t)
+        offerKS(ns, C, encodeOld(ns, { bags = "1", bagItems = { [1005] = 4 }, bank = t, bankItems = { [1006] = 9 } }), t)
         ok(rowFor(ns, 1005) and rowFor(ns, 1006), "shown")
         -- The master takes the bank away from C: the old snapshot (older than the change) goes.
         wow.advance(5)
         setList(ns, { { A, "bk" }, { C, "b" } })
         eq(rowFor(ns, 1006), nil, "bank gone"); eq(rowFor(ns, 1005), nil, "the snapshot is older than the change")
         wow.advance(5)
-        offerKS(ns, C, (ns.BankStock.encode({ bags = "1", bagItems = { [1005] = 4 }, bank = t, bankItems = { [1006] = 9 } })))
+        offerKS(ns, C, (encodeOld(ns, { bags = "1", bagItems = { [1005] = 4 }, bank = t, bankItems = { [1006] = 9 } })))
         ok(rowFor(ns, 1005), "a newer snapshot: bags back"); eq(rowFor(ns, 1006), nil, "bank still not given")
         -- Revoked.
         wow.advance(5)
@@ -344,7 +363,7 @@ return function(T)
         setList(ns, { { A, "bk" }, { C, "b" } })
         eq(rowFor(ns, 1005), nil, "re-appointed: old snapshot not shown")
         wow.advance(5)
-        offerKS(ns, C, (ns.BankStock.encode({ bags = "1", bagItems = { [1005] = 4 } })))
+        offerKS(ns, C, (encodeOld(ns, { bags = "1", bagItems = { [1005] = 4 } })))
         ok(rowFor(ns, 1005), "fresh one shown")
         -- Left the guild roster.
         table.remove(wow.state.roster, 3)
@@ -373,7 +392,7 @@ return function(T)
     test("GF-012-B data from a non-custodian is not shown; malformed or too big is refused", done(function()
         local ns = custodian({ bags = { 0 } })
         local t = T0()
-        eq(offerKS(ns, D, ns.BankStock.encode({ bags = "1", bagItems = { [7001] = 1 } }), t), "new", "stored (it may be relayed)")
+        eq(offerKS(ns, D, encodeOld(ns, { bags = "1", bagItems = { [7001] = 1 } }), t), "new", "stored (it may be relayed)")
         eq(rowFor(ns, 7001), nil, "D is not a custodian: not shown")
         ns.BankStock.diagText()
         ok(ns.BankStock.stats.ignored >= 1, "counted as not shown")
@@ -413,6 +432,7 @@ return function(T)
         setList(ns, { { A, "bk" } })
         ns.Framework.open("bank")
         local c = ns.BankUI.controls
+        ns.BankUI.setView("setup") -- GF-012-C: the scope has its own view
         local f = ns.Widgets.confirmFrame()
         ok(not (f and f:IsShown()), "no scope: not asked on the page")
         wow.click(c.scope.bags[1]) -- 行囊
@@ -489,17 +509,17 @@ return function(T)
         offerKS(ns, C, ns.BankStock.EMPTY)
         eq(c.stock.text:GetText(), UI.STOCK_EMPTY.noscope[1], "C has no scope")
         wow.advance(1)
-        offerKS(ns, C, "1;;-;6;0;;")
+        offerKS(ns, C, "2;;6-")
         eq(c.stock.text:GetText(), UI.STOCK_EMPTY.unseen[1], "C has not opened the bank")
         wow.advance(1)
         local items = {}
-        for i = 1, 10 do items[5000 + i] = 100 - i end
-        offerKS(ns, C, (ns.BankStock.encode({ bags = "1", bagItems = items })))
+        for i = 1, UI.STOCK_ROWS + 4 do items[5000 + i] = 100 - i end -- GF-012-C: the page holds more rows
+        offerKS(ns, C, (encodeOld(ns, { bags = "1", bagItems = items })))
         eq(c.stock.kind, nil, "rows shown")
         eq(#c.stockRows, UI.STOCK_ROWS, "6 pooled rows")
         eq(c.stockRows[1].itemID, 5001, "most first")
         eq(c.stockRows[1].count:GetText(), "99", "total")
-        eq(c.stockRows[1].sub:GetText(), "測試丙 背包 99", "who and where")
+        eq(c.stockRows[1].who:GetText(), "測試丙", "who (GF-012-C: the places are in the tooltip)")
         eq(c.stockRows[1].ago:GetText(), "剛剛", "how long ago")
         eq(c.stockMore:GetText(), "還有 4 項，用滑鼠滾輪往下看", "the more line")
         c.stockRows[1]:GetScript("OnMouseWheel")(c.stockRows[1], -1)
@@ -546,7 +566,7 @@ return function(T)
         for i = 5, 14 do
             local items = {}
             for k = 1, 100 do items[10000 + (i * 37 + k) % 300] = k end
-            offerKS(ns, string.format("0000-%08X", 0x2000 + i), (ns.BankStock.encode({ bags = "1", bagItems = items, bank = T0(), bankItems = { [20000 + i] = 1 } })))
+            offerKS(ns, string.format("0000-%08X", 0x2000 + i), (encodeOld(ns, { bags = "1", bagItems = items, bank = T0(), bankItems = { [20000 + i] = 1 } })))
         end
         local t0 = os.clock()
         local n = 10

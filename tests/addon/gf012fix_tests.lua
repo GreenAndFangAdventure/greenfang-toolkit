@@ -89,6 +89,7 @@ return function(T)
         local ns = login()
         local UI = ns.BankUI
         ns.Framework.open(UI.ID)
+        UI.setView("setup") -- GF-012-C: the list has its own view
         -- The box only searches the roster: a name that is not a member opens the picker, appoints nobody.
         UI.controls.name:SetText("外人")
         wow.click(UI.controls.appoint)
@@ -153,6 +154,7 @@ return function(T)
         ns.Bank.invalidate()
         local UI = ns.BankUI
         ns.Framework.open(UI.ID)
+        UI.setView("setup") -- GF-012-C
         UI.controls.name:SetText("測試丙-測試伺服器")
         wow.click(UI.controls.appoint)
         ok((ns.Bank.isCustodian(C)), "appointed from the page")

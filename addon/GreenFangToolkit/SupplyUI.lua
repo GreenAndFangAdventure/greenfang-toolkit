@@ -153,6 +153,17 @@ UI.GROUP_TABS = { need = true, offer = true }
 -- every tab, right over the column header; 收集組 follows it.
 UI.POST_X = 22
 UI.GROUP_X, UI.GROUP_W = 142, 170
+-- GF-012-C (owner 2026-11-28): 臨時黑箱's stock on 調貨看板 too, marked 黑箱
+-- (the game's box icon and the word, in its own colour); a 黑箱 filter in
+-- 收集組's place (全部／只看黑箱／不看黑箱). Only BankStock.rows() is used
+-- (valid custodians in the roster, the epoch rule): nothing is read here.
+UI.STOCK_TEXT = "黑箱"
+UI.STOCK_NAME = "臨時黑箱"
+UI.STOCK_ICON = "Interface\\Icons\\INV_Box_01"
+UI.STOCK_COLOR = { 0.78, 0.55, 1 }
+UI.STOCK_FILTER_W = 150
+UI.STOCK_FILTERS = { { value = nil, text = "全部" }, { value = "only", text = "只看黑箱" }, { value = "none", text = "不看黑箱" } }
+function UI.stockTag(text) return "|T" .. UI.STOCK_ICON .. ":16:16|t " .. (text or UI.STOCK_TEXT) end
 UI.EXPAND_CLOSED = "Interface\\Buttons\\UI-PlusButton-Up"
 UI.EXPAND_OPEN = "Interface\\Buttons\\UI-MinusButton-Up"
 
@@ -173,7 +184,7 @@ local panel, tabs, statePanel, autoBox, manualBox, postButton, header, detailHea
 local groupLabel, groupButton
 local rows, detailRows = {}, {}
 local detail = {}
-local state = { tab = "need", offset = 0, selected = nil, items = {}, group = nil }
+local state = { tab = "need", offset = 0, selected = nil, items = {}, group = nil, stock = nil }
 UI.state = state
 
 -- f.tip under the mouse (check boxes, buttons, edit boxes of this page).
@@ -233,7 +244,10 @@ function UI.matchShort(kind, it)
     return n > 0 and (n .. " 位") or "暫無"
 end
 function UI.qtyShort(kind, it)
-    if kind == "guild" then return #it.needs .. "／" .. #it.offers end
+    if kind == "guild" then
+        if it.stock and #it.needs == 0 and #it.offers == 0 then return UI.STOCK_TEXT end -- GF-012-C
+        return #it.needs .. "／" .. #it.offers
+    end
     return UI.qtyText(kind, it)
 end
 -- 時效 of a row: the best match's, else my own entry's.
@@ -259,12 +273,19 @@ function UI.listingTipLines(e, withName)
     return out
 end
 function UI.condText(e)
+    if e.stock then return UI.stockTag() end -- GF-012-C
     local m = UI.manualOf(e)
     if not m then return "自動" end
     return L.termsText(m.terms, m.price, true)
 end
 
 function UI.personText(e)
+    if e.stock then
+        -- GF-012-C: one 黑箱 line per item: how many in all, how many custodians online.
+        local on = 0
+        for _, p in ipairs(e.stock.places) do if ns.BankStock.isOnline(p.h) then on = on + 1 end end
+        return UI.STOCK_NAME, "共 " .. e.qty, on > 0 and ("在線 " .. on) or "離線", Supply.FRESH_TEXT[e.fresh or "unknown"] or "未知"
+    end
     local name = e.member and ns.shortName(e.member.name) or "未知"
     -- GF-UI-H: automatic candidates read 可能提供 (manual ones 徵求／供應, below).
     local what = e.direction == "need" and ("缺 " .. e.qty) or ("可能提供 " .. e.qty)
@@ -412,8 +433,10 @@ function UI.listFor(kind)
         return out
     end
     local rule = UI.GROUP_TABS[kind] and UI.groupRule() or nil
-    for _, it in ipairs(Supply.view(kind)) do
-        if not rule or (rule.items and rule.items[it.itemID]) then
+    local entries
+    if kind == "guild" then entries = UI.guildEntries() end
+    for _, it in ipairs(Supply.view(kind, entries)) do
+        if (not rule or (rule.items and rule.items[it.itemID])) and (kind ~= "guild" or state.stock ~= "only" or it.stock) then
             local tip = {}
             if it.mine then tip[#tip + 1] = "來源：" .. sourceText(it.mine) end
             -- GF-009-15: where my own items are (自動集料 on; never sent).
@@ -434,12 +457,56 @@ function UI.listFor(kind)
             end
             local teach = UI.teachText(it.itemID) -- GF-009-10
             if teach then table.insert(tip, 1, teach) end
+            -- GF-012-C: the 黑箱 mark on the row's second line, and who holds it in the tooltip.
+            local stockLine
+            if it.stock then
+                stockLine = UI.stockTag(UI.STOCK_TEXT .. " " .. it.stock.qty .. " 個（" .. #it.stock.stock.places .. " 位保管人）")
+                tip[#tip + 1] = UI.STOCK_NAME .. "："
+                for _, line in ipairs(ns.BankUI.tipLines(it.stock.stock)) do tip[#tip + 1] = "　" .. line end
+            end
             out[#out + 1] = { itemID = it.itemID, item = it, qty = UI.qtyText(kind, it), match = UI.matchText(kind, it),
                 qtyShort = UI.qtyShort(kind, it), matchShort = UI.matchShort(kind, it), fresh = UI.freshShort(it),
-                tip = tip, hasNote = hasNote, where = where, teach = teach }
+                tip = tip, hasNote = hasNote, where = where, teach = teach, stockLine = stockLine }
         end
     end
     return out
+end
+
+-- GF-012-C: 調貨看板's entries: everybody's needs and offers plus one 黑箱
+-- entry per item in 臨時黑箱 (BankStock.rows(): only valid custodians in the
+-- roster, the epoch rule). 不看黑箱 leaves them out. My own places are not
+-- counted (my own supplies are not on 調貨看板 either).
+function UI.stockEntries()
+    local K = ns.BankStock
+    local out = {}
+    if not K then return out end
+    for _, r in ipairs((K.rows())) do
+        local places, qty = {}, 0
+        for _, p in ipairs(r.places) do
+            if not p.h.own then places[#places + 1] = p; qty = qty + p.bags + p.bank end
+        end
+        if #places > 0 then
+            local row = #places == #r.places and r or { itemID = r.itemID, total = qty, places = places, t = r.t, base = r }
+            local entry = K.contactEntry(row)
+            local t = r.t or 0
+            out[#out + 1] = { key = "stock|" .. r.itemID, a = "~stock", member = entry and entry.member or nil, own = false,
+                itemID = r.itemID, direction = "stock", qty = qty, t = t,
+                fresh = t > 0 and Supply.freshness(t, math.huge) or "unknown", stock = row }
+        end
+    end
+    return out
+end
+function UI.guildEntries()
+    local list = Supply.entries()
+    if state.stock ~= "none" then
+        for _, e in ipairs(UI.stockEntries()) do list[#list + 1] = e end
+    end
+    return list
+end
+function UI.setStockFilter(v)
+    state.stock, state.offset, state.selected = v, 0, nil
+    if UI.stockButton then UI.stockButton.value = v; UI.stockButton.refreshText() end
+    UI.refresh()
 end
 
 function UI.scroll(delta)
@@ -465,10 +532,13 @@ function UI.drawList()
             r.fresh:SetText(data.fresh or "")
             -- GF-009-15: where my own items are, on a second line.
             -- GF-009-10: a recipe item says what it teaches there (when nothing else does).
-            local second = (data.where or "") ~= "" and data.where or data.teach
+            local second = (data.where or "") ~= "" and data.where or data.stockLine or data.teach
             local two = (second or "") ~= ""
             if two ~= (r.gfTwoLine == true) then r.gfTwoLine = two; UI.placeRow(r, UI.listWidth()) end
             r.where:SetText(two and second or "")
+            -- GF-012-C: the 黑箱 line in its own colour (else the grey of the font).
+            local wc = (second ~= nil and second == data.stockLine) and UI.STOCK_COLOR or ns.COLOR.disabled
+            r.where:SetTextColor(wc[1], wc[2], wc[3])
             if two then r.where:Show() else r.where:Hide() end
             r.noteIcon:ClearAllPoints()
             r.noteIcon:SetPoint("BOTTOMRIGHT", r.icon, "BOTTOMRIGHT", 4, -4)
@@ -542,6 +612,10 @@ function UI.setGroup(id)
 end
 local function drawGroup()
     if not groupButton then return end
+    if UI.stockButton then -- GF-012-C: the 黑箱 filter, on 調貨看板 only
+        local on = state.tab == "guild"
+        if on then UI.stockLabel:Show(); UI.stockButton:Show() else UI.stockLabel:Hide(); UI.stockButton:Hide() end
+    end
     if state.group and not UI.groupRule() then state.group = nil; groupButton.value = nil end
     groupButton.refreshText()
     local on = UI.GROUP_TABS[state.tab] == true
@@ -657,7 +731,11 @@ local function newDetailRow(i)
     r:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
     r.contact = Th.button(r, "聯絡", 72, ns.BUTTON_H)
     r.contact:SetPoint("RIGHT", r, "TOPRIGHT", 0, -UI.MAIN_H / 2)
-    r.contact:SetScript("OnClick", function(self) if self.entry then Supply.contact(self.entry) end end)
+    r.contact:SetScript("OnClick", function(self)
+        if not self.entry then return end
+        -- GF-012-C: a 黑箱 line picks the custodian like 臨時黑箱's 聯絡 does.
+        if self.entry.stock then ns.BankUI.contact(self, self.entry.stock) else Supply.contact(self.entry) end
+    end)
     -- GF-UI-F: the page's one sentence lives here now (no footer line).
     r.contact.tip = UI.CONTACT_TIP
     withTip(r.contact)
@@ -773,6 +851,10 @@ function UI.drawDetail()
             r.on:SetText(on)
             r.fresh:SetText(fresh)
             r.src:SetText(UI.condText(e))
+            local sc = e.stock and UI.STOCK_COLOR or ns.COLOR.disabled -- GF-012-C
+            r.src:SetTextColor(sc[1], sc[2], sc[3])
+            local nc = e.stock and UI.STOCK_COLOR or ns.COLOR.white
+            r.name:SetTextColor(nc[1], nc[2], nc[3])
             local h = UI.setRowNote(r, UI.noteText(e), UI.NOTE_X, UI.NOTE_W, -UI.MAIN_H, true)
             if y - h < bottom and used > 0 then
                 r:Hide() -- does not fit: the wheel brings it up
@@ -782,6 +864,7 @@ function UI.drawDetail()
             -- GF-UI-M: the tooltip names the person in full (the cell may end in 「…」).
             r.tipLines = UI.listingTipLines(e, false)
             table.insert(r.tipLines, 1, name)
+            if e.stock then for _, line in ipairs(ns.BankUI.tipLines(e.stock)) do r.tipLines[#r.tipLines + 1] = line end end
             r.contact.entry = e
             r.contact:Show()
             W.setEnabled(r.contact, Supply.canContact(e))
@@ -1160,6 +1243,12 @@ local function build(p)
     groupButton = ns.choiceButton(p, UI.GROUP_W, UI.GROUP_X + 56, UI.TOOL_Y, UI.groupOptions,
         function(value) UI.setGroup(value) end, "全部")
     UI.groupLabel, UI.groupButton, UI.autoBox, UI.manualBox = groupLabel, groupButton, autoBox, manualBox
+    -- GF-012-C: 黑箱 (全部／只看黑箱／不看黑箱), in 收集組's place on 調貨看板.
+    UI.stockLabel = label(p, UI.STOCK_TEXT, ns.FIELD_FONT)
+    UI.stockLabel:SetPoint("TOPLEFT", p, "TOPLEFT", UI.GROUP_X, UI.TOOL_Y - 6)
+    UI.stockButton = ns.choiceButton(p, UI.STOCK_FILTER_W, UI.GROUP_X + 56, UI.TOOL_Y, function() return UI.STOCK_FILTERS end,
+        function(value) UI.setStockFilter(value) end, "全部")
+    UI.stockLabel:Hide(); UI.stockButton:Hide()
     -- The list's column header: a faint bar, gold names; the quantity right-aligned.
     header = CreateFrame("Frame", nil, p)
     header:SetPoint("TOPLEFT", p, "TOPLEFT", UI.LIST_X, UI.HEAD_Y)
@@ -1191,6 +1280,8 @@ local function build(p)
     -- GF-009-13: the form and the finder never outlive the page (the window's
     -- X, another module, /gftk); an unsaved form is kept as a draft.
     if p.HookScript then p:HookScript("OnHide", function() UI.closeWithPage() end) end
+    -- GF-012-C: 聯絡's custodian menu goes with the page.
+    if p.HookScript then p:HookScript("OnHide", function() if ns.BankUI then ns.BankUI.closeContact() end end) end
     -- GF-UI-I: Th.vline's second y counts from the page's bottom; the old call
     -- gave the list's bottom from the top, so the line ran out of the window.
     -- Anchor the top and give the height instead.
