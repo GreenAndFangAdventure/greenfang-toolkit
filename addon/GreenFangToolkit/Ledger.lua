@@ -359,6 +359,7 @@ function L:drain()
             else
                 r = ns.call(C_ChatInfo.SendAddonMessage, cfg.prefix, item.msg, "GUILD")
             end
+            ns.Comm.noteSend(cfg.prefix, r) -- GF-001-D15
             -- Review 1-4: same throttle codes as Share (false, 3, 8, the Enum values).
             local throttled = Share.isThrottled and Share.isThrottled(r) or (r == 3 or r == 8)
             if throttled then
@@ -618,9 +619,7 @@ function L:dropTarget(name)
 end
 
 function L:register()
-    if C_ChatInfo and type(C_ChatInfo.RegisterAddonMessagePrefix) == "function" then
-        ns.call(C_ChatInfo.RegisterAddonMessagePrefix, self.cfg.prefix)
-    end
+    ns.Comm.registerPrefix(self.cfg.prefix) -- GF-001-D15: the result shows in 同步與診斷
 end
 
 -- Route CHAT_MSG_ADDON: true when one of the ledgers took the prefix.
