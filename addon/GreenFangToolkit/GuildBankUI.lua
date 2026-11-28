@@ -17,7 +17,7 @@ local str = ns.str
 local UI = {}
 ns.GuildBankUI = UI
 
-UI.KEY, UI.TEXT, UI.ORDER = "guildbank", "公會銀行", 30
+UI.KEY, UI.TEXT, UI.ORDER = "guildbank", "公會銀行", 40
 UI.W, UI.H = 1060, 560        -- used when the parent has no size yet
 UI.ROW_H = ns.PAGE_ROW or 36
 UI.MORE_H = 26

@@ -457,28 +457,28 @@ return function(T)
         local ns = login()
         local UI = ns.BankUI
         local built, drawn, parent = 0, 0, nil
-        ok(UI.addView({ key = "guildbank", text = "公會銀行", order = 40,
+        ok(UI.addView({ key = "testview", text = "測試頁", order = 45,
             build = function(p) built = built + 1; parent = p; p.mark = p:CreateFontString(nil, "ARTWORK") end,
             draw = function() drawn = drawn + 1 end }), "added")
-        eq(UI.addView({ key = "guildbank", text = "again" }), false, "a key only once")
+        eq(UI.addView({ key = "testview", text = "again" }), false, "a key only once")
         ns.Framework.open("bank")
         local c = UI.controls
-        eq(#c.views.buttons, 4, "four buttons")
-        eq(c.views.buttons[4]:GetText(), "公會銀行", "by order")
+        eq(#c.views.buttons, 5, "five buttons (GF-017 adds 公會銀行)")
+        eq(c.views.buttons[4]:GetText(), "公會銀行", "GF-017's page by order"); eq(c.views.buttons[5]:GetText(), "測試頁", "by order")
         eq(built, 0, "not built before it is shown")
-        wow.click(c.views.buttons[4])
-        eq(c.view, "guildbank", "shown")
+        wow.click(c.views.buttons[5])
+        eq(c.view, "testview", "shown")
         eq(built, 1, "built once"); ok(drawn >= 1, "drawn")
         ok(parent:IsShown() and not c.stockView:IsShown(), "only that page")
         eq(UI.VIEW_W, ns.Framework.PANEL_WIDTH, "page width"); eq(UI.VIEW_H, ns.Framework.PANEL_HEIGHT, "page height")
         local d1 = drawn
-        UI.setView("stock"); UI.setView("guildbank")
+        UI.setView("stock"); UI.setView("testview")
         eq(built, 1, "still built once"); ok(drawn > d1, "drawn again")
-        ok(UI.refreshView("guildbank"), "refreshView draws when shown")
+        ok(UI.refreshView("testview"), "refreshView draws when shown")
         eq(UI.refreshView("stock"), false, "not when another is shown")
         -- Added after the page was built: a new button too.
         ok(UI.addView({ key = "late", text = "後加", order = 50 }), "late")
-        eq(#c.views.buttons, 5, "five buttons")
+        eq(#c.views.buttons, 6, "six buttons")
         UI.setView("late")
         eq(c.view, "late", "shows")
     end))

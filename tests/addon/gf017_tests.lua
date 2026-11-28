@@ -436,7 +436,7 @@ return function(T)
         local ns = login({ lines = LINES })
         local views, parent = fakeView(ns)
         eq(#views, 1, "registered once")
-        eq(views[1].key, "guildbank"); eq(views[1].text, "公會銀行"); eq(views[1].order, 30)
+        eq(views[1].key, "guildbank"); eq(views[1].text, "公會銀行"); eq(views[1].order, 40)
         eq(ns.GuildBankUI.register(), false, "not twice")
         views[1].build(parent)
         local frames = #wow.state.frames
@@ -561,7 +561,8 @@ return function(T)
             ok(not src:find("OnUpdate\"", 1, true) and not src:find("\"OnUpdate", 1, true), file .. " has no OnUpdate")
         end
         local list = table.concat(wow.TOC_FILES, ",")
-        ok(list:find("BankStock.lua,GuildBank.lua,GuildBankUI.lua", 1, true), "after BankStock.lua in the TOC")
+        local at = list:find("BankStock.lua,", 1, true)
+        ok(at and (list:find("GuildBank.lua,GuildBankUI.lua", at, true)), "after BankStock.lua in the TOC")
     end)
 
     test("GF-017 diag line and probe fields", done(function()
