@@ -59,6 +59,8 @@ Probe.APIS = {
     "GetCurrentGuildBankTab", "QueryGuildBankTab", "GetGuildBankMoney", "GetGuildBankWithdrawMoney",
     "CanWithdrawGuildBankMoney", "GetGuildBankTabPermissions", "GetNumGuildBankTransactions", "QueryGuildBankLog",
     "GuildBankFrame_LoadUI", "CanGuildBankRepair",
+    -- GF-017: the guild bank gold log (Forever Blizzard_GuildBankUI money log)
+    "GetNumGuildBankMoneyTransactions", "GetGuildBankMoneyTransaction", "MAX_GUILDBANK_TABS",
     -- bags and items
     "C_Container.GetContainerNumSlots", "C_Container.GetContainerItemInfo", "C_Container.GetContainerItemID",
     "C_Container.GetContainerItemLink", "C_Container.GetContainerNumFreeSlots", "C_Container.GetBagName",
@@ -101,6 +103,7 @@ Probe.EVENTS = {
     "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", "PLAYER_INTERACTION_MANAGER_FRAME_HIDE",
     "GUILDBANKFRAME_OPENED", "GUILDBANKFRAME_CLOSED", "GUILDBANKBAGSLOTS_CHANGED", "GUILDBANK_UPDATE_TABS",
     "GUILDBANKLOG_UPDATE", "GUILDBANK_UPDATE_MONEY",
+    "GUILDBANK_UPDATE_WITHDRAWMONEY", -- GF-017
     "BAG_UPDATE", "BAG_UPDATE_DELAYED", "ITEM_DATA_LOAD_RESULT", "GET_ITEM_INFO_RECEIVED",
     "QUEST_LOG_UPDATE", "QUEST_TURNED_IN", "QUEST_DATA_LOAD_RESULT", "QUEST_ACCEPTED",
     "MAIL_SHOW", "MAIL_CLOSED", "MAIL_INBOX_UPDATE", "MAIL_SEND_SUCCESS", "MAIL_FAILED", "MAIL_SUCCESS",
@@ -477,6 +480,21 @@ local function bank(deep)
         c.guildBankWithdrawMoney = Probe.try("GetGuildBankWithdrawMoney")
         c.canWithdrawGuildBankMoney = Probe.try("CanWithdrawGuildBankMoney")
         c.numGuildBankTransactions = Probe.try("GetNumGuildBankTransactions", tab or 1)
+        -- GF-017: the gold log, read only (the money log tab asks the server for it;
+        -- the probe never asks: what is there after that tab was opened, or after the
+        -- toolkit's own request in GuildBank.lua). Types and counts only, no names.
+        local _, nMoney = Probe.try("GetNumGuildBankMoneyTransactions")
+        c.numGuildBankMoneyTransactions = Probe.typeOf(nMoney) .. ":" .. tostring(plain(nMoney))
+        if type(plain(nMoney)) == "number" and plain(nMoney) > 0 then
+            local summary, kind = Probe.try("GetGuildBankMoneyTransaction", 1)
+            c.guildBankMoneyTransaction1 = summary
+            kind = plain(kind)
+            c.guildBankMoneyKind1 = (ns.GuildBank and type(kind) == "string" and ns.GuildBank.LETTER[kind]) and kind
+                or Probe.typeOf(kind)
+        end
+        c.maxGuildBankTabs = tostring(plain(rawget(_G, "MAX_GUILDBANK_TABS")))
+        c.toolkitGuildBank = ns.GuildBank and string.format("open=%s money=%s log=%s", tostring(ns.GuildBank.open),
+            tostring(ns.GuildBank.lastMoney), tostring(ns.GuildBank.lastLog)) or "nil"
     end
     return c
 end

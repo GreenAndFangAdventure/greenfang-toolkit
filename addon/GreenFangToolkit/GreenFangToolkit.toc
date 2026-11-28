@@ -61,3 +61,5 @@ Talents.lua
 SleepingBagMap.lua
 RecipeLink.lua
 BankStock.lua
+GuildBank.lua
+GuildBankUI.lua
