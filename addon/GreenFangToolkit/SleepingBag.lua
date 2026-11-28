@@ -19,6 +19,12 @@
 -- (settings.modules.sleepingbag.characters[GUID].step, layout = 2; a step
 -- saved by the nine-step layout is moved over once). There is no automatic
 -- step from quest progress (no quest IDs yet), so only the buttons move it.
+-- GF-008-F (owner 2026-11-28): the text is bigger, with A－ / A＋ (saved in
+-- settings.modules.sleepingbag.textSize, not per character); the colour legend
+-- is written in its colours; places with coordinates are links that open the
+-- map on that point; the quest log tells which step the character is really
+-- on (route.questChain, step.doneWhen) as one line with 跳到第 N 步 for the
+-- player to press; the page never moves the step by itself.
 
 local _, ns = ...
 local str = ns.str
@@ -30,7 +36,7 @@ SB.MODES = { rpg = "RPG 模式", normal = "一般模式" }
 SB.RPG_ON = false -- GF-008-B: true shows the RPG / normal switch again
 
 local panel, modeButton, progressLine, bodyText, revealButton, nextButton, backButton, resetButton, mapButton, stepLabel
-local scroll, scrollChild
+local scroll, scrollChild, scrollBar, sizer, hintLine, jumpButton
 
 ---------------------------------------------------------------------------
 -- State (pure; covered by offline tests)
@@ -188,6 +194,196 @@ function SB.stepLines(step, mode, revealed)
     return lines
 end
 
+---------------------------------------------------------------------------
+-- GF-008-F: the text size (A－ / A＋), one for every character
+---------------------------------------------------------------------------
+
+function SB.textSize()
+    local m = ns.Framework.moduleSettings(SB.ID)
+    for _, v in ipairs(ns.Theme.READ_SIZES) do if v == m.textSize then return v end end
+    return ns.Theme.READ_DEFAULT
+end
+function SB.setTextSize(size)
+    ns.Framework.moduleSettings(SB.ID).textSize = size
+    SB.refresh()
+end
+
+---------------------------------------------------------------------------
+-- GF-008-F: the step the quest log says the character is on
+--   SB.detect() -> { ok = false, why = "..." }        no way to tell here
+--               -> { ok = true, any = false }          no record of the chain
+--               -> { ok = true, any = true, step = N } N = #steps + 1: finished
+-- Only C_QuestLog (the Forever client has no global quest API). Called when
+-- the page is drawn; the quest events at the end redraw an open page.
+-- Nothing per frame, nothing saved.
+---------------------------------------------------------------------------
+
+local turnedIn = {} -- QUEST_TURNED_IN this session (the flag can lag the event)
+function SB.resetSession() turnedIn = {} end
+
+local function questLog()
+    local q = rawget(_G, "C_QuestLog")
+    if type(q) ~= "table" or type(q.IsQuestFlaggedCompleted) ~= "function" then return nil end
+    return q
+end
+local function completed(q, id)
+    if turnedIn[id] then return true end
+    local ok, v = pcall(q.IsQuestFlaggedCompleted, id)
+    return ok and v == true
+end
+local function onQuest(q, id)
+    local ok, v
+    if type(q.IsOnQuest) == "function" then
+        ok, v = pcall(q.IsOnQuest, id)
+        return ok and v == true
+    end
+    if type(q.GetLogIndexForQuestID) == "function" then
+        ok, v = pcall(q.GetLogIndexForQuestID, id)
+        return ok and type(v) == "number" and v > 0
+    end
+    return false
+end
+local function anyOf(list, test, q)
+    for _, id in ipairs(type(list) == "table" and list or {}) do if test(q, id) then return true end end
+    return false
+end
+
+function SB.detect()
+    local route = SB.route()
+    if not (route and type(route.questChain) == "table") then return { ok = false, why = "這條路線沒有任務編號" } end
+    local q = questLog()
+    if not q then return { ok = false, why = "這個客戶端查不到任務紀錄" } end
+    local any = false
+    for _, id in ipairs(route.questChain) do
+        if completed(q, id) or onQuest(q, id) then any = true; break end
+    end
+    if not any then return { ok = true, any = false } end
+    local step = #route.steps + 1
+    for i, st in ipairs(route.steps) do
+        local d = st.doneWhen
+        local done = type(d) == "table" and (anyOf(d.completed, completed, q) or anyOf(d.onQuest, onQuest, q))
+        if not done then step = i; break end
+    end
+    return { ok = true, any = true, step = step }
+end
+
+-- The line under the buttons, and the step 跳到 offers (nil: no button).
+function SB.hint()
+    local d, s, route = SB.detect(), SB.state(), SB.route()
+    if not d.ok then return "任務進度：無法自動判斷（" .. d.why .. "），請自己按上一步／下一步。", nil end
+    if not d.any then return "任務進度：任務記錄裡還沒有這條任務（還沒接第一個任務，或這個伺服器的任務編號不同）。", nil end
+    local total = route and #route.steps or 0
+    local where = d.step > total and "已經做完整條任務" or ("實際大概在第 " .. d.step .. " 步")
+    if d.step == s.step then return "任務進度：依任務記錄，你" .. where .. "，和目前顯示的一樣。", nil end
+    local shown = s.step > total and "全部完成" or ("第 " .. s.step .. " 步")
+    return "任務進度：依任務記錄，你" .. where .. "（目前顯示" .. shown .. "）。", d.step
+end
+
+function SB.jumpTo(n)
+    local route = SB.route()
+    n = tonumber(n)
+    if not (route and n and n >= 1 and n <= #route.steps + 1) then return false end
+    SB.state().step = n
+    SB.refresh()
+    return true
+end
+
+---------------------------------------------------------------------------
+-- GF-008-F: places with coordinates are links (|Hgfsb:<step>:<point>|h);
+-- the text's frame opens the map on a click.
+---------------------------------------------------------------------------
+
+SB.LINK_COLOR = { 1.00, 0.60, 0.20 }
+SB.LINK_TIP = "點一下在地圖上標出"
+local function link(stepIndex, pointIndex, text)
+    return string.format("|Hgfsb:%d:%d|h%s%s|r|h", stepIndex, pointIndex, ns.SleepingBagMap.hex(SB.LINK_COLOR), text)
+end
+SB.link = link
+-- "gfsb:2:1" -> 2, 1
+function SB.parseLink(l)
+    local a, b = str(l):match("^gfsb:(%d+):(%d+)")
+    return tonumber(a), tonumber(b)
+end
+
+-- The first point on the step's own map.
+local function ownPoint(step)
+    for i, p in ipairs(step.points or {}) do
+        if (not p.mapID or p.mapID == step.mapID) and p.x and p.y then return i end
+    end
+    return nil
+end
+
+-- Each point's words in a text become links (the first time each word appears).
+local function linkWords(text, step, stepIndex)
+    if not text or text == "" then return text end
+    local hits = {}
+    for pi, p in ipairs(step.points or {}) do
+        if p.x and p.y then
+            for _, w in ipairs(type(p.words) == "table" and p.words or {}) do
+                local a, b = text:find(w, 1, true)
+                if a then hits[#hits + 1] = { a = a, b = b, pi = pi } end
+            end
+        end
+    end
+    table.sort(hits, function(x, y) return x.a < y.a end)
+    local out, at = {}, 1
+    for _, h in ipairs(hits) do
+        if h.a >= at then
+            out[#out + 1] = text:sub(at, h.a - 1)
+            out[#out + 1] = link(stepIndex, h.pi, text:sub(h.a, h.b))
+            at = h.b + 1
+        end
+    end
+    out[#out + 1] = text:sub(at)
+    return table.concat(out)
+end
+SB.linkWords = linkWords
+
+local function richCoords(step, stepIndex)
+    local pts = step.points or {}
+    if #pts == 0 then return coords(step, true) end
+    local out = {}
+    for i, p in ipairs(pts) do
+        local zone = p.zone or step.mapZone or step.zone
+        local place = string.format("%s（%d, %d）", zone, int(p.x), int(p.y))
+        local rest = pointText(step, p):sub(#place + 1)
+        out[#out + 1] = link(stepIndex, i, place) .. rest .. (p.label and ("：" .. p.label) or "")
+    end
+    return table.concat(out, "；")
+end
+
+-- The page as drawn: links, the legend in its colours (SB.pageText stays plain).
+function SB.richText(size)
+    local route = SB.route()
+    if not route or SB.isFinished() or SB.viewMode() ~= "normal" then return SB.pageText() end
+    local s = SB.state()
+    local i, step = s.step, route.steps[s.step]
+    local out = {}
+    local own = ownPoint(step)
+    out[#out + 1] = string.format("【第 %d／%d 步】%s", i, #route.steps, own and link(i, own, step.zone) or step.zone)
+    out[#out + 1] = "位置：" .. richCoords(step, i)
+    if step.action and step.action ~= "" then out[#out + 1] = "要做的事：" .. linkWords(step.action, step, i) end
+    if step.tip and step.tip ~= "" then out[#out + 1] = "提醒：" .. step.tip end
+    out[#out + 1] = "狀態：待實地驗證"
+    local Map = ns.SleepingBagMap
+    if Map and Map.legendLines then
+        for _, line in ipairs(Map.legendLines(size and math.floor(size * 0.8) or nil)) do out[#out + 1] = line end
+    end
+    out[#out + 1] = ""
+    out[#out + 1] = route.note .. "需要 " .. route.minLevel .. " 級以上。資料來源：" .. route.source
+    return table.concat(out, "\n")
+end
+
+-- A link was clicked: the map on that point (only for the step on the page).
+function SB.openLink(l)
+    local si, pi = SB.parseLink(l)
+    local step, Map = SB.currentStep(), ns.SleepingBagMap
+    if not (si and pi and step and Map) or si ~= SB.state().step then return false end
+    local r, why = Map.show(step, si, pi)
+    if not r and why == "combat" then ns.say("戰鬥中不能打開地圖，脫離戰鬥後再點一次。") end
+    return r, why
+end
+
 -- Whole page text for the current state (mode: the one to draw; default the shown one).
 function SB.pageText(mode)
     local route = SB.route()
@@ -227,9 +423,23 @@ function SB.refresh()
     local nav = SB.nav()
     progressLine:SetText(string.format("%s｜共 %d 步｜%s", route and route.title or "", total,
         "每一步都待實地驗證，走到哪一步請自己按"))
-    local text = SB.pageText()
+    -- GF-008-F: the text in the chosen size, with links and the coloured legend; it scrolls.
+    local size = SB.textSize()
+    bodyText:SetFontObject(ns.Theme.readFont(size))
+    local text = SB.richText(size)
     bodyText:SetText(text)
-    scrollChild:SetHeight(math.max(400, select(2, text:gsub("\n", "")) * 18 + 60))
+    sizer.sync()
+    SB.layoutScroll(size, select(2, text:gsub("\n", "")) + 1)
+    local hint, jump = SB.hint()
+    hintLine:SetText(hint)
+    if jump then
+        jumpButton:SetText(jump > total and "跳到完成" or ("跳到第 " .. jump .. " 步"))
+        jumpButton.gfStep = jump
+        jumpButton:Show()
+    else
+        jumpButton.gfStep = nil
+        jumpButton:Hide()
+    end
     local step = SB.currentStep()
     if mode == "rpg" and step ~= nil and not s.revealed[step.id] then revealButton:Show() else revealButton:Hide() end
     -- GF-008-E: 上一步 dim on the first step; 下一步 says 完成 on the last, dim when finished.
@@ -244,6 +454,24 @@ function SB.refresh()
     if can then mapButton:Show() else mapButton:Hide() end
     mapButton:SetEnabled(can and not ns.inCombat() or false)
     if Map then Map.update(step, s.step) end
+end
+
+-- GF-008-F: how far the text reaches (the client measures it; offline, by
+-- lines), in steps of one line; the bar scrolls the frame by those steps.
+SB.SCROLL_PAD = 24
+function SB.layoutScroll(size, lines)
+    local lineH = size + 4
+    local h = ns.num(bodyText.GetStringHeight and bodyText:GetStringHeight()) or 0
+    if h <= 0 then h = lines * lineH end
+    h = h + SB.SCROLL_PAD
+    local view = ns.num(scroll:GetHeight()) or 0
+    if view <= 0 then view = 400 end
+    scrollChild:SetHeight(math.max(view, h))
+    local total, visible = math.ceil(h / lineH), math.floor(view / lineH)
+    local offset = math.min(scrollBar.offset or 0, math.max(0, total - visible))
+    scrollBar.lineH = lineH
+    scroll:SetVerticalScroll(offset * lineH)
+    scrollBar.sync(offset, total, visible)
 end
 
 -- GF-008-B: 看地圖 for the current step.
@@ -284,15 +512,51 @@ local function build(p)
     mapButton.tip = "在世界地圖上標出這一步的位置"
     SB.mapButton = mapButton
     resetButton = button(p, "重設進度", 100, 880, -64, SB.reset)
-    scroll = ns.createFrame("ScrollFrame", nil, p, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", p, "TOPLEFT", 20, -100)
+    -- GF-008-F: A－ / A＋ left of 重設進度.
+    sizer = ns.Widgets.textSizer(p, { get = SB.textSize, set = SB.setTextSize })
+    sizer.minus:SetPoint("TOPLEFT", p, "TOPLEFT", 772, -64)
+    sizer.plus:SetPoint("TOPLEFT", p, "TOPLEFT", 824, -64)
+    SB.sizer = sizer
+    -- GF-008-F: what the quest log says, and 跳到第 N 步 (the player presses it).
+    hintLine = p:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
+    hintLine:SetPoint("TOPLEFT", p, "TOPLEFT", 22, -106)
+    hintLine:SetWidth(830)
+    hintLine:SetJustifyH("LEFT")
+    SB.hintLine = hintLine
+    jumpButton = button(p, "", 120, 860, -100, function(self) if self.gfStep then SB.jumpTo(self.gfStep) end end)
+    jumpButton:Hide()
+    SB.jumpButton = jumpButton
+    -- GF-008-F: a plain scroll frame with the toolkit's scroll bar (GF-UI-P).
+    scroll = CreateFrame("ScrollFrame", nil, p)
+    scroll:SetPoint("TOPLEFT", p, "TOPLEFT", 20, -138)
     scroll:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -40, 20)
     scrollChild = CreateFrame("Frame", nil, scroll)
     scrollChild:SetSize(930, 400)
     scroll:SetScrollChild(scrollChild)
-    bodyText = scrollChild:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)
+    scrollBar = ns.Widgets.scrollBar(p, 300, function(offset)
+        scroll:SetVerticalScroll(offset * (scrollBar.lineH or 24))
+    end)
+    scrollBar:SetPoint("TOPLEFT", scroll, "TOPRIGHT", ns.Widgets.SCROLL_GAP, 0)
+    scrollBar:SetPoint("BOTTOMLEFT", scroll, "BOTTOMRIGHT", ns.Widgets.SCROLL_GAP, 0)
+    SB.scrollBar, SB.scroll = scrollBar, scroll
+    if scroll.EnableMouseWheel then scroll:EnableMouseWheel(true) end
+    scroll:SetScript("OnMouseWheel", function(_, delta) scrollBar.scrollBy(-(tonumber(delta) or 0) * 2) end)
+    -- GF-008-F: the links in the text.
+    if scrollChild.SetHyperlinksEnabled then scrollChild:SetHyperlinksEnabled(true) end
+    scrollChild:SetScript("OnHyperlinkClick", function(_, l) SB.openLink(l) end)
+    scrollChild:SetScript("OnHyperlinkEnter", function(self, _, text)
+        if not GameTooltip then return end
+        GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+        GameTooltip:AddLine((str(text):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")), 1, 0.82, 0)
+        GameTooltip:AddLine(SB.LINK_TIP, 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    scrollChild:SetScript("OnHyperlinkLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+    SB.scrollChild = scrollChild
+    bodyText = scrollChild:CreateFontString(nil, "ARTWORK", ns.Theme.readFont(SB.textSize()))
     bodyText:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 4, -4)
     bodyText:SetWidth(920)
+    SB.bodyText = bodyText
     bodyText:SetJustifyH("LEFT")
     bodyText:SetJustifyV("TOP")
     if bodyText.SetSpacing then bodyText:SetSpacing(4) end
@@ -308,3 +572,14 @@ ns.Framework.register({
     create = build,
     show = SB.refresh,
 })
+
+-- GF-008-F: the quest log changed while the page is open: draw it again (the
+-- 任務進度 line). Two quest events; nothing happens while the page is closed.
+local questEvents = CreateFrame("Frame")
+-- A client without these events: the line is still right whenever the page opens.
+pcall(function() questEvents:RegisterEvent("QUEST_TURNED_IN") end)
+pcall(function() questEvents:RegisterEvent("QUEST_ACCEPTED") end)
+questEvents:SetScript("OnEvent", function(_, event, id)
+    if event == "QUEST_TURNED_IN" and tonumber(id) then turnedIn[tonumber(id)] = true end
+    if panel and panel.IsVisible and panel:IsVisible() then SB.refresh() end
+end)

@@ -236,7 +236,8 @@ return function(T)
             ok(not src:find("C_Timer", 1, true), f .. ": no timer")
             local n = 0
             for _ in src:gmatch("RegisterEvent%(") do n = n + 1 end
-            eq(n, f == "SleepingBagMap.lua" and 2 or 0, f .. ": events (only the two combat ones)")
+            -- GF-008-F: SleepingBag.lua listens to QUEST_TURNED_IN / QUEST_ACCEPTED (the 任務進度 line).
+            eq(n, (f == "SleepingBagMap.lua" or f == "SleepingBag.lua") and 2 or 0, f .. ": events (combat; GF-008-F the two quest ones)")
         end
         local ns = login(true)
         local SB = ns.SleepingBag

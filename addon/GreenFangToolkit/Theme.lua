@@ -608,3 +608,21 @@ function T.coinText(copper, size)
     if cu > 0 or #out == 0 then part(cu, T.C.coinCopper, T.TEX.coin.copper) end
     return table.concat(out, " ")
 end
+
+---------------------------------------------------------------------------
+-- GF-008-F (owner 2026-11-28: 「冒險指南的字太小了，請放大，或設計成有按鈕可以
+-- 縮放字的大小」): body-text fonts for a reading page in a few sizes, made
+-- once each (a copy of the game's GameFontHighlight at that size). Any guide
+-- can use them with ns.Widgets.textSizer.
+---------------------------------------------------------------------------
+
+T.READ_SIZES = { 18, 20, 22, 24 }
+T.READ_DEFAULT = 20
+local readFonts = {}
+function T.readFont(size)
+    size = tonumber(size) or T.READ_DEFAULT
+    if readFonts[size] == nil then
+        readFonts[size] = font("GreenFangToolkitRead" .. size, "GameFontHighlight", size) or false
+    end
+    return readFonts[size] or ns.LABEL_FONT
+end

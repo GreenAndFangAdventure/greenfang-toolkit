@@ -155,11 +155,40 @@ end
 M.KINDS = {
     start = { name = "接任務", color = { 0.30, 1.00, 0.30 }, word = "綠色" },
     turnin = { name = "交任務並接下一個", color = { 1.00, 0.82, 0.00 }, word = "金色" },
-    route = { name = "路線點", color = { 0.35, 0.70, 1.00 }, word = "藍色" },
+    route = { name = "路線點", color = { 0.35, 0.70, 1.00 }, word = "藍色", more = "（推車、飛艇塔、飛行點）" },
 }
 M.APPROX = { name = "大約位置", color = { 0.75, 0.75, 0.75 }, word = "灰色" }
 M.CONF = { multi = "多來源一致", single = "單一來源", approx = "大約" }
-M.LEGEND = "標記顏色｜綠色：接任務｜金色：交任務並接下一個｜藍色：路線點（推車、飛艇塔、飛行點）｜灰色：大約位置"
+-- GF-008-F (owner: 「標記顏色的說明文字就用對應顏色」): the legend is built from
+-- the same styles the pins are tinted with (one set of colour values).
+M.LEGEND_ORDER = { M.KINDS.start, M.KINDS.turnin, M.KINDS.route, M.APPROX }
+local function legendPart(style) return style.word .. "：" .. style.name .. (style.more or "") end
+do
+    local parts = { "標記顏色" }
+    for _, style in ipairs(M.LEGEND_ORDER) do parts[#parts + 1] = legendPart(style) end
+    M.LEGEND = table.concat(parts, "｜")
+end
+-- A small square of the colour (the game's plain white texture, tinted), so a
+-- colour that is hard to read on the dark page still shows.
+M.SQUARE = "Interface\\Buttons\\WHITE8X8"
+function M.square(c, size)
+    size = size or 14
+    return string.format("|T%s:%d:%d:0:0:8:8:0:8:0:8:%d:%d:%d|t", M.SQUARE, size, size,
+        math.floor(c[1] * 255 + 0.5), math.floor(c[2] * 255 + 0.5), math.floor(c[3] * 255 + 0.5))
+end
+local function hex(c)
+    return string.format("|cff%02x%02x%02x", math.floor(c[1] * 255 + 0.5), math.floor(c[2] * 255 + 0.5), math.floor(c[3] * 255 + 0.5))
+end
+M.hex = hex
+-- The legend for the page: a title line, then one line per colour, each line
+-- in its own colour after a square of it.
+function M.legendLines(size)
+    local out = { "標記顏色：" }
+    for _, style in ipairs(M.LEGEND_ORDER) do
+        out[#out + 1] = M.square(style.color, size) .. " " .. hex(style.color) .. legendPart(style) .. "|r"
+    end
+    return out
+end
 
 function M.styleFor(p)
     if p.conf == "approx" then return M.APPROX end
@@ -339,8 +368,8 @@ local function firstOwn(cur)
     for _, at in ipairs(cur.list) do if at.mapID == cur.mapID then return at end end
     return cur.list[1]
 end
-local function setWaypoint(cur)
-    local at = firstOwn(cur)
+local function setWaypoint(cur, at)
+    at = at or firstOwn(cur)
     if not at then return false end
     local point = call(UiMapPoint.CreateFromCoordinates, at.mapID, at.x / 100, at.y / 100)
     if not point then return false end
@@ -389,10 +418,15 @@ local function openMap(mapID)
 end
 
 -- 看地圖: returns "canvas" / "waypoint" / "map" (no pin), or false and why ("combat", "none").
-function M.show(step, index)
+-- GF-008-F: focus = the index of one of the step's points (a place clicked in
+-- the guide's text): the map opens on that point's map (the waypoint goes there).
+function M.show(step, index, focus)
     if ns.inCombat() then return false, "combat" end
     if not M.canShow(step) then return false, "none" end
-    local mapID = M.mapFor(step)
+    local fp = focus and M.points(step)[focus] or nil
+    if focus and not fp then return false, "none" end
+    local mapID = fp and M.pointMap(step, fp) or M.mapFor(step)
+    if not mapID then return false, "none" end
     local how = M.method()
     -- GF-008-C: no points: the map only, no pin.
     if not M.hasPin(step) then
@@ -409,8 +443,10 @@ function M.show(step, index)
         placePins()
         return "canvas"
     end
-    -- The waypoint: the first point on the step's own map.
-    local first = setWaypoint(cur)
+    -- The waypoint: the first point on the step's own map (GF-008-F: or the clicked one).
+    local want
+    if fp then for _, at in ipairs(cur.list) do if at.point == fp then want = at end end end
+    local first = setWaypoint(cur, want)
     if not first then return false, "none" end
     cur.waypoint = true
     M.current = cur
