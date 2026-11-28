@@ -4,7 +4,7 @@
 
 安裝：把 `GreenFangToolkit` 資料夾放到 `World of Warcraft\_forever_\Interface\AddOns\`。在遊戲裡按小地圖按鈕，或輸入 `/gftk`（也可以用 `/綠皮`）打開工具箱。
 
-## 下一版
+## 0.16.17（冒險單開單表單簡化）
 
 ### 冒險單開單畫面變簡單（GF-UI-O；只做過離線測試，未實機驗證）
 
