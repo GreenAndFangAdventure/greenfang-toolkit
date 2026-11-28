@@ -133,7 +133,8 @@ return function(T)
         -- Shown buttons on the first look (the theme's X counts too).
         local n = 0
         for _, o in ipairs(wow.allObjects()) do
-            if (o._kind == "Button" or o._kind == "CheckButton") and o._parent == f and visible(o) then n = n + 1 end
+            -- GF-UI-R: the title line's 說明 button is window chrome, not one of the form's buttons.
+            if (o._kind == "Button" or o._kind == "CheckButton") and o._parent == f and visible(o) and o ~= f.gfHelpButton then n = n + 1 end
         end
         ok(n <= 8, "few buttons on the first look: " .. n)
         -- Quests: one 人數.
