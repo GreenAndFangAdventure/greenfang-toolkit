@@ -2251,7 +2251,7 @@ end
 
 -- GF-UI-A §2.5 item 2 / §3 item 16: no sentences: the field that is missing turns red with a ✗;
 -- the two without a field get a mark and a number ("✗ 20/20", "✗ 結束").
-UI.SUBMIT_FIELD = { ["no-destination"] = "目的地", ["bad-time"] = "時段", ["too-far"] = "時段" }
+UI.SUBMIT_FIELD = { ["no-destination"] = "活動", ["bad-time"] = "時段", ["too-far"] = "時段" }
 UI.SUBMIT_ERROR = { ["too-many"] = A().MAX_TICKETS .. "/" .. A().MAX_TICKETS, closed = "結束" }
 function UI.markField(f, name)
     for fname, fs in pairs(f.fieldStrings or {}) do
@@ -2300,9 +2300,58 @@ function UI.submitTicket(d)
     return id, why, lfgNote
 end
 
-UI.TICKET_FIELDS = { "目的地", "時段", "人數", "錄取", "標籤", "備註" }
+-- GF-UI-O (owner 2026-11-28: 「冒險單的功能太複雜了，按鈕有點多，先把快速設定按鈕，
+-- 整合與內建蒐尋器相同」): the form reads like the game's 建立隊伍 screen. First look,
+-- top to bottom: 活動 (the chosen dungeon / quests, two same-size buttons 地城 任務),
+-- 職責 (the role icons with their numbers; quests: one 人數), 時段, 說明 (the
+-- ticket's note; saved and shared as before), then 上架到尋求組隊 and 開單.
+-- 更多設定 folds the rest: the ＋ － of 人數, 錄取 and 標籤; folded, one line says
+-- their values (grey while they are the defaults). Every control is made once;
+-- folding only shows / hides and moves them (no new frames, events or timers).
+UI.TICKET_MAIN = { "活動", "職責", "時段", "說明" }
+UI.TICKET_MORE = { "人數", "錄取", "標籤" }
+UI.TICKET_FIELDS = { "活動", "職責", "時段", "說明", "人數", "錄取", "標籤" }
+UI.TICKET_W = 820
+UI.DEST_NAME_W = 320 -- the 活動 field (the name is cut with … past it), then 地城 任務
+UI.MORE_TEXT = { closed = "＋ 更多設定", open = "－ 更多設定" }
 
--- 目的地: the chosen art + name + levels, then a small 「選擇」/「更換」 button.
+-- What 更多設定 starts with: the destination's own roles (5 people: 1 1 3), 直接錄取, no tag.
+function UI.ticketDefaultRoles(d)
+    if d and d.dungeon then return ns.AdventureData.defaultRoles(d.dungeon) end
+    return ns.AdventureData.defaultRoles(nil)
+end
+-- Which of 更多設定's values differ from the defaults: { count, mode, tags }.
+function UI.ticketChanged(d)
+    local out = { count = false, mode = false, tags = false }
+    if not d then return out end
+    if d.dungeon then
+        local def, r = UI.ticketDefaultRoles(d), d.roles or {}
+        for _, k in ipairs(A().ROLES) do if (r[k] or 0) ~= (def[k] or 0) then out.count = true end end
+    elseif #(d.quests or {}) > 0 or d.zone then
+        out.count = (d.size or 5) ~= 5
+    end
+    out.mode = d.mode == "c"
+    out.tags = (d.tags or 0) ~= 0
+    return out
+end
+function UI.ticketMoreIsDefault(d)
+    local c = UI.ticketChanged(d)
+    return not (c.count or c.mode or c.tags)
+end
+-- The folded line: "直接錄取｜無標籤", "團長同意｜解任務、語音｜人數已調整"; isDefault.
+function UI.ticketMoreSummary(d)
+    local c = UI.ticketChanged(d)
+    local parts = { (d and d.mode == "c") and "團長同意" or "直接錄取" }
+    local tags = {}
+    for _, k in ipairs(UI.TAG_KEYS) do
+        if d and math.floor((d.tags or 0) / A().TAGS[k]) % 2 == 1 then tags[#tags + 1] = UI.TAG_NAME[k] end
+    end
+    parts[#parts + 1] = #tags > 0 and table.concat(tags, "、") or "無標籤"
+    if c.count then parts[#parts + 1] = "人數已調整" end
+    return table.concat(parts, "｜"), not (c.count or c.mode or c.tags)
+end
+
+-- 活動: the chosen art + name + levels in one field; 地城 / 任務 change it.
 local function drawDest(f)
     local d = draft
     if d.dungeon then
@@ -2318,30 +2367,15 @@ local function drawDest(f)
         f.destName:SetText((d.zone or "") .. ((d.zone and q ~= "") and "  " or "") .. q)
     else
         f.destIcon:Hide()
-        f.destName:SetText("")
+        f.destName:SetText("|cff9a9a9a還沒選，按右邊的地城或任務|r")
     end
-    -- GF-002-H (R-16.26): step one is two big buttons, 地城 and 任務; once chosen,
-    -- the art + name, then a small 地城 and 任務 to change it.
-    local chosen = d.dungeon or #d.quests > 0 or d.zone
+    -- 任務 needs the quest log (as before); without it the button is dimmed, not gone.
     local hasLog = A().questLog() ~= nil
-    f.pickQuest.disabled = not hasLog
-    f.pickQuest.tex:SetAlpha(hasLog and 1 or 0.4)
-    if f.pickQuest.label then f.pickQuest.label:SetAlpha(hasLog and 1 or 0.4) end
-    f.pickQuest.tip = not hasLog and (tex("no", 16) .. " 任務日誌") or nil
-    if chosen then
-        f.pickDungeon:Hide(); f.pickQuest:Hide()
-        f.dest:Show(); f.destQuest:Show()
-        f.dest:ClearAllPoints(); f.dest:SetPoint("LEFT", f.destName, "RIGHT", 16, 0)
-        f.destQuest:ClearAllPoints(); f.destQuest:SetPoint("LEFT", f.dest, "RIGHT", 10, 0)
-        if hasLog then f.destQuest:Show() else f.destQuest:Hide() end
-    else
-        f.dest:Hide(); f.destQuest:Hide()
-        f.pickDungeon:Show(); f.pickQuest:Show()
-        ns.OrdersUI.flow(f, { f.pickDungeon, f.pickQuest }, f.controlX, f.rowY[1] + 6, 40)
-    end
+    f.destQuest.disabled = not hasLog
+    f.destQuest:SetAlpha(hasLog and 1 or 0.4)
+    f.destQuest.tip = not hasLog and (tex("no", 16) .. " 任務日誌") or nil
 end
 
--- The rows under 時段 follow its chips (GF-002-H: up to 5 slots wrap over two lines).
 -- GF-002-J (owner 0.14.0: 「選項沒對齊」「錄取和標籤重疊」): options sit in even columns
 -- from the control line; every row of a window uses the same column width.
 UI.OPTION_COL = 150
@@ -2355,57 +2389,89 @@ function UI.gridPlace(f, list, x0, y, colW)
     end
 end
 
+local function showIf(w, on) if on then w:Show() else w:Hide() end end
+-- The widgets inside 更多設定 (made once in openTicket).
+function UI.ticketMoreWidgets(f)
+    local out = { f.fieldStrings["人數"], f.fieldStrings["錄取"], f.fieldStrings["標籤"], f.direct, f.consent }
+    for _, b in ipairs(f.tagList) do out[#out + 1] = b end
+    for _, r in ipairs({ "t", "h", "d", "any" }) do
+        local g = f.roleGroups[r]
+        for _, w in ipairs({ g.moreIcon, g.moreText, g.plus, g.minus }) do out[#out + 1] = w end
+    end
+    return out
+end
+
+-- Rows under 時段 follow its chips (GF-002-H: up to 5 slots wrap) and the open slot
+-- editor (GF-UI-G); 說明, 更多設定 (its three rows when open), then 上架 / 開單.
 local function layoutTicket(f, lines, extra)
     local O = ns.OrdersUI
-    local FX, X = O.FIELD_X, f.controlX
-    local y = f.rowY[2] - lines * UI.CHIP_LINE - 10 - (extra or 0) -- GF-UI-G: the open slot editor
-    local rows = {}
-    for i = 3, 7 do rows[i] = y; y = y - O.ROW_STEP end
-    f.rowY[3], f.rowY[4], f.rowY[5], f.rowY[6], f.rowY[7] = rows[3], rows[4], rows[5], rows[6], rows[7]
+    local FX, X, STEP = O.FIELD_X, f.controlX, O.ROW_STEP
     local function label(name, yy)
         local fs = f.fieldStrings[name]
         fs:ClearAllPoints(); fs:SetPoint("TOPLEFT", f, "TOPLEFT", FX, yy - 8)
     end
-    label("人數", rows[3])
-    for _, g in pairs(f.roleGroups) do
-        g.icon:ClearAllPoints(); g.icon:SetPoint("TOPLEFT", f, "TOPLEFT", g.x, rows[3])
-        g.text:ClearAllPoints(); g.text:SetPoint("TOPLEFT", f, "TOPLEFT", g.x + ns.ICON + 4, rows[3] - 8)
-        g.plus:ClearAllPoints(); g.plus:SetPoint("TOPLEFT", f, "TOPLEFT", g.bx, rows[3] + 1)
-        g.minus:ClearAllPoints(); g.minus:SetPoint("TOPLEFT", f, "TOPLEFT", g.bx + 38, rows[3] + 1)
+    local function at(w, x, yy) w:ClearAllPoints(); w:SetPoint("TOPLEFT", f, "TOPLEFT", x, yy) end
+    local y = f.rowY[3] - lines * UI.CHIP_LINE - 10 - (extra or 0)
+    f.rowY[4] = y; label("說明", y); at(f.note, X + 6, y)
+    y = y - STEP
+    f.rowY[5] = y; at(f.moreToggle, X, y); at(f.moreSummary, X + f.moreToggle.gfWidth + 12, y - 8)
+    local open = f.moreOpen == true
+    if open then
+        y = y - STEP; f.rowY[6] = y; label("人數", y)
+        for _, g in pairs(f.roleGroups) do
+            at(g.moreIcon, g.x, y + 1); at(g.moreText, g.x + ns.ICON + 4, y - 8)
+            at(g.plus, g.bx, y + 1); at(g.minus, g.bx + 38, y + 1)
+        end
+        y = y - STEP; f.rowY[7] = y; label("錄取", y); UI.gridPlace(f, { f.direct, f.consent }, X, y)
+        y = y - STEP; f.rowY[8] = y; label("標籤", y); UI.gridPlace(f, f.tagList, X, y)
+    else
+        f.rowY[6], f.rowY[7], f.rowY[8] = nil, nil, nil
     end
-    label("錄取", rows[4]); UI.gridPlace(f, { f.direct, f.consent }, X, rows[4])
-    label("標籤", rows[5]); UI.gridPlace(f, f.tagList, X, rows[5])
-    label("備註", rows[6]); f.note:ClearAllPoints(); f.note:SetPoint("TOPLEFT", f, "TOPLEFT", X + 6, rows[6])
-    f.lfgCheck:ClearAllPoints(); f.lfgCheck:SetPoint("TOPLEFT", f, "TOPLEFT", FX, rows[7])
-    f:SetHeight(-rows[7] + 110)
-    UI.fitScreen(f, f.width, -rows[7] + 110) -- GF-014-03: many slots + the editor at 768 high
+    y = y - STEP
+    f.rowY[9] = y
+    at(f.lfgCheck, X, y - 1)
+    at(f.go, f.width - 24 - f.go.gfWidth, y)
+    local h = -y + ns.BUTTON_H + 20
+    f:SetHeight(h)
+    UI.fitScreen(f, f.width, h) -- GF-014-03: many slots + the editor at 768 high
 end
 
 local function drawTicket()
     if not (popup and draft) then return end
     local f = popup
     if f.TitleText then f.TitleText:SetText(draft.editId and "編輯冒險單" or "冒險單") end
-    if f.badField == "目的地" and (draft.dungeon or #draft.quests > 0 or draft.zone) then UI.markField(f, nil)
+    if f.badField == "活動" and (draft.dungeon or #draft.quests > 0 or draft.zone) then UI.markField(f, nil)
     elseif f.badField and f.fieldStrings then UI.markField(f, f.badField) end
     f.go:SetText(tex("yes", 20) .. (draft.editId and " 儲存" or " 開單"))
     drawDest(f)
     -- 時段: one chip per slot, then ＋時段 (R-16.3). GF-UI-G: a chip opens its editor
     -- under the chips (inside the form), not a separate picker.
-    local lines = math.max(1, UI.drawSlotChips(f, draft.slots, f.slotChips, f.addSlot, f.controlX, f.rowY[2],
+    local lines = math.max(1, UI.drawSlotChips(f, draft.slots, f.slotChips, f.addSlot, f.controlX, f.rowY[3],
         function(self, i) UI.toggleSlotEditor(f, i) end))
     f.startButton = f.slotChips[1]
-    local extra = UI.placeSlotEditor(f, f.controlX, f.rowY[2] - lines * UI.CHIP_LINE - 2)
+    local extra = UI.placeSlotEditor(f, f.controlX, f.rowY[3] - lines * UI.CHIP_LINE - 2)
+    local open = f.moreOpen == true
+    for _, w in ipairs(UI.ticketMoreWidgets(f)) do showIf(w, open) end
     layoutTicket(f, lines, extra)
-    -- 人數: each role with its own ＋ － (dungeon), or one number (quests).
+    -- 職責: the role icons with their numbers (dungeon), or one 人數 (quests).
+    f.fieldStrings["職責"]:SetText(draft.dungeon and "職責" or "人數")
     for _, r in ipairs({ "t", "h", "d", "any" }) do
         local g = f.roleGroups[r]
         local show = (r == "any") == (draft.dungeon == nil)
-        for _, w in ipairs({ g.icon, g.text, g.plus, g.minus }) do if show then w:Show() else w:Hide() end end
-        g.text:SetText(tostring(r == "any" and draft.size or draft.roles[r])) -- GF-002-J: the icon says the role
+        local n = tostring(r == "any" and draft.size or draft.roles[r]) -- GF-002-J: the icon says the role
+        g.text:SetText(n); g.moreText:SetText(n)
+        showIf(g.icon, show); showIf(g.text, show)
+        for _, w in ipairs({ g.moreIcon, g.moreText, g.plus, g.minus }) do showIf(w, show and open) end
     end
     ns.OrdersUI.setSelected(f.direct, draft.mode ~= "c")
     ns.OrdersUI.setSelected(f.consent, draft.mode == "c")
     for k, b in pairs(f.tagButtons) do ns.OrdersUI.setSelected(b, math.floor(draft.tags / A().TAGS[k]) % 2 == 1) end
+    -- 更多設定: folded, its values in one line (grey = the defaults).
+    f.moreToggle:SetText(open and UI.MORE_TEXT.open or UI.MORE_TEXT.closed)
+    local text, isDefault = UI.ticketMoreSummary(draft)
+    f.moreSummary:SetText(text)
+    if isDefault then f.moreSummary:SetTextColor(0.6, 0.6, 0.6) else f.moreSummary:SetTextColor(1, 1, 1) end
+    showIf(f.moreSummary, not open)
     -- 尋求組隊: only for 現在 with a dungeon, when the game lets us list.
     local L = ns.NativeLFG
     local canLfg = L and L.canList() and UI.hasNow(draft) and draft.dungeon ~= nil and not draft.editId
@@ -2413,6 +2479,15 @@ local function drawTicket()
     else f.lfgCheck:Hide(); f.lfgCheck.label:Hide() end
 end
 UI.drawTicket = drawTicket
+
+-- 更多設定: open / fold (on = nil toggles). Only Show / Hide and new places.
+function UI.setTicketMore(on)
+    if not popup then return nil end
+    if on == nil then on = not popup.moreOpen end
+    popup.moreOpen = on and true or false
+    drawTicket()
+    return popup.moreOpen
+end
 
 -- GF-002-I (R-17.16): the group size of the destination (5, 10, 20, 40) caps the roles.
 function UI.changeCount(role, n)
@@ -2445,7 +2520,8 @@ function UI.openTicket(v, mode)
         draft.slots = { { now = true } }
     end
     if not popup then
-        local f = ns.popupWindow(UI.TICKET_NAME, 820, 470)
+        local W = UI.TICKET_W
+        local f = ns.popupWindow(UI.TICKET_NAME, W, 470)
         f:HookScript("OnHide", function() UI.keepDraft("ticket") end) -- GF-014-03
         ns.Theme.formPanel(f) -- GF-UI-G: the opaque form colour
         f:SetPoint("CENTER", 0, 40)
@@ -2454,48 +2530,76 @@ function UI.openTicket(v, mode)
         local O = ns.OrdersUI
         local FX = O.FIELD_X
         local X = O.controlX(UI.TICKET_FIELDS)
-        f.controlX, f.width = X, 820
+        f.controlX, f.width = X, W
         f.rowY = {}
-        for i = 1, 7 do f.rowY[i] = -48 - (i - 1) * O.ROW_STEP end
+        for i = 1, 3 do f.rowY[i] = -48 - (i - 1) * O.ROW_STEP end
         local y = f.rowY
         local field = O.fieldLabel
-        field(f, "目的地", FX, y[1] - 8)
+        -- 活動 [art] name … [地城] [任務] (two text buttons of one size).
+        field(f, "活動", FX, y[1] - 8)
         f.destIcon = f:CreateTexture(nil, "ARTWORK"); f.destIcon:SetSize(ns.ICON, ns.ICON)
         f.destIcon:SetPoint("TOPLEFT", f, "TOPLEFT", X, y[1] + 1)
         f.destName = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
-        f.destName:SetPoint("LEFT", f.destIcon, "RIGHT", 8, 0)
-        f.pickDungeon = iconButton(f, 40, "dungeon", nil, function(self) UI.pickDestination(self) end, "地城")
-        f.pickQuest = iconButton(f, 40, "quest", nil, function(self) if not self.disabled then UI.pickQuests(self) end end, "任務")
-        f.dest = O.textButton(f, tex("dungeon", 18) .. " 地城", function(self) UI.pickDestination(self) end)
-        f.destQuest = O.textButton(f, tex("quest", 18) .. " 任務", function(self) UI.pickQuests(self) end)
-        -- 時段 [現在] [明天 20:00～22:00] [＋時段] (GF-002-H, R-16.1 - R-16.3)
-        field(f, "時段", FX, y[2] - 8)
-        f.slotChips = {}
-        f.addSlot = O.textButton(f, "＋時段", function() UI.addSlotInline(f) end)
-        f.slotListFn = function() return draft and draft.slots end -- GF-UI-G: the slot editor
-        f.slotRedraw = function() drawTicket() end
-        -- 人數: 坦 1 ＋ －  補 1 ＋ －  輸出 3 ＋ － (one 人數 for quests).
-        field(f, "人數", FX, y[3] - 8)
+        f.destName:SetPoint("TOPLEFT", f, "TOPLEFT", X + ns.ICON + 8, y[1] - 8)
+        f.destName:SetWidth(UI.DEST_NAME_W)
+        if f.destName.SetWordWrap then f.destName:SetWordWrap(false) end
+        f.destName:SetJustifyH("LEFT")
+        local dText, qText = tex("dungeon", 18) .. " 地城", tex("quest", 18) .. " 任務"
+        local bw = math.max(ns.labelWidth(dText), ns.labelWidth(qText)) + 28
+        f.dest = O.textButton(f, dText, function(self) UI.pickDestination(self) end, nil, bw)
+        f.destQuest = O.textButton(f, qText, function(self) if not self.disabled then UI.pickQuests(self) end end, nil, bw)
+        local bx = X + ns.ICON + 8 + UI.DEST_NAME_W + 12
+        f.dest:SetPoint("TOPLEFT", f, "TOPLEFT", bx, y[1])
+        f.destQuest:SetPoint("TOPLEFT", f, "TOPLEFT", bx + bw + 10, y[1])
+        f.dest.flowX, f.destQuest.flowX = bx, bx + bw + 10
+        -- 職責: [坦] 1  [補] 1  [輸出] 3 (one 人數 for quests); the ＋ － are in 更多設定.
+        field(f, "職責", FX, y[2] - 8)
         f.roleGroups = {}
         local function group(r, gx)
             local g = { x = gx }
             g.icon = f:CreateTexture(nil, "ARTWORK"); g.icon:SetSize(ns.ICON, ns.ICON)
             ns.GameIcons.set(g.icon, UI.GAME[r])
+            g.icon:SetPoint("TOPLEFT", f, "TOPLEFT", gx, y[2] + 1)
             g.text = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
+            g.text:SetPoint("TOPLEFT", f, "TOPLEFT", gx + ns.ICON + 4, y[2] - 8)
+            g.moreIcon = f:CreateTexture(nil, "ARTWORK"); g.moreIcon:SetSize(ns.ICON, ns.ICON)
+            ns.GameIcons.set(g.moreIcon, UI.GAME[r])
+            g.moreText = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
             g.bx = gx + ns.ICON + 4 + ns.labelWidth("40") + 2
             g.plus = O.textButton(f, "＋", function() UI.changeCount(r, 1) end, nil, 34); g.plus.fieldNamed = UI.ROLE_NAME[r]
             g.minus = O.textButton(f, "－", function() UI.changeCount(r, -1) end, nil, 34); g.minus.fieldNamed = UI.ROLE_NAME[r]
             f.roleGroups[r] = g
-            return g.bx + 38 + 34 + 24
+            return g
         end
         -- GF-002-J: the three roles on the option columns.
         for k, r in ipairs({ "t", "h", "d" }) do group(r, X + (k - 1) * UI.OPTION_COL) end
         group("any", X)
-        field(f, "錄取", FX, y[4] - 8)
+        -- 時段 [現在] [明天 20:00～22:00] [＋時段] (GF-002-H, R-16.1 - R-16.3)
+        field(f, "時段", FX, y[3] - 8)
+        f.slotChips = {}
+        f.addSlot = O.textButton(f, "＋時段", function() UI.addSlotInline(f) end)
+        f.slotListFn = function() return draft and draft.slots end -- GF-UI-G: the slot editor
+        f.slotRedraw = function() drawTicket() end
+        -- 說明: the ticket's note (draft.note, saved and shared as before).
+        field(f, "說明", FX, y[3] - 8)
+        f.note = ns.Theme.editBox(f); f.note:SetSize(480, 30)
+        if f.note.SetFontObject then f.note:SetFontObject(ns.LABEL_FONT) end
+        f.note:SetAutoFocus(false)
+        if f.note.SetMaxLetters then f.note:SetMaxLetters(A().NOTE_MAX) end
+        f.note:SetScript("OnTextChanged", function(self) if draft then draft.note = A().cleanNote(self:GetText()) end end)
+        f.note:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+        f.note.fieldNamed = "說明"
+        -- 更多設定 and its folded line.
+        f.moreToggle = O.textButton(f, UI.MORE_TEXT.closed, function() UI.setTicketMore() end,
+            math.max(ns.labelWidth(UI.MORE_TEXT.closed), ns.labelWidth(UI.MORE_TEXT.open)) + 28)
+        f.moreSummary = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
+        f.moreSummary:SetJustifyH("LEFT")
+        field(f, "人數", FX, y[3] - 8) -- 更多設定's rows are placed by layoutTicket
+        field(f, "錄取", FX, y[3] - 8)
         f.direct = iconButton(f, ns.ICON, "direct", "直接錄取", function() draft.mode = "a"; drawTicket() end, "直接錄取")
         f.consent = iconButton(f, ns.ICON, "consent", "團長同意", function() draft.mode = "c"; drawTicket() end, "團長同意")
         f.modeButton = f.direct
-        field(f, "標籤", FX, y[5] - 8)
+        field(f, "標籤", FX, y[3] - 8)
         f.tagButtons, f.tagList = {}, {}
         for _, k in ipairs(UI.TAG_KEYS) do
             local b = iconButton(f, ns.ICON, "tag_" .. k, UI.TAG_NAME[k], function()
@@ -2506,27 +2610,22 @@ function UI.openTicket(v, mode)
             f.tagButtons[k] = b
             f.tagList[#f.tagList + 1] = b
         end
-        field(f, "備註", FX, y[6] - 8)
-        f.note = ns.Theme.editBox(f); f.note:SetSize(480, 30)
-        if f.note.SetFontObject then f.note:SetFontObject(ns.LABEL_FONT) end
-        f.note:SetAutoFocus(false)
-        if f.note.SetMaxLetters then f.note:SetMaxLetters(A().NOTE_MAX) end
-        f.note:SetScript("OnTextChanged", function(self) if draft then draft.note = A().cleanNote(self:GetText()) end end)
-        f.note:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
         -- GF-002-G: also list in the game's group finder (現在 + a dungeon only).
-        -- GF-UI-A §2.5 item 1: 「上架」 with the group finder's art (no sentence).
-        f.lfgCheck = ns.checkBox(f, ns.GameIcons.markup("lfg", 18) .. " 上架", FX, y[7], function(on) draft.lfg = on end)
+        f.lfgCheck = ns.checkBox(f, ns.GameIcons.markup("lfg", 18) .. " 上架到尋求組隊", X, y[3], function(on) draft.lfg = on end)
         f.lfgCheck.tip = "尋求組隊"
-        f.result = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT)); f.result:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", FX, 24)
-        if f.result.SetTextColor then f.result:SetTextColor(1, 0.4, 0.4) end
         f.go = O.textButton(f, tex("yes", 20) .. " 開單", function() UI.submitTicket() end, 120)
-        f.go:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -24, 18)
+        f.result = ns.freeText(f:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
+        f.result:SetPoint("RIGHT", f.go, "LEFT", -12, 0)
+        if f.result.SetTextColor then f.result:SetTextColor(1, 0.4, 0.4) end
         f:Hide()
         popup = f
     end
     popup.note:SetText(draft.note or "")
     popup.result:SetText("")
     popup.slotEditIndex = nil -- GF-UI-G: a new form starts with every slot folded
+    -- GF-UI-O: 更多設定 opens by itself when it holds something other than the defaults
+    -- (editing / reopening a ticket with 團長同意, a tag or other numbers; a kept draft).
+    popup.moreOpen = not UI.ticketMoreIsDefault(draft)
     UI.markField(popup, nil)
     popup:Show()
     drawTicket()

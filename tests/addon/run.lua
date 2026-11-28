@@ -4814,6 +4814,9 @@ assert(loadfile(ROOT .. "/tests/addon/gf012b_tests.lua"))()({ test = test, eq = 
 -- 調貨看板's 黑箱 rows (tests/addon/gf012c_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gf012c_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-UI-O: the 冒險單 form like the game's 建立隊伍 screen, 更多設定 folded (tests/addon/gfuio_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gfuio_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0

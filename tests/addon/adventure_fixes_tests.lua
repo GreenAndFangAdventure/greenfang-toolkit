@@ -398,7 +398,7 @@ return function(T)
         local U = ns.AdventureUI
         local d = U.openTicket()
         local f = _G[U.TICKET_NAME]
-        d.dungeon = "smg"; U.drawTicket()
+        d.dungeon = "smg"; U.setTicketMore(true) -- GF-UI-O: inside 更多設定
         local X, C = f.controlX, U.OPTION_COL
         eq(f.direct.flowX, X, "直接錄取: column 1"); eq(f.consent.flowX, X + C, "團長同意: column 2")
         for k, b in ipairs(f.tagList) do eq(b.flowX, X + (k - 1) * C, "tag " .. k .. ": column " .. k) end
@@ -416,7 +416,7 @@ return function(T)
         eq((overlaps(pk)), "", "time picker"); eq(insideWindow(pk), "", "time picker inside")
         pk:Hide()
         questLog({ { "貧瘠之地", { 3001, "測試任務 甲", 20, 3 }, { 3002, "測試任務 乙", 20 } } })
-        local qp = U.pickQuests(f.pickQuest)
+        local qp = U.pickQuests(f.destQuest)
         eq((overlaps(qp)), "", "quest picker: zones"); eq(insideWindow(qp), "", "inside")
         for _, z in ipairs(qp.zoneRows) do if z:IsShown() and z.zone == "貧瘠之地" then wow.click(z) end end
         eq((overlaps(qp)), "", "quest picker: quests"); eq(insideWindow(qp), "", "inside")
@@ -437,7 +437,7 @@ return function(T)
         questLog({ { "貧瘠之地", { 3001, "測試任務 甲", 20 }, { 3002, "測試任務 精英", 22, 3 } }, { "灰谷", { 4001, "測試任務 乙", 22 } } })
         local d = U.openTicket()
         local f = _G[U.TICKET_NAME]
-        wow.click(f.pickQuest)
+        wow.click(f.destQuest)
         local qp = U.questPickerFrame()
         local zones = {}
         for _, z in ipairs(qp.zoneRows) do if z:IsShown() then zones[#zones + 1] = z.zone end end
@@ -457,7 +457,7 @@ return function(T)
         ok(U.detailText(v):find(ns.GameIcons.pick("elite")[1], 1, true), "the group quest marked on line 2")
         -- A zone alone (where I am, no quests) is a destination too.
         local d2 = U.openTicket()
-        U.pickQuests(f.pickQuest)
+        U.pickQuests(f.destQuest)
         for _, z in ipairs(qp.zoneRows) do if z.zone == "雷霆崖" then wow.click(z) end end
         local id2 = U.submitTicket()
         ok(id2, "opened with the zone only"); eq(Adv.get(id2).zone, "雷霆崖", "its zone")

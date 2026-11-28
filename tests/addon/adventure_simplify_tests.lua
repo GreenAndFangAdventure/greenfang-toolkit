@@ -675,15 +675,15 @@ return function(T)
         eq(U.nextInvite.label._text, "下一位", "下一位")
         U.openTicket()
         local tf = _G[U.TICKET_NAME]
-        eq(plain(tf.lfgCheck.label._text):gsub("^%s+", ""), "上架", "上架")
+        eq(plain(tf.lfgCheck.label._text):gsub("^%s+", ""), "上架到尋求組隊", "上架到尋求組隊") -- GF-UI-O
         -- A missing field turns red with a ✗ (no sentence).
         local _, why = U.submitTicket()
         eq(why, "no-destination", "nothing chosen")
-        eq(table.concat(tf.fieldStrings["目的地"]._color, ","), "1,0.3,0.3", "目的地 red")
+        eq(table.concat(tf.fieldStrings["活動"]._color, ","), "1,0.3,0.3", "活動 red (GF-UI-O)")
         ok(tf.fieldMark:IsShown() and tf.fieldMark._texture:find("NotReady", 1, true), "✗ next to it")
         eq(tf.result._text, "", "no text")
         U.draft().dungeon = "smg"; U.drawTicket()
-        eq(table.concat(tf.fieldStrings["目的地"]._color, ","), "1,0.82,0", "fixed: gold again")
+        eq(table.concat(tf.fieldStrings["活動"]._color, ","), "1,0.82,0", "fixed: gold again")
         ok(not tf.fieldMark:IsShown(), "no ✗")
         U.openWorker()
         eq(plain(_G[U.WORKER_NAME].TitleText._text), "職工單", "no brackets in the title")
@@ -707,7 +707,7 @@ return function(T)
         C_QuestLog = { GetNumQuestLogEntries = function() return 2, 0 end, GetInfo = function(i)
             return ({ { isHeader = true, title = "貧瘠之地" }, { questID = 850, title = "測試任務：草原之心", level = 16 } })[i] end }
         U.openTicket()
-        U.pickQuests(_G[U.TICKET_NAME].pickQuest)
+        U.pickQuests(_G[U.TICKET_NAME].destQuest)
         local qp = U.questPickerFrame()
         for _, z in ipairs(qp.zoneRows) do if z:IsShown() and z.zone == "貧瘠之地" then wow.click(z) end end -- GF-002-J (R-17.20): the zone first
         local r = qp.rows[1]
