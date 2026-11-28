@@ -9,10 +9,12 @@
 --     the list's own leader field must match, its epoch must not be below the
 --     highest one seen: an old packet never brings a revoked custodian back),
 --   * a custodian's own 公產 scope (which bags / bank tabs count): a setting
---     on that custodian's computer only. NOTHING is scanned in phase 1.
--- Not here: stock, requests, approvals, reservations, hand-outs (phase 2).
+--     on that custodian's computer only. Nothing is scanned here.
+-- GF-012-B: the stock of that scope is BankStock.lua (read and shared only
+-- after the custodian's yes). Not here or there: requests, approvals,
+-- reservations, hand-outs (phase 3).
 -- Privacy: this file never calls a bag, bank or item function; nobody's bags
--- are read (offline test checks the source and counts calls).
+-- are read here (offline test checks the source and counts calls).
 -- Design: private repo docs/research/GF-012-A_personal-bank.md.
 -- API evidence: IsGuildLeader is a general WoW guess for 16001 (not checked in
 -- game); GetGuildInfo rank index and the GetGuildRosterInfo order are checked
@@ -578,6 +580,8 @@ function Bank.setScope(kind, index, on)
     local s = Bank.scope()
     if not s then return "invalid" end
     s[kind][index] = on and true or nil
+    -- GF-012-B: the stock follows the scope (an emptied scope asks again next time).
+    if ns.BankStock then ns.BankStock.scopeChanged() end
     if Bank.onChanged then Bank.onChanged() end
     return "ok"
 end
@@ -610,11 +614,13 @@ function Bank.diagText()
         last = "｜上次指定：" .. (Bank.APPOINT_NAME[la.r] or tostring(la.r))
             .. (la.why and ("（" .. (Bank.WHY_NAME[la.why] or la.why) .. "）") or "")
     end
-    return string.format("身分：%s%s｜名單：%s%s｜有效保管人 %d 位｜發布 %d、拒絕管理 %d、自我修正 %d%s%s｜庫存：尚未開放（第一階段不掃描）",
+    -- GF-012-B: the stock line (BankStock.diagText) in place of 「尚未開放」.
+    local stock = ns.BankStock and ns.BankStock.diagText() or "庫存：未載入"
+    return string.format("身分：%s%s｜名單：%s%s｜有效保管人 %d 位｜發布 %d、拒絕管理 %d、自我修正 %d%s%s｜%s",
         Bank.ROLE_NAME[Bank.myRole()] or "?", (auth == "unknown" and why) and ("（" .. (Bank.WHY_NAME[why] or why) .. "）") or "",
         Bank.STATE_NAME[cur.state] or cur.state, cur.state == "ok" and (cur.direct and "，直接收到" or "，經轉送") or "",
         active, stats.published, stats.refused, stats.healed,
-        Bank.rosterSkipped > 0 and string.format("｜名冊讀不到 %d 列", Bank.rosterSkipped) or "", last)
+        Bank.rosterSkipped > 0 and string.format("｜名冊讀不到 %d 列", Bank.rosterSkipped) or "", last, stock)
 end
 
 ---------------------------------------------------------------------------
@@ -651,6 +657,7 @@ ns.Share.onUpdate(function(a)
     if Bank.kChanged(a) then
         if Bank.onChanged then Bank.onChanged() end
         Bank.notifySoon() -- GF-014-04
+        if ns.BankStock then ns.BankStock.soon() end -- GF-012-B: revoked / kinds changed
     end
 end)
 
@@ -659,6 +666,7 @@ pcall(events.RegisterEvent, events, "GUILD_ROSTER_UPDATE")
 events:SetScript("OnEvent", function()
     Bank.invalidate()
     Bank.checkStepDown()
+    if ns.BankStock then ns.BankStock.rosterChanged() end -- GF-012-B: only while it waits for the list
     if Bank.onChanged then Bank.onChanged() end
     if Bank.notifyPending then Bank.notifySoon() end -- GF-014-04: the roster came after the list
 end)

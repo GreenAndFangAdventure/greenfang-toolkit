@@ -2,7 +2,7 @@
 ## Title: 綠皮冒險工具箱
 ## Notes: 綠皮與獠牙冒險事務所｜公會名冊、睡袋路線；可搭配 GF Sync 補充公會網站資料
 ## Author: 綠皮與獠牙冒險事務所
-## Version: 0.16.14
+## Version: 0.16.15
 ## IconTexture: Interface\Icons\INV_Misc_Bag_10
 ## SavedVariables: GreenFangToolkitDB
 ## OptionalDeps: GFGuildRoster
@@ -60,3 +60,4 @@ WorkerMatch.lua
 Talents.lua
 SleepingBagMap.lua
 RecipeLink.lua
+BankStock.lua

@@ -1,8 +1,10 @@
 -- BankUI (GF-012 phase 1, spec v2.0 §8, design GF-012-A §6): 物資調度 →
 -- 公會黑庫. Shows who is guild master, the custodian list and its state, the
 -- guild master's buttons (指定 / 背包 / 銀行 / 撤銷; everybody else sees them
--- disabled, never lit), a custodian's own 公產 scope (a setting only) and,
--- in place of the stock list, a state panel (GF-UI-M: 「庫存：第二階段才有」).
+-- disabled, never lit), a custodian's own 公產 scope and, GF-012-B, the
+-- guild's stock (BankStock: one row per item, who holds how many, how long
+-- ago, 聯絡; a search box and 6 reused rows with the wheel). The custodian
+-- list keeps 4 reused rows (was 8) to make room; it scrolls the same way.
 -- Game art only (class icons, the state panel's icons), 16 px text, button
 -- names of 2-4 characters.
 
@@ -13,16 +15,26 @@ local UI = {}
 ns.BankUI = UI
 
 UI.ID = "bank"
-UI.ROWS, UI.ROW_H, UI.ROW_W = 8, 40, 660
+UI.ROWS, UI.ROW_H, UI.ROW_W = 4, 40, 660 -- GF-012-B: 4 rows (was 8), the stock list below
 UI.X, UI.RIGHT_X = 20, 720
 -- GF-UI-I (owner 0.16.2: 標題和右邊的字壓到上面的分頁列): the sub-tab row's
 -- line ends 29 px into the page, so everything starts UI.TOP below it.
 UI.TOP = 40
 UI.Y = { title = -UI.TOP, status = -UI.TOP - 32, listHead = -UI.TOP - 68, rows = -UI.TOP - 100, scopeHead = -UI.TOP - 68,
-    stockHead = -UI.TOP - 484, stock = -UI.TOP - 514 }
--- GF-UI-M (owner): what the 庫存 area says in phase 1 (was 「尚未開放｜等會長實機驗證權限後開放」).
-UI.STOCK_TITLE = "庫存：第二階段才有"
-UI.STOCK_DETAIL = "目前只能管理保管人名單；庫存、申領、核准還在開發中"
+    stockHead = -UI.TOP - 316, stockRows = -UI.TOP - 352, stock = -UI.TOP - 372 }
+-- GF-012-B: the stock list (BankStock).
+UI.STOCK_ROWS, UI.STOCK_ROW_H = 6, 44
+UI.STOCK_MORE = "還有 %d 項，用滑鼠滾輪往下看"
+UI.STOCK_EMPTY = {
+    nobody = { "還沒有保管人", "會長指定保管人後，這裡會列出保管人分享的物品" },
+    none = { "保管人還沒分享庫存", "保管人上線並開啟分享後就會出現" },
+    noscope = { "保管人還沒設定公產範圍", "保管人在右邊「我的公產範圍」勾選後就會出現" },
+    unseen = { "保管人還沒打開銀行", "保管人打開銀行後才看得到銀行裡的物品" },
+    empty = { "公產範圍裡沒有可交易的物品", "綁定的物品不列入" },
+    list = { "還沒有保管人名單", "等會長的名單傳到" },
+    search = { "找不到符合的物品", "換個名字試試" },
+}
+UI.SHARE_LABEL = "分享庫存給公會"
 -- GF-UI-M (owner): the list scrolls with the wheel (8 pooled rows; up to 10
 -- active + 10 revoked); the same 「還有 N 位」 line as 調貨看板's detail.
 UI.MORE_TEXT = "還有 %d 位，用滑鼠滾輪往下看"
@@ -37,6 +49,7 @@ local c = {}
 
 local function B() return ns.Bank end
 local function W() return ns.Widgets end
+local function K() return ns.BankStock end
 
 local function text(parent, font, x, y, w)
     local fs = ns.freeText(parent:CreateFontString(nil, "ARTWORK", font or ns.LABEL_FONT))
@@ -143,6 +156,7 @@ local function build(p)
             local index = it[1]
             local box = ns.checkBox(p, it[2], cx, cy, function(on)
                 UI.say(B().setScope(kind, index, on))
+                if on and K() then K().askIfNeeded() end -- GF-012-B: the first tick asks once
             end)
             box.kind, box.index = kind, index
             c.scope[kind][#c.scope[kind] + 1] = box
@@ -150,12 +164,55 @@ local function build(p)
         y = y - math.ceil(#B().SCOPE[kind] / 3) * 34 - 14
     end
     c.scopeNote = text(p, ns.DISABLED_FONT, UI.RIGHT_X, y - 4, 360)
-    c.scopeNote:SetText("只存在本機，不掃描")
+    c.scopeNote:SetText(K().SCOPE_NOTE) -- GF-012-B (was 只存在本機，不掃描)
+    -- GF-012-B: the share switch (on asks first) and what I share.
+    c.share = ns.checkBox(p, UI.SHARE_LABEL, UI.RIGHT_X, y - 34, function(on)
+        K().toggle(on)
+        UI.refresh()
+    end)
+    c.mine = ns.freeText(p:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
+    c.mine:SetPoint("TOPLEFT", p, "TOPLEFT", UI.RIGHT_X, y - 72)
+    c.mine:SetWidth(360); c.mine:SetJustifyH("LEFT")
+    if c.mine.SetWordWrap then c.mine:SetWordWrap(true) end
     -- 庫存
     c.stockHead = header(p, "庫存", X, Y.stockHead)
-    c.stock = W().statePanel(p, 1060, 100)
+    c.stockMore = text(p, ns.DISABLED_FONT, X + 60, Y.stockHead, 300)
+    c.searchLabel = text(p, ns.FIELD_FONT, X + 410, Y.stockHead)
+    c.searchLabel:SetText("搜尋")
+    c.search = ns.Theme.editBox(p, 200, 30)
+    c.search:SetPoint("TOPLEFT", p, "TOPLEFT", X + 460, Y.stockHead + 6)
+    if c.search.SetMaxLetters then c.search:SetMaxLetters(40) end
+    c.search:SetScript("OnTextChanged", function(self)
+        c.query = str(self:GetText())
+        ns.Recipes.soon("bank-stock-search", UI.PICKER_DELAY, function()
+            if panel and panel:IsShown() then c.stockOffset = 0; UI.drawStock() end
+        end)
+    end)
+    c.search:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    c.query, c.stockOffset = "", 0
+    c.stockRows = {}
+    for i = 1, UI.STOCK_ROWS do c.stockRows[i] = UI.stockRow(p, i) end
+    c.stock = W().statePanel(p, UI.ROW_W, 140)
     c.stock:SetPoint("TOPLEFT", p, "TOPLEFT", X, Y.stock)
     UI.controls = c
+end
+
+-- GF-012-B: one stock row (Widgets.itemRow): icon, name, total; under the
+-- name who holds how many; on the right how long ago and 聯絡.
+function UI.stockRow(p, i)
+    local r = W().itemRow(p, UI.ROW_W, UI.STOCK_ROW_H)
+    r:SetPoint("TOPLEFT", p, "TOPLEFT", UI.X, UI.Y.stockRows - (i - 1) * UI.STOCK_ROW_H)
+    r.ago = ns.freeText(r:CreateFontString(nil, "ARTWORK", ns.LABEL_FONT))
+    r.ago:SetPoint("LEFT", r.right, "LEFT", 0, 0)
+    r.ago:SetWidth(90); r.ago:SetJustifyH("LEFT")
+    r.contact = ns.Theme.button(r, "聯絡", 72, ns.BUTTON_H)
+    r.contact:SetPoint("RIGHT", r, "RIGHT", -6, 0)
+    r.contact:SetScript("OnClick", function(self) if self.entry then ns.Supply.contact(self.entry) end end)
+    r.setRightWidth(172)
+    if r.EnableMouseWheel then r:EnableMouseWheel(true) end
+    r:SetScript("OnMouseWheel", function(_, delta) UI.scrollStock(delta) end)
+    r:Hide()
+    return r
 end
 
 -- GF-012-FIX: a custodian no longer in the roster is shown as 已不在公會
@@ -366,7 +423,60 @@ function UI.refresh()
     end
     shown(c.scopeNote, isCust)
     if isCust then c.scopeState.set(nil) else c.scopeState.set("empty", "你不是保管人") end
-    c.stock.set("unknown", UI.STOCK_TITLE, UI.STOCK_DETAIL)
+    -- GF-012-B: the share switch and what I share.
+    local st = K().myState()
+    shown(c.share, isCust); shown(c.share.label, isCust)
+    c.share.set(st == "on")
+    setEnabled(c.share, isCust and st ~= "noscope")
+    c.mine:SetText(isCust and K().mineText() or "")
+    UI.drawStock()
+end
+
+-- GF-012-B: the stock list (only this part is drawn on a search or the wheel).
+function UI.drawStock()
+    if not panel then return end
+    local cur = B().current()
+    local all, why = K().rows()
+    local rows = (c.query or "") ~= "" and K().search(c.query) or all
+    c.stockTotal = #rows
+    c.stockOffset = math.max(0, math.min(c.stockOffset or 0, #rows - UI.STOCK_ROWS))
+    local rest = #rows - c.stockOffset - UI.STOCK_ROWS
+    c.stockMore:SetText(rest > 0 and string.format(UI.STOCK_MORE, rest) or "")
+    for i, r in ipairs(c.stockRows) do
+        local item = rows[c.stockOffset + i]
+        if item then
+            r.set(item.itemID, item.total, { sub = K().whereText(item), stripe = c.stockOffset + i })
+            r.ago:SetText(item.t and ns.Recipes.agoText(item.t) or "")
+            local e = K().contactEntry(item)
+            r.contact.entry = e
+            setEnabled(r.contact, e ~= nil and ns.Supply.canContact(e))
+        else
+            r.contact.entry = nil
+            r:Hide()
+        end
+    end
+    if #rows > 0 then
+        c.stock.set(nil)
+    else
+        local key = cur.state ~= "ok" and "list" or (#all > 0 and "search") or why
+        local t = UI.STOCK_EMPTY[key] or UI.STOCK_EMPTY.none
+        c.stock.set(key == "list" and "unknown" or "empty", t[1], t[2])
+    end
+end
+
+function UI.scrollStock(delta)
+    local before = c.stockOffset or 0
+    local after = math.max(0, math.min((c.stockTotal or 0) - UI.STOCK_ROWS, before - (delta or 0)))
+    if after == before then return false end
+    c.stockOffset = after
+    UI.drawStock()
+    return true
+end
+
+-- The page shows: draw it; a custodian who has not said yes yet is asked once.
+function UI.show()
+    UI.refresh()
+    if K() then K().askIfNeeded() end
 end
 
 -- GF-UI-M: the wheel over the list moves one row; the same 8 rows are refilled.
@@ -380,6 +490,8 @@ function UI.scroll(delta)
 end
 
 ns.Bank.onChanged = function() if panel and panel:IsShown() then UI.refresh() end end
+-- GF-012-B: BankStock tells only when a stock record or my sharing changed.
+function UI.stockChanged() if panel and panel:IsShown() then UI.refresh() end end
 
 ns.Framework.register({
     id = UI.ID,
@@ -389,5 +501,5 @@ ns.Framework.register({
     entry = "logistics",
     order = 17,
     create = build,
-    show = UI.refresh,
+    show = UI.show,
 })

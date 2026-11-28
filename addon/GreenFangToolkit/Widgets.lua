@@ -349,7 +349,9 @@ end
 
 W.CONFIRM_NAME = "GreenFangToolkit_Confirm"
 local confirm
-function W.confirm(text, onYes)
+-- GF-012-B: onNo (optional) runs when the box closes without 確定 (取消, the X,
+-- ESC, or another confirm taking its place); callers without it are unchanged.
+function W.confirm(text, onYes, onNo)
     if not confirm then
         local f = CreateFrame("Frame", W.CONFIRM_NAME, UIParent)
         f:SetFrameStrata("TOOLTIP")
@@ -361,18 +363,25 @@ function W.confirm(text, onYes)
         f.text:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -20)
         f.yes = ns.OrdersUI.textButton(f, "確定", function()
             local fn = f.onYes
-            f.onYes = nil
+            f.onYes, f.onNo = nil, nil
             f:Hide()
             if fn then fn() end
         end, 90)
         f.no = ns.OrdersUI.textButton(f, "取消", function() f.onYes = nil; f:Hide() end, 90)
         W.closeButton(f)
+        local function closed()
+            local fn = f.onNo
+            f.onYes, f.onNo = nil, nil
+            if fn then fn() end
+        end
+        if f.HookScript then f:HookScript("OnHide", closed) else f:SetScript("OnHide", closed) end
         f:Hide()
         confirm = f
     end
     local f = confirm
+    if f:IsShown() and f.onNo then local old = f.onNo; f.onNo = nil; pcall(old) end
     f.text:SetText(text or "")
-    f.onYes = onYes
+    f.onYes, f.onNo = onYes, onNo
     local w = math.max(300, ns.labelWidth(text or "") + 40 + W.CLOSE_SIZE)
     f:SetSize(w, 116)
     f.yes:ClearAllPoints(); f.yes:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -20, 16)
