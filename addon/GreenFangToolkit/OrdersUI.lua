@@ -82,8 +82,22 @@ function UI.feeKind(fee)
     return "amount"
 end
 
+-- GF-UI-T: true when the estimate has no price at all for what must be bought
+-- (every material bought lacks one): then there is nothing to show but words.
+function UI.noEstimate(est)
+    if not (est and est.unknown) or est.noList then return false end
+    if (est.total or 0) > 0 then return false end
+    for _, row in ipairs(est.mats or {}) do if row.total then return false end end
+    return true
+end
+
 -- Text next to the estimate: "≥" when a price is missing (R-8.2.4).
 function UI.totalText(est, fee)
+    -- GF-UI-T: no price at all: words, never 「＞0 銅」 (with a fee: the fee, then the words).
+    if UI.noEstimate(est) then
+        if (fee or 0) > 0 then return UI.money(fee) .. "  " .. UI.TEXT.noEstimateFee end
+        return UI.TEXT.noEstimate
+    end
     local t = (est and est.total or 0) + (fee or 0)
     local s = UI.money(t)
     -- GF-006-D: also while the material list is not known yet (only the fee is in it).
@@ -904,24 +918,32 @@ UI.TEXT = {
     bringAll = "自帶",
     missing = "沒有價格：",
     lowerBound = "（＞＝至少：有材料沒有價格，沒算進去）",
-    noMarket = "還沒有行情資料：到拍賣場按旁邊的掃描鈕，或等會友掃描後分享過來",
+    noMarket = "還沒有行情：找拍賣師打開拍賣場，按右上角旁的「掃描行情」",
+    namedActive = "（接單中）",
+    -- GF-UI-T (owner: 材料費「＞0 銅」很怪): no price for any material bought.
+    noEstimate = "無法估價（沒有行情）",
+    noEstimateFee = "（材料無法估價）",
     marketSingle = "只有 1 位會友回報過，僅供參考",
     marketOld = "天前的價格",
+    scanName = "掃描行情",
 }
 UI.HINT = {
     product = { "成品", "這張單要做的東西。滑鼠移上去看物品說明。" },
     guild = { "公會單", "所有會做這個配方的會友都看得到，最先接單的人負責做。點一下改成公會單。" },
     named = { "指定工匠", "只有你選的那位工匠會收到這張單。點一下從會做的人裡選一位。",
-        "角落的小錘子＝這位工匠目前有開「接單」。" },
+        "名字後面寫「接單中」＝這位工匠目前有開接單。" },
     mat = { "點圖示：全部自帶／全部不帶，切換。", "「自帶」填你自己準備、交易時交給工匠的數量；沒自帶的部分由工匠準備，算進材料費。" },
     matsCost = { "材料費", "沒自帶的材料，照價格估的費用（給工匠的材料錢）。",
-        "價格依序從這裡找：1. 商人賣的價格（你逛過賣它的商人）；2. 拍賣插件；3. 公會的拍賣掃描（7 天內）。",
-        "前面有「＞」＝有材料查不到價格，沒算進去，實際會更多。" },
+        "價格依序從這裡找：1. 商人賣的價格（你逛過賣它的商人）；2. 拍賣插件；3. 拍賣場的「掃描行情」（你或會友 7 天內掃的）。",
+        "前面有「＞」＝有材料查不到價格，沒算進去，實際會更多；全部都查不到時寫「無法估價」。" },
     fee = { "工錢", "給工匠的手工費，可以自己改。",
         "紅色問號＝工匠沒填工錢；禮物＝工匠寫免費。" },
-    total = { "合計", "材料費＋工錢。前面有「＞」＝有材料沒有價格，實際會更多。" },
+    total = { "合計", "材料費＋工錢。前面有「＞」＝有材料沒有價格，實際會更多；材料全部沒有價格時寫「無法估價」。" },
+    scan = { "掃描行情", "按一下，工具箱就記下目前拍賣場所有物品的價格，用來估下單時的材料費和行情；掃完會自動分享給公會。",
+        "掃描時遊戲不會卡，可以繼續逛；按右鍵停止。" },
     market = { "行情", "這個成品在拍賣場最近的價格，用來和合計比較，看自己做划不划算。",
-        "來源：拍賣插件，或公會的拍賣掃描（在拍賣場按旁邊的掃描鈕；會友掃描的也會分享過來）。" },
+        "怎麼有行情：找拍賣師、打開拍賣場視窗，視窗右上角旁邊會多一顆「掃描行情」按鈕，按一下，工具箱就記下目前拍賣場的價格，用來估材料費和行情；公會裡有人掃過也會自動分享給你。",
+        "裝了拍賣插件的話，也會用插件的價格。" },
 }
 
 -- A tooltip by the mouse (Widgets.rowTip) with a white first line and wrapped lines under it.
@@ -1119,7 +1141,8 @@ UI.moneyBoxes = moneyBoxes
 -- 材料費: the amount ("＞" when a price is missing) and which materials have none.
 function UI.matsCostText(est)
     if est.noList then return UI.TEXT.noList end
-    local s = (est.unknown and "＞" or "") .. UI.money(est.total)
+    -- GF-UI-T: no price at all: 「無法估價（沒有行情）」 and which materials, no 「＞0」.
+    local s = UI.noEstimate(est) and UI.TEXT.noEstimate or ((est.unknown and "＞" or "") .. UI.money(est.total))
     if est.unknown then
         local names = {}
         for _, id in ipairs(est.missing or {}) do names[#names + 1] = UI.itemName(id) or ("#" .. tostring(id)) end
@@ -1249,10 +1272,11 @@ local function drawPopup(keepBoxes)
     UI.setSelected(popup.named, d.crafter ~= "*")
     local m = d.crafter ~= "*" and memberOf(d.crafter) or nil
     if m and Icons.setClassIcon(popup.named.tex, m.classToken) then popup.named.tex:Show() else setIcon(popup.named.tex, "unknown") end
-    setLabel(popup.named, m and ("指定工匠：" .. ns.shortName(m.name)) or "指定工匠")
+    -- GF-UI-T (owner: 「指定工匠有個標記重疊？」): the small hammer that sat on the
+    -- icon's corner is gone; 「接單中」 after the name says the same in words.
+    local active = m and O().isActive(m.guid, d.skill)
+    setLabel(popup.named, m and ("指定工匠：" .. ns.shortName(m.name) .. (active and UI.TEXT.namedActive or "")) or "指定工匠")
     if popup.named.label then popup.named.label:SetAlpha(1) end
-    popup.namedActive:Hide()
-    if m and O().isActive(m.guid, d.skill) then setIcon(popup.namedActive, "hammer") end
     popup.guild.hintExtra = d.crafter == "*" and { "目前選的是這個" } or nil
     popup.named.hintExtra = m and { "目前選的是：" .. ns.shortName(m.name) } or nil
     local est = UI.estimateOf(d)
@@ -1361,8 +1385,6 @@ local function createPopup()
     for _, b in ipairs({ f.guild, f.named }) do
         b:SetScript("OnEnter", function(self) UI.hint(self, self.hintLines, self.hintExtra) end)
     end
-    f.namedActive = f:CreateTexture(nil, "OVERLAY"); f.namedActive:SetSize(14, 14)
-    f.namedActive:SetPoint("TOPRIGHT", f.named, "TOPRIGHT", 4, 4)
     -- 材料: one row per material; the column names above them.
     UI.fieldLabel(f, "材料", UI.FIELD_X, MAT_Y - 4)
     f.matW = UI.POPUP_W - X - 24 - ns.Widgets.SCROLL_W - ns.Widgets.SCROLL_GAP
@@ -1714,7 +1736,7 @@ function UI.tradeHidden() if strip then strip:Hide() end end
 function UI.strip() return strip end
 
 ---------------------------------------------------------------------------
--- ⚖ next to the auction house (R-8.4)
+-- 「掃描行情」 next to the auction house (R-8.4; GF-UI-T: the icon has its name)
 ---------------------------------------------------------------------------
 
 local scanButton
@@ -1722,10 +1744,12 @@ function UI.auctionShown()
     local anchor = _G.AuctionHouseFrame or _G.AuctionFrame
     if not anchor then return end
     if not scanButton then
-        scanButton = iconButton(UIParent, 32, "scan", "掃描", function(_, mouse)
+        scanButton = iconButton(UIParent, 32, "scan", UI.TEXT.scanName, function(_, mouse)
             if mouse == "RightButton" then P().stopScan() else P().startScan() end
             UI.scanChanged()
-        end)
+        end, UI.TEXT.scanName)
+        -- GF-UI-T: a hint in words (what it does, where the prices go).
+        scanButton:SetScript("OnEnter", function(self) UI.hint(self, UI.HINT.scan, self.hintExtra) end)
         scanButton:SetFrameStrata("HIGH")
         scanButton.ring = scanButton:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         scanButton.ring:SetPoint("CENTER")
@@ -1750,7 +1774,8 @@ function UI.scanChanged()
         scanButton.ring:SetText("")
     end
     local ago = last and last.at and math.floor((S().serverNow() - last.at) / 3600)
-    scanButton.tip = "掃描" .. (ago and ("  " .. ago .. " 小時前") or "")
+    scanButton.tip = UI.TEXT.scanName .. (ago and ("  " .. ago .. " 小時前") or "")
+    scanButton.hintExtra = { ago and ("上次掃描：" .. ago .. " 小時前") or "還沒掃描過" }
 end
 function UI.scanButton() return scanButton end
 

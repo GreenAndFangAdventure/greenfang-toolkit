@@ -225,7 +225,7 @@ return function(T)
             ok(text ~= "" and GameTooltip:GetOwner() == b, name .. ": a hint")
             ok(b.tipPoint ~= nil, name .. ": by the mouse (rowTip)")
         end
-        ok(has(hover(f.named), "小錘子"), "the hammer badge explained")
+        ok(has(hover(f.named), "接單中"), "接單中 explained (GF-UI-T: no hammer on the icon)")
         ok(has(hover(f.feeIcon), "紅色問號"), "the red ? explained")
         ok(has(hover(f.matRows[1].icon), "自帶"), "the material icon explains 自帶")
         C_Item = nil

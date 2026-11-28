@@ -4861,6 +4861,11 @@ assert(loadfile(ROOT .. "/tests/addon/gfuir_tests.lua"))()({ test = test, eq = e
 assert(loadfile(ROOT .. "/tests/addon/gfuis_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint, shareLogin = shareLogin, shareFrom = shareFrom,
     rMsg = rMsg, leatherWindow = leatherWindow, PEER = PEER, A_PEER = A_PEER, A_THIRD = A_THIRD })
+-- GF-UI-T: the 說明 mode lists the words at once (號碼對照); 指定工匠 without a mark on
+-- its icon; 行情 and the 「掃描行情」 button in plain words; 無法估價 instead of 「＞0」
+-- (tests/addon/gfuit_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gfuit_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0
