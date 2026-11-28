@@ -42,47 +42,43 @@ return function(T)
     test("GF-008-C every step has a map; the one the owner can check", function()
         local ns = login()
         local M = ns.SleepingBagMap
-        local want = { 1413, 1434, 1436, 1414, 1442, 1442, 1415, 1432, 1424 } -- GF-008-D: the wall opens on Hillsbrad (the cart)
+        local want = { 1413, 1436, 1442, 1432, 1424 } -- GF-008-E: five steps, each on its own place
         for i, st in ipairs(ns.SleepingBagRoutes.Horde.steps) do
             eq(M.mapFor(st), want[i], "step " .. i .. " " .. st.id .. ": its map")
             ok(M.canShow(st), "step " .. i .. ": 看地圖")
-            ok((st.x and st.y) or st.noPin, "step " .. i .. ": a pin, or why not")
+            ok(st.x and st.y, "step " .. i .. ": a pin (GF-008-E: no step without a place)")
             eq(st.verified, false, "step " .. i .. ": 待實地驗證")
         end
     end)
 
+    -- GF-008-E: every step of the route has a place now; the code path for a step
+    -- without one (a later route's data) still opens its map without a pin.
     test("GF-008-C a step without x / y: its map opens without a pin, and the page says why", function()
         local ns, calls, wm = login()
         local SB, M = ns.SleepingBag, ns.SleepingBagMap
         eq(SB.showMap(), "canvas", "step 1 pinned")
         local pin = M.pin()
         ok(pin._shown, "the pin")
-        SB.complete(); SB.complete(); SB.complete() -- step 4: back to Kalimdor
-        local step = SB.currentStep()
-        eq(step.id, "to-kalimdor", "step 4")
-        ok(SB.mapButton._shown ~= false, "看地圖 shown")
-        wm:Hide() -- closed since step 1: 看地圖 opens it again
-        eq(SB.showMap(), "map", "the map only")
+        local step = { id = "trip", zone = "返回卡林多", mapID = 1414, mapZone = "卡林多", mapZoneEN = "Kalimdor",
+            noPin = "搭飛艇移動", action = "a", verified = false }
+        wm:Hide()
+        eq(M.show(step, 4), "map", "the map only")
         eq(calls.open[#calls.open], 1414, "opened on 卡林多")
         eq(wm:GetMapID(), 1414, "the map shows it")
         ok(not pin._shown, "no pin")
         eq(M.current, nil, "nothing pinned")
-        ok(SB.pageText():find("卡林多（地圖不標位置：" .. step.noPin .. "）", 1, true), "the reason on the page")
-        -- Step 7 (to Loch Modan): Eastern Kingdoms, no pin.
-        SB.complete(); SB.complete(); SB.complete()
-        eq(SB.currentStep().id, "to-loch-modan", "step 7")
-        eq(SB.showMap(), "map", "the map only")
-        eq(wm:GetMapID(), 1415, "東部王國")
+        eq(SB.coords(step), "卡林多（地圖不標位置：搭飛艇移動）", "the reason in the text")
     end)
 
-    test("GF-008-C approximate pins say so: 格羅姆高營地, 烈日石居, the wall on the Arathi map", function()
+    test("GF-008-C approximate pins say so: 格羅姆高營地, the wall on the Arathi map", function()
         local ns, _, wm = login()
         local SB, M = ns.SleepingBag, ns.SleepingBagMap
-        SB.complete() -- step 2
+        SB.complete() -- GF-008-E: step 2 西部荒野; Grom'gol is its second point
         eq(SB.showMap(), "canvas", "pinned")
         ok(SB.pageText():find("荊棘谷（32, 29）（大約：格羅姆高營地的飛艇塔）", 1, true), "the page says approximate")
-        local pin = M.pin()
-        GameTooltip._lines = nil
+        wm:SetMapID(1434)
+        local pin = M.pin(2)
+        ok(pin._shown, "Grom'gol's pin on the jungle map")
         local said = {}
         local add = GameTooltip.AddLine
         GameTooltip.AddLine = function(self, t, ...) said[#said + 1] = t; return add(self, t, ...) end
@@ -91,10 +87,9 @@ return function(T)
         local found = false
         for _, t in ipairs(said) do if tostring(t):find("大約：格羅姆高營地", 1, true) then found = true end end
         ok(found, "the tooltip says approximate")
-        for _ = 1, 7 do SB.complete() end
+        for _ = 1, 3 do SB.complete() end
         eq(SB.currentStep().id, "thoradin-wall", "the last step")
         eq(SB.showMap(), "canvas", "pinned")
-        -- GF-008-D: the cart on Hillsbrad, the bags on the Arathi map (sourced, no longer approximate).
         eq(wm:GetMapID(), 1424, "on 希爾斯布萊德丘陵")
         ok(SB.pageText():find("希爾斯布萊德丘陵（87, 49）（多來源一致）", 1, true), "the cart's text")
         ok(SB.pageText():find("阿拉希高地（22, 24）（單一來源）", 1, true), "the bags' text")

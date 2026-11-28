@@ -1,45 +1,36 @@
 -- Route data for the sleeping bag helper (GF-008-A): Horde route of the
 -- "Cozy Sleeping Bag" quest chain on WoW Forever.
 --
--- GF-008-D (owner: 「請再多去蒐集資料做精簡的攻略…針對部落解法做」): rewritten
--- in our own words from several public guides cross-checked step by step
--- (GreenFang_Toolkit docs/research/GF-008-D_guide.md lists the URLs):
---   warcraft.wiki.gg quest pages (Forever + SoD values), method.gg (Forever),
---   kotaku.com (Forever), warcrafttavern.com (Forever), dotesports (SoD).
--- NOTHING here is field-tested yet: every step has verified = false and the UI
--- shows "待實地驗證". Quest IDs are intentionally not used until they are
--- confirmed on the Forever client.
+-- GF-008-D: rewritten in our own words from several public guides
+-- (docs/research/GF-008-D_guide.md). GF-008-E (owner 2026-11-28: 步驟太多太囉嗦、
+-- 沒有地點的步驟要併進有地點的步驟): nine steps became five; every step has a
+-- place on its own map; one line to do, at most one line to watch out for.
+-- Sources cross-checked again for GF-008-E: wow.gg (zh-cn), conquestcapped,
+-- skycoach, leprestore, kami-labs, gfinity, plus the GF-008-D set.
+-- NOTHING here is field-tested yet: every step has verified = false. Quest IDs
+-- are intentionally not used until they are confirmed on the Forever client.
 --
 -- One route per faction: ns.SleepingBagRoutes[<key>] = { faction = "Horde" |
--- "Alliance", ... }. SleepingBag.lua picks the route whose `faction` matches
--- the player; an Alliance route can be added here later without code changes.
+-- "Alliance", ... }. SleepingBag.lua picks the route whose `faction` matches.
 --
 -- Step fields:
---   id, zone, zoneEN        map area
---   mapID                   the step's uiMapID (classic IDs, unconfirmed on
---                           Forever; the map code checks the name and falls
---                           back to a search by name)
---   mapZone, mapZoneEN      the map's name when it is not the step's zone
---   points                  GF-008-D: the step's map points, in order:
---                             x, y      precise coordinates (0-100)
+--   id, zone, zoneEN        map area (the step's own map)
+--   mapID                   the step's uiMapID (classic IDs, checked by name)
+--   points                  the step's map points, in order; AT LEAST ONE on the
+--                           step's own map (GF-008-E, ns.SleepingBagCheck):
+--                             x, y      coordinates (0-100)
 --                             kind      "start" 接任務 / "turnin" 交任務並接下一個 /
---                                       "route" 路線點 (cart, zeppelin tower, flight point)
+--                                       "route" 路線點 (cart, zeppelin tower, path)
 --                             label     what is there
 --                             conf      "multi" 多來源一致 / "single" 單一來源 /
---                                       "approx" 大約 (map knowledge, no reliable source)
---                             approx    the landmark the approximate point sits on
+--                                       "approx" 大約 (map knowledge)
+--                             approx    the landmark an approximate point sits on
 --                             src       where the numbers come from
 --                             mapID, zone, zoneEN  when the point is on another map
---   x, y, approx            filled below from the first point on the step's own
---                           map (older code and tests read these)
---   noPin                   why this step opens its map without a point
---   landmark                what you will see there
---   object, objectEN        thing to interact with (Chinese name not confirmed)
---   action                  one line: what to do
---   tip                     one line: the usual stuck point
---   travel                  one line: how to get there
---   transfer, guards, noFlightPath, rpgHint   short extra lines
---   round                   1 = part of the first field-test round (spec §3)
+--   x, y, approx            filled below from the first point on the step's own map
+--   action                  ONE sentence: where to go, what to do
+--   tip                     at most one sentence: what to bring / level / danger
+--   landmark, rpgHint, object, objectEN   for the RPG text (switched off)
 --   verified                false until checked in the game
 
 local _, ns = ...
@@ -51,47 +42,26 @@ ns.SleepingBagRoutes.Horde = {
     title = "舒適睡袋（部落路線）",
     faction = "Horde",
     minLevel = 14,
+    layout = 2, -- GF-008-E: the five-step layout (a saved step of the nine-step one is moved over)
+    -- GF-008-E: the nine-step layout's saved step (1-10, 10 = finished) -> this layout's.
+    fromLayout1 = { 1, 2, 2, 3, 3, 3, 4, 4, 5, 6 },
     reward = "舒適睡袋（Cozy Sleeping Bag）",
-    note = "不必打怪，但中段會穿過高等區域與聯盟地盤；攻略建議 30 級以上再走第 7～9 步。",
-    source = "warcraft.wiki.gg、method.gg、kotaku.com、warcrafttavern.com（詳見研究筆記）",
+    note = "不必打怪，但第 4、5 步要穿過聯盟地盤和高等區域。",
+    source = "wow.gg、warcraft.wiki.gg、method.gg、kotaku.com、conquestcapped.com、skycoach.gg 等攻略交叉比對",
     steps = {
         {
             id = "barrens",
             zone = "貧瘠之地", zoneEN = "The Barrens",
             mapID = 1413,
             points = {
-                { x = 46.1, y = 74.3, kind = "start", label = "燒毀的殘骸", conf = "multi",
-                  src = "Method 46.12, 74.32；wiki 46.4, 73.9；Kotaku、Tavern 46, 74" },
+                { x = 46.1, y = 74.3, kind = "start", label = "燒毀的殘骸（黑塔裡）", conf = "multi",
+                  src = "Method 46.12, 74.32；wiki 46.4, 73.9；wow.gg、Kotaku、Tavern、skycoach 46, 74" },
             },
+            action = "到陶拉祖營地正南、大路旁燒黑的瞭望塔，點塔裡燒毀的殘骸接第一個任務。",
+            tip = "14 級就能接；從十字路口飛行點沿大路往南走。",
             landmark = "南貧瘠之地：陶拉祖營地正南、大路旁燒黑的瞭望塔",
-            object = "燒毀的殘骸", objectEN = "Burned-Out Remains",
-            action = "點塔裡的殘骸，接「...and that note you found」。",
-            tip = "紙條只說去「雙胞胎之地」，答案是西部荒野。",
-            travel = "十字路口飛行點沿大路往南。",
-            transfer = "十字路口（飛行點）",
-            guards = "低等野怪，14 級可通過。",
-            noFlightPath = "從奧格瑪經杜洛塔過橋進貧瘠之地，沿大路南下。",
             rpgHint = "往十字路口以南走，找路邊那座被燒成焦黑的塔。",
-            round = 1,
-            verified = false,
-        },
-        {
-            id = "to-stranglethorn",
-            zone = "荊棘谷", zoneEN = "Stranglethorn Vale",
-            mapID = 1434,
-            points = {
-                { x = 32, y = 29, kind = "route", label = "格羅姆高營地飛艇塔", conf = "approx",
-                  approx = "格羅姆高營地的飛艇塔", src = "地圖知識，沒有攻略給座標" },
-            },
-            landmark = "格羅姆高營地",
-            action = "奧格瑪外飛艇塔搭往格羅姆高營地的飛艇。",
-            tip = "下飛艇往西到海邊，沿海岸往北游到西部荒野南岸（Method 的走法）。",
-            travel = "飛艇不需要飛行點；水裡有敵對納迦，貼著岸游。",
-            transfer = "奧格瑪飛艇塔＞格羅姆高營地",
-            guards = "荊棘谷怪物等級高，別進叢林。",
-            noFlightPath = "飛艇不需要飛行點。",
-            rpgHint = "往大海的另一邊去：飛艇能到南方的叢林。",
-            round = 1,
+            object = "燒毀的殘骸", objectEN = "Burned-Out Remains",
             verified = false,
         },
         {
@@ -99,91 +69,36 @@ ns.SleepingBagRoutes.Horde = {
             zone = "西部荒野", zoneEN = "Westfall",
             mapID = 1436,
             points = {
-                { x = 37.1, y = 50.1, kind = "turnin", label = "燒毀的推車旁的殘骸", conf = "multi",
-                  src = "Method 37.14, 50.13；Kotaku、Tavern 37, 50；wiki 37.5, 50.7" },
+                { x = 37.1, y = 50.1, kind = "turnin", label = "燒毀推車旁的殘骸", conf = "multi",
+                  src = "Method 37.14, 50.13；wiki 37.5, 50.7；wow.gg、Kotaku、Tavern、skycoach 37, 50" },
+                { x = 32, y = 29, kind = "route", label = "格羅姆高營地飛艇塔", conf = "approx",
+                  approx = "格羅姆高營地的飛艇塔", src = "地圖知識，沒有攻略給座標",
+                  mapID = 1434, zone = "荊棘谷", zoneEN = "Stranglethorn Vale" },
             },
-            landmark = "亞歷斯頓農場（Alexston Farmstead）燒毀的推車",
-            object = "燒毀的殘骸／釘住的木板", objectEN = "Burned-Out Remains / Nailed Plank",
-            action = "點推車旁的殘骸交任務，接「Stepping Stones」。",
-            tip = "物件名稱各攻略說法不一（殘骸或木板），找燒毀的推車就對了；獎勵兩瓶藥水。",
-            travel = "從南岸上岸後往北走到農場。",
-            transfer = "無",
-            guards = "聯盟地區：避開哨兵嶺，別在路上停。",
-            noFlightPath = "游泳與步行即可。",
-            rpgHint = "穿過開闊農地，找一輛燒焦的推車。",
-            round = 1,
+            action = "奧格瑪搭飛艇到荊棘谷格羅姆高營地，下海往北沿岸游到西部荒野，點亞歷斯頓農場燒毀推車旁的殘骸。",
+            tip = "聯盟地區，交完就走；海裡有納迦，貼著岸游。",
+            landmark = "亞歷斯頓農場燒毀的推車",
+            rpgHint = "坐飛艇到南方叢林，再沿海岸往北到開闊農地，找燒焦的推車。",
+            object = "燒毀的殘骸（也有攻略寫釘住的木板）", objectEN = "Burned-Out Remains / Nailed Plank",
             verified = false,
         },
         {
-            id = "to-kalimdor",
-            zone = "返回卡林多", zoneEN = "Back to Kalimdor",
-            mapID = 1414, mapZone = "卡林多", mapZoneEN = "Kalimdor",
-            noPin = "這一步是搭飛艇移動，沒有固定地點",
-            landmark = "格羅姆高營地＞奧格瑪＞十字路口",
-            action = "游回格羅姆高營地，搭飛艇回奧格瑪，再飛十字路口。",
-            tip = "這趟先別用爐石：第 7 步要用爐石回奧格瑪。",
-            travel = "從十字路口往西北走進石爪山脈。",
-            transfer = "格羅姆高營地飛艇塔；十字路口（飛行點）",
-            guards = "游回去時同樣避開納迦。",
-            noFlightPath = "沒有十字路口飛行點就從奧格瑪步行。",
-            rpgHint = "回到故鄉的大陸。",
-            round = 1,
-            verified = false,
-        },
-        {
-            id = "stonetalon-litter",
+            id = "stonetalon",
             zone = "石爪山脈", zoneEN = "Stonetalon Mountains",
             mapID = 1442,
             points = {
-                { x = 40.8, y = 52.5, kind = "turnin", label = "口袋裡的雜物（營地箱子上）", conf = "multi",
-                  src = "wiki 40.8, 52.5；另一份攻略摘要 40.6, 52.4（Method 寫 54.6, 52.4，不一致）" },
-                { x = 47, y = 61, kind = "route", label = "烈日石居（飛行點）", conf = "approx",
-                  approx = "烈日石居", src = "地圖知識" },
+                { x = 40.6, y = 52.4, kind = "turnin", label = "口袋裡的雜物（營地箱子上）", conf = "multi",
+                  src = "wow.gg、conquestcapped、搜尋摘要 40.6, 52.4；wiki 40.8, 52.5（Method 寫 54.6, 52.4，不採用）" },
+                { x = 39.6, y = 49.9, kind = "turnin", label = "一堆泥土（營地北邊坡上）", conf = "multi",
+                  src = "wiki 39.6, 49.9；Method 39.61, 49.88；Dot Esports 39.62, 49.86；wow.gg 39.6, 49.8" },
+                { x = 50.9, y = 52.3, kind = "route", label = "烈日石居往北的山路口", conf = "single",
+                  src = "conquestcapped 50.9, 52.3" },
             },
-            landmark = "烈日石居往北山路盡頭的小營地，有營火",
-            object = "口袋裡的雜物", objectEN = "Pocket Litter",
-            action = "點營地箱子上的雜物交任務，接「Scramble」。",
-            tip = "獎勵有 12 格的工具箱；營火的「Rekindle」可略過（有人回報會壞）。",
-            travel = "從烈日石居往北走山路上去。",
-            transfer = "烈日石居（飛行點）",
-            guards = "中等級野怪，走山路別拉怪。",
-            noFlightPath = "從十字路口往西北步行進石爪山脈。",
-            rpgHint = "到烈日石居一帶，沿山坡小路走到有營火的地方。",
-            round = 1,
-            verified = false,
-        },
-        {
-            id = "stonetalon-mound",
-            zone = "石爪山脈", zoneEN = "Stonetalon Mountains",
-            mapID = 1442,
-            points = {
-                { x = 39.6, y = 49.9, kind = "turnin", label = "一堆泥土", conf = "multi",
-                  src = "wiki 39.6, 49.9；Method 39.61, 49.88；Dot Esports 39.62, 49.86" },
-            },
-            landmark = "營地往北上坡的土堆",
-            object = "一堆泥土", objectEN = "Mound of Dirt",
-            action = "往北上坡點土堆交任務，接「Wet Job」；獎勵選一把遠程武器。",
-            tip = "坡邊是懸崖，摔下去要繞一大圈。",
-            travel = "從上一步營地往北走一小段。",
-            guards = "與上一步相同。",
-            noFlightPath = "步行即可。",
-            rpgHint = "從營火往北上坡，留意翻過的土。",
-            round = 1,
-            verified = false,
-        },
-        {
-            id = "to-loch-modan",
-            zone = "前往洛克莫丹", zoneEN = "To Loch Modan",
-            mapID = 1415, mapZone = "東部王國", mapZoneEN = "Eastern Kingdoms",
-            noPin = "這一步是跨好幾區的長途移動，看大陸地圖找路線",
-            landmark = "幽暗城＞銀松森林＞希爾斯布萊德丘陵＞阿拉希高地＞濕地＞洛克莫丹",
-            action = "爐石回奧格瑪，搭飛艇到幽暗城，一路往東南走到洛克莫丹。",
-            tip = "最危險的一段：沒坐騎約 40 分鐘，路上怪到 60 級；沿路開飛行點。",
-            travel = "幽暗城＞銀松森林＞希爾斯布萊德＞阿拉希＞濕地＞洛克莫丹。",
-            transfer = "幽暗城飛艇塔；塔倫米爾（飛行點）",
-            guards = "濕地米奈希爾港、塞爾薩瑪一帶有聯盟守衛，貼大路走。",
-            noFlightPath = "全程步行，路線相同。",
-            rpgHint = "先往北方的亡者之城，再一路往東南穿過高地與沼澤，直到矮人的湖區。",
+            action = "游回格羅姆高搭飛艇回奧格瑪，到石爪山脈烈日石居，沿北邊山路到營地點箱子上的雜物，再往北上坡點土堆。",
+            tip = "回程先別用爐石（下一步要用）；坡邊是懸崖，別摔下去。",
+            landmark = "烈日石居往北山路盡頭、有營火的小營地",
+            rpgHint = "到烈日石居一帶，沿山坡小路走到有營火的地方，再往北上坡找翻過的土。",
+            object = "口袋裡的雜物、一堆泥土", objectEN = "Pocket Litter / Mound of Dirt",
             verified = false,
         },
         {
@@ -191,17 +106,14 @@ ns.SleepingBagRoutes.Horde = {
             zone = "洛克莫丹", zoneEN = "Loch Modan",
             mapID = 1432,
             points = {
-                { x = 49.5, y = 12.9, kind = "turnin", label = "雕刻的小雕像（水壩平台）", conf = "multi",
-                  src = "wiki 49.5, 12.8；Method 49.45, 12.91；Tavern 49, 12" },
+                { x = 49.5, y = 12.9, kind = "turnin", label = "雕刻的小雕像（水壩下方平台）", conf = "multi",
+                  src = "wiki 49.5, 12.8；Method 49.45, 12.91；wow.gg、conquestcapped 49.4, 12.9；Tavern 49, 12" },
             },
-            landmark = "北邊的石壁水壩（Stonewrought Dam）",
+            action = "爐石回奧格瑪，搭飛艇到幽暗城，一路往東南走到洛克莫丹北邊的水壩，從水壩中段跳到下方平台點雕像。",
+            tip = "最危險的一段：路上有高等怪、水壩有聯盟守衛，死了就跑屍回來再跳。",
+            landmark = "洛克莫丹北邊的石壁水壩",
+            rpgHint = "先往北方的亡者之城，再一路往東南到矮人的湖區，找湖北邊的大水壩。",
             object = "雕刻的小雕像", objectEN = "Carved Figurine",
-            action = "從水壩中段往北側跳到下方平台，點雕像交任務，接「Eagle's Fist」。",
-            tip = "水壩有高等聯盟守衛巡邏，可能會死；跑屍回來再跳。",
-            travel = "從濕地進洛克莫丹後往北走到水壩。",
-            guards = "跳下前先看守衛走到哪。",
-            noFlightPath = "步行即可。",
-            rpgHint = "找湖北邊那道巨大的水壩，雕像在水壩的一處平台上。",
             verified = false,
         },
         {
@@ -209,25 +121,38 @@ ns.SleepingBagRoutes.Horde = {
             zone = "希爾斯布萊德丘陵", zoneEN = "Hillsbrad Foothills",
             mapID = 1424,
             points = {
-                { x = 87.4, y = 49.6, kind = "route", label = "牆缺口的推車（爬牆起點）", conf = "multi",
-                  src = "Method 87.36, 49.62；另一份攻略摘要 87.3, 49.6" },
-                { x = 22.5, y = 24.2, kind = "turnin", label = "信差的包包＋匆忙捲起的背包", conf = "single",
+                { x = 87.3, y = 49.6, kind = "route", label = "牆邊壞掉的推車（爬牆起點）", conf = "multi",
+                  src = "Method 87.36, 49.62；wow.gg、conquestcapped、skycoach、kami-labs、leprestore 87.3, 49.6" },
+                { x = 22.5, y = 24.2, kind = "turnin", label = "信差的包包＋下面的背包", conf = "single",
                   mapID = 1417, zone = "阿拉希高地", zoneEN = "Arathi Highlands",
-                  src = "wiki 22.5, 24.2（在阿拉希高地地圖上）" },
+                  src = "wiki 22.5, 24.2（阿拉希高地地圖）；其他攻略只說和推車同一處" },
             },
-            landmark = "希爾斯布萊德與阿拉希高地交界的索拉丁之牆",
-            object = "信差的包包、匆忙捲起的背包", objectEN = "Messenger Bag / Hastily Rolled-Up Satchel",
-            action = "推車爬上牆頂走到營地；先點包包交任務，再點背包拿舒適睡袋。",
+            action = "從洛克莫丹往北經濕地、阿拉希高地，走到索拉丁之牆靠丘陵那側，踩推車爬上牆，先點信差的包包，再點下面的背包拿睡袋。",
             tip = "爬法：圓桶＞突出的木板＞推車頂＞牆頂；點完包包別離開牆上。",
-            travel = "從洛克莫丹往北經濕地、阿拉希高地走到牆的西側缺口。",
-            transfer = "阿拉希高地的落錘鎮（飛行點）",
-            guards = "牆附近有中高等級怪，上了牆就比較安全。",
-            noFlightPath = "從濕地北上沿大路步行。",
-            rpgHint = "到分隔丘陵與高地的古老石牆，找能爬上牆頂的地方。",
+            landmark = "希爾斯布萊德丘陵與阿拉希高地交界的索拉丁之牆",
+            rpgHint = "到分隔丘陵與高地的古老石牆，找能爬上牆頂的壞推車。",
+            object = "信差的包包、匆忙捲起的背包", objectEN = "Messenger Bag / Hastily Rolled-Up Satchel",
             verified = false,
         },
     },
 }
+
+-- GF-008-E: problems of a route's data (empty = fine): every step needs a point
+-- on its own map, an action and an id. Tests check every route; a later
+-- Alliance route is held to the same rule.
+function ns.SleepingBagCheck(route)
+    local bad = {}
+    for i, st in ipairs(type(route) == "table" and route.steps or {}) do
+        local own = false
+        for _, p in ipairs(type(st.points) == "table" and st.points or {}) do
+            if (not p.mapID or p.mapID == st.mapID) and type(p.x) == "number" and type(p.y) == "number" then own = true end
+        end
+        if not own then bad[#bad + 1] = "第 " .. i .. " 步沒有地點" end
+        if type(st.action) ~= "string" or st.action == "" then bad[#bad + 1] = "第 " .. i .. " 步沒有要做的事" end
+        if type(st.id) ~= "string" or st.id == "" then bad[#bad + 1] = "第 " .. i .. " 步沒有 id" end
+    end
+    return bad
+end
 
 -- x / y / approx on each step from its first point on the step's own map.
 for _, route in pairs(ns.SleepingBagRoutes) do
