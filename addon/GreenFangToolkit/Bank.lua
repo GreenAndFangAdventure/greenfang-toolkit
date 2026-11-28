@@ -55,7 +55,8 @@ Bank.WHY_NAME = { guild = "不在目標公會", roster = "名冊未載入或找�
     api = "遊戲沒回答是否為會長", conflict = "遊戲與名冊對會長不一致" }
 Bank.APPOINT_NAME = { ok = "成功", same = "沒有變更", full = "已達上限", invalid = "格式不對",
     ["not-found"] = "找不到這位職工", ["no-authority"] = "沒有會長權限", roster = "公會名冊尚未載入" }
-Bank.ROLE_NAME = { leader = "會長", custodian = "保管人", member = "職工", unknown = "權限未知" }
+Bank.ROLE_NAME = { leader = "會長", custodian = "保管人", member = "職工", unknown = "權限未知",
+    officer = "審核幹部" } -- GF-012-D
 
 local stats = { published = 0, refused = 0, healed = 0, rejectedOld = 0, rejectedForged = 0 }
 Bank.stats = stats
@@ -273,6 +274,7 @@ function Bank.myRole()
     if auth == "leader" then return "leader" end
     local me = S().selfAuthor()
     if me and (Bank.isCustodian(me)) then return "custodian" end
+    if me and Bank.isOfficer and (Bank.isOfficer(me)) then return "officer" end -- GF-012-D
     if auth == "unknown" then return "unknown" end
     return "member"
 end
@@ -523,9 +525,11 @@ end
 -- publishing it. A new guild master starts from an empty list (design §3.4).
 function Bank.checkStepDown()
     local g = guildData()
-    if not g or not g.own then return false end
+    if not g or not (g.own or g.ownO) then return false end
     if Bank.authority() ~= "member" then return false end
-    g.previous, g.own = g.own, nil
+    -- GF-012-D: the reviewer list (審核幹部) is put aside the same way.
+    if g.own then g.previous, g.own = g.own, nil end
+    if g.ownO then g.previousO, g.ownO = g.ownO, nil end
     if Bank.onChanged then Bank.onChanged() end
     return true
 end
@@ -616,6 +620,12 @@ function Bank.diagText()
     end
     -- GF-012-B: the stock line (BankStock.diagText) in place of 「尚未開放」.
     local stock = ns.BankStock and ns.BankStock.diagText() or "庫存：未載入"
+    -- GF-012-D: the reviewer list and the requests.
+    local oc = Bank.officers and Bank.officers() or { state = "unknown" }
+    local on = 0
+    for _, e in ipairs(oc.list and oc.list.entries or {}) do if e.enabled then on = on + 1 end end
+    stock = stock .. string.format("｜審核幹部：%s，有效 %d 位", Bank.STATE_NAME[oc.state] or oc.state, on)
+        .. (ns.BankRequests and ("｜" .. ns.BankRequests.diagText()) or "")
     return string.format("身分：%s%s｜名單：%s%s｜有效保管人 %d 位｜發布 %d、拒絕管理 %d、自我修正 %d%s%s｜%s",
         Bank.ROLE_NAME[Bank.myRole()] or "?", (auth == "unknown" and why) and ("（" .. (Bank.WHY_NAME[why] or why) .. "）") or "",
         Bank.STATE_NAME[cur.state] or cur.state, cur.state == "ok" and (cur.direct and "，直接收到" or "，經轉送") or "",
@@ -725,3 +735,213 @@ function Bank.notifySoon() ns.coalesce("bank-notify", 0, Bank.notifyScan) end
 if ns.Notify and ns.Notify.onAfterCombat then
     ns.Notify.onAfterCombat(function() if Bank.notifyPending then Bank.notifyScan() end end)
 end
+
+---------------------------------------------------------------------------
+-- GF-012-D (owner 2026-11-28: 「會長、保管人與指定幹部」可以核准): the
+-- reviewer list 審核幹部, one more GFTKS record group KO, authored by the
+-- guild master like K (K itself is not changed: 0.16.16 reads it as before).
+--   wire: 1;<epoch>;<leaderA>;<a>,<1|0>,<epoch>/...   (1 = 有效, 0 = 已撤銷)
+-- Checked like K: the author must be the current guild master, the leader
+-- field must match, the epoch must not be below the highest seen (an old
+-- packet never brings a revoked reviewer back). At most Bank.MAX_ACTIVE
+-- active and Bank.MAX_REVOKED revoked. Only the guild master changes it.
+-- Saved: bank.guilds[<guild>].ownO = { epoch, entries = { [a] = { enabled,
+-- epoch, at } } } (the master's original), .seenO = { [leaderA] = epoch }.
+---------------------------------------------------------------------------
+
+Bank.OFFICER_GROUP = "KO"
+
+function Bank.encodeOfficers(d)
+    if type(d) ~= "table" or type(d.epoch) ~= "number" or not validA(d.leader) then return nil end
+    local parts = {}
+    for _, e in ipairs(d.entries or {}) do
+        if not validA(e.a) or type(e.epoch) ~= "number" then return nil end
+        parts[#parts + 1] = e.a .. "," .. (e.enabled and "1" or "0") .. "," .. S().b36(e.epoch)
+    end
+    return "1;" .. S().b36(d.epoch) .. ";" .. d.leader .. ";" .. table.concat(parts, "/")
+end
+
+function Bank.decodeOfficers(_, v)
+    if type(v) ~= "string" or #v > Bank.MAX_VALUE then return nil end
+    local ep, leader, body = v:match("^1;([0-9a-z]+);([%w%-]+);(.*)$")
+    local epoch = ep and S().unb36(ep)
+    if not epoch or epoch < S().EPOCH or epoch > S().serverNow() + S().FUTURE then return nil end
+    local d = { epoch = epoch, leader = leader, entries = {} }
+    local seenA, active, revoked, n = {}, 0, 0, 0
+    if body ~= "" then
+        for item in (body .. "/"):gmatch("([^/]*)/") do
+            n = n + 1
+            if n > Bank.MAX_ACTIVE + Bank.MAX_REVOKED then return nil end
+            local a, on, eep = item:match("^([%w%-]+),([01]),([0-9a-z]+)$")
+            local e = eep and S().unb36(eep)
+            if not a or not e or e > epoch or seenA[a] then return nil end
+            seenA[a] = true
+            if on == "1" then active = active + 1 else revoked = revoked + 1 end
+            d.entries[#d.entries + 1] = { a = a, enabled = on == "1", epoch = e }
+        end
+    end
+    if active > Bank.MAX_ACTIVE or revoked > Bank.MAX_REVOKED then return nil end
+    return d
+end
+
+-- The reviewer list in force: { state (Bank.STATE_NAME key), leader, list }.
+local officerMemo = {}
+function Bank.officers()
+    local out = { state = "unknown" }
+    if ns.guildState() ~= "target" or not S().store() then return out end
+    local leaderA = Bank.rosterLeader()
+    if not leaderA then return out end
+    local key = tostring(S().version) .. "|" .. tostring(cache.at) .. "|" .. leaderA
+    if officerMemo.key == key then return officerMemo.out end
+    officerMemo = { key = key, out = out }
+    out.leader = leaderA
+    local rec = S().get(leaderA, Bank.OFFICER_GROUP)
+    if not rec then out.state = "none"; return out end
+    local d = S().decoded(leaderA, Bank.OFFICER_GROUP)
+    if not d then out.state = "invalid"; return out end
+    if d.leader ~= leaderA then out.state = "forged"; return out end
+    local g = guildData()
+    if g and type(g.seenO) ~= "table" then g.seenO = {} end
+    local seen = g and g.seenO[leaderA] or 0
+    if d.epoch < seen then out.state = "old"; return out end
+    if g and d.epoch > seen then g.seenO[leaderA] = d.epoch end
+    out.state, out.list, out.at = "ok", d, rec.t
+    return out
+end
+
+-- Is a an enabled reviewer now? Also returns the entry (its epoch).
+function Bank.isOfficer(a)
+    local cur = Bank.officers()
+    local e = cur.state == "ok" and entryFor(cur.list, a) or nil
+    return e ~= nil and e.enabled, e
+end
+
+local function ownOfficerTable(own)
+    local me = S().selfAuthor()
+    if not own or not me then return nil end
+    local list = { epoch = own.epoch, leader = me, entries = {} }
+    for a, e in pairs(own.entries or {}) do
+        list.entries[#list.entries + 1] = { a = a, enabled = e.enabled == true, epoch = e.epoch }
+    end
+    table.sort(list.entries, function(x, y) return x.a < y.a end)
+    return list
+end
+
+function Bank.ownOfficerValue()
+    if Bank.authority() ~= "leader" then return nil end
+    local g = guildData()
+    return g and g.ownO and Bank.encodeOfficers(ownOfficerTable(g.ownO)) or nil
+end
+
+local retryingO = false
+local function publishOfficers()
+    local v = Bank.ownOfficerValue()
+    if not v then return "no-authority" end
+    local r = S().ownRecord(Bank.OFFICER_GROUP, v)
+    if r == "stored" or r == "same" then
+        local g, me = guildData(), S().selfAuthor()
+        if g and me and g.ownO then
+            if type(g.seenO) ~= "table" then g.seenO = {} end
+            g.seenO[me] = math.max(g.seenO[me] or 0, g.ownO.epoch)
+        end
+    elseif r == "future" and not retryingO then
+        retryingO = true
+        ns.after(Bank.RETRY, function() retryingO = false; publishOfficers() end)
+    end
+    if Bank.onChanged then Bank.onChanged() end
+    return r
+end
+Bank.publishOfficers = publishOfficers
+
+local function changeOfficers(fn)
+    if not Bank.canManage() then stats.refused = stats.refused + 1; return "no-authority" end
+    local g = guildData()
+    if not g then return "no-authority" end
+    g.ownO = g.ownO or { epoch = 0, entries = {} }
+    if type(g.ownO.entries) ~= "table" then g.ownO.entries = {} end
+    if type(g.seenO) ~= "table" then g.seenO = {} end
+    local me = S().selfAuthor()
+    local epoch = math.max(math.floor(S().serverNow()), (g.ownO.epoch or 0) + 1, ((me and g.seenO[me]) or 0) + 1)
+    local r = fn(g.ownO, epoch)
+    if r ~= "ok" then return r end
+    g.ownO.epoch = epoch
+    trim(g.ownO)
+    publishOfficers()
+    return "ok"
+end
+
+-- Appoint a reviewer (a name, a roster member or an author id).
+function Bank.appointOfficer(who)
+    if not Bank.canManage() then stats.refused = stats.refused + 1; return "no-authority" end
+    if not (ns.Roster and ns.Roster.current()) then return "roster" end
+    local a = memberA(who)
+    if not a then return "not-found" end
+    return changeOfficers(function(own, epoch)
+        local e = own.entries[a]
+        if e and e.enabled then return "same" end
+        if activeCount(own) >= Bank.MAX_ACTIVE then return "full" end
+        own.entries[a] = { enabled = true, epoch = epoch, at = ns.now() }
+        return "ok"
+    end)
+end
+
+function Bank.revokeOfficer(a)
+    if not Bank.canManage() then stats.refused = stats.refused + 1; return "no-authority" end
+    return changeOfficers(function(own, epoch)
+        local e = own.entries[a]
+        if not e or not e.enabled then return "not-found" end
+        e.enabled, e.epoch, e.at = false, epoch, ns.now()
+        return "ok"
+    end)
+end
+
+-- Somebody sent a reviewer list under my name that is not my original.
+function Bank.healOfficers()
+    local me = S().selfAuthor()
+    local g = guildData()
+    if not me or not g or not g.ownO or Bank.authority() ~= "leader" then return false end
+    local rec = S().get(me, Bank.OFFICER_GROUP)
+    local mine = Bank.ownOfficerValue()
+    if not mine or (rec and rec.h == S().hash(mine)) then return false end
+    local theirs = rec and S().decodeValue(Bank.OFFICER_GROUP, rec.v)
+    g.ownO.epoch = math.max(math.floor(S().serverNow()), g.ownO.epoch + 1, theirs and (theirs.epoch + 1) or 0)
+    publishOfficers()
+    return true
+end
+
+-- Reviewer rows for the page: enabled first, then revoked (newest first).
+function Bank.officerEntries()
+    local cur = Bank.officers()
+    local out = {}
+    for _, e in ipairs(cur.list and cur.list.entries or {}) do out[#out + 1] = e end
+    table.sort(out, function(x, y)
+        if x.enabled ~= y.enabled then return x.enabled end
+        if x.epoch ~= y.epoch then return x.epoch > y.epoch end
+        return x.a < y.a
+    end)
+    return out, cur
+end
+
+ns.Share.registerGroup({
+    name = "CUSTODY_OFFICER",
+    ["local"] = true,
+    match = function(g) return g == Bank.OFFICER_GROUP end,
+    encode = function(_, d) return Bank.encodeOfficers(d) end,
+    decode = Bank.decodeOfficers,
+    ownGroups = { Bank.OFFICER_GROUP },
+    own = function() return Bank.ownOfficerValue() end,
+})
+
+local oSig = {}
+ns.Share.onUpdate(function(a)
+    if a == nil then return end
+    local rec = S().get(a, Bank.OFFICER_GROUP)
+    local sig = rec and (tostring(rec.h) .. "|" .. tostring(rec.t)) or false
+    local old = oSig[a]
+    if old == nil then old = false end
+    if old == sig then return end
+    oSig[a] = sig
+    if a == S().selfAuthor() then Bank.healOfficers() end
+    if Bank.onChanged then Bank.onChanged() end
+    if ns.BankRequests then ns.BankRequests.soon() end
+end)

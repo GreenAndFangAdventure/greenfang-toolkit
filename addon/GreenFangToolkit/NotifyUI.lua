@@ -32,6 +32,7 @@ UI.MODULE_SHORT = { supply = "調貨", radar = "雷達", adventure = "冒險", o
 for k, v in pairs({ order_guild = "委託", order_remind = "委託", adv_update = "冒險", adv_remind = "冒險", adv_leader = "冒險" }) do
     UI.MODULE_SHORT[k] = v -- GF-014-05
 end
+UI.MODULE_SHORT.bank_request = "黑箱" -- GF-012-D
 
 -- GF-UI-N (owner 0.16.12: 「未讀與已讀也應該要清楚辨識」): an unread row has the
 -- game's small yellow light before its tag, a warm fill and gold words; a read

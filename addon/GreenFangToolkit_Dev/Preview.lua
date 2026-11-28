@@ -322,6 +322,16 @@ function P.realNotices(ns)
         add("bank_keeper", string.format(P.BANK_TEXT.on, k1))
         add("bank_keeper", string.format(P.BANK_TEXT.change, k1))
         add("bank_keeper", P.BANK_TEXT.off)
+        -- GF-012-D: 黑箱申領 (BankRequests' own words).
+        local R = ns.BankRequests
+        if R and R.NOTIFY_TEXT then
+            local it = "亞麻布 8 個"
+            add("bank_request", string.format(R.NOTIFY_TEXT.new, it, "測試甲"))
+            add("bank_request", string.format(R.NOTIFY_TEXT.give, it, "測試甲"))
+            for _, st in ipairs({ "approved", "rejected", "short", "delivered" }) do
+                add("bank_request", string.format(R.NOTIFY_TEXT.mine, R.NOTIFY_SAID[st], it))
+            end
+        end
     end)
     if Adv and member then Adv.member = member end
     if S and memberFor then S.memberFor = memberFor end

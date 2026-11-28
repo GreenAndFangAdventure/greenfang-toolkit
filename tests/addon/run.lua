@@ -4814,6 +4814,10 @@ assert(loadfile(ROOT .. "/tests/addon/gf012b_tests.lua"))()({ test = test, eq = 
 -- 調貨看板's 黑箱 rows (tests/addon/gf012c_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gf012c_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-012-D: 臨時黑箱 requests: who writes what, who may decide, 10 and two 8s, cancel / expiry, duplicates,
+-- revoked lists, the delivered snapshot, addView, the 申領 page and form, combat, 審核幹部 (tests/addon/gf012d_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gf012d_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0
