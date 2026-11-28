@@ -863,25 +863,27 @@ test("minimap: 31px button, border/background/icon anchored TOPLEFT", function()
     end
 end)
 
-test("minimap: icon is the adventure bag, with INV_Misc_Bag_08 fallback", function()
+-- GF-UI-P (owner 2026-11-28): a wrench (was the adventure bag); the engineering icon as the fallback.
+test("minimap: icon is the wrench, with Trade_Engineering fallback", function()
     wow.reset()
     wow.login(ADDON_DIR)
     local b = _G.GreenFangToolkit_MinimapButton
-    eq(textureByLayer(b, "ARTWORK")._texture, "Interface\\Icons\\INV_Misc_Bag_10", "chosen icon")
+    eq(textureByLayer(b, "ARTWORK")._texture, "Interface\\Icons\\INV_Misc_Wrench_01", "chosen icon")
     local f = assert(io.open(ADDON_DIR .. "/GreenFangToolkit.toc", "rb"))
     local toc = f:read("*a"); f:close()
-    ok(toc:find("## IconTexture: Interface\\Icons\\INV_Misc_Bag_10", 1, true), "TOC IconTexture")
+    ok(toc:find("## IconTexture: Interface\\Icons\\INV_Misc_Wrench_01", 1, true), "TOC IconTexture")
     ok(not toc:find("Book_09", 1, true), "old book icon gone from TOC")
+    ok(not toc:find("Bag_10", 1, true), "the bag is gone from the TOC")
     -- Missing file detected through GetFileIDFromPath.
-    wow.reset({ fileIDs = true, missingFiles = { ["Interface\\Icons\\INV_Misc_Bag_10"] = true } })
+    wow.reset({ fileIDs = true, missingFiles = { ["Interface\\Icons\\INV_Misc_Wrench_01"] = true } })
     wow.login(ADDON_DIR)
     b = _G.GreenFangToolkit_MinimapButton
-    eq(textureByLayer(b, "ARTWORK")._texture, "Interface\\Icons\\INV_Misc_Bag_08", "fallback via GetFileIDFromPath")
+    eq(textureByLayer(b, "ARTWORK")._texture, "Interface\\Icons\\Trade_Engineering", "fallback via GetFileIDFromPath")
     -- Missing file reported by SetTexture returning false.
-    wow.reset({ missingFiles = { ["Interface\\Icons\\INV_Misc_Bag_10"] = true } })
+    wow.reset({ missingFiles = { ["Interface\\Icons\\INV_Misc_Wrench_01"] = true } })
     wow.login(ADDON_DIR)
     b = _G.GreenFangToolkit_MinimapButton
-    eq(textureByLayer(b, "ARTWORK")._texture, "Interface\\Icons\\INV_Misc_Bag_08", "fallback via SetTexture")
+    eq(textureByLayer(b, "ARTWORK")._texture, "Interface\\Icons\\Trade_Engineering", "fallback via SetTexture")
 end)
 
 test("minimap: saved angle is kept, default stays 215", function()
@@ -4203,9 +4205,11 @@ test("D21 tooltips: recipe tooltip next to the row's name; roster icon tooltip o
     row._scripts.OnEnter(row)
     eq(GameTooltip._anchor, "ANCHOR_NONE", "not the default (screen corner) anchor")
     local pt = GameTooltip._points[1]
-    eq(pt[1] .. ">" .. pt[3], "BOTTOMLEFT>TOPLEFT", "just above the row")
+    -- GF-UI-P: every list row's tooltip comes from Widgets.rowTip (next to the mouse, beside
+    -- the row); the mock has no row edges, so it takes its plain place right under the row.
+    local want = ns.Widgets.tipPlace(row)
+    eq(pt[1] .. ">" .. pt[3], want.point .. ">" .. want.relPoint, "Widgets.rowTip's place")
     eq(pt[2], row, "on the hovered row")
-    eq(pt[4], 300, "next to the name, towards the middle")
     sendFrom(ns, PEER, peerData())
     ns.Framework.open("roster")
     local peer = rowFor(ns, PEER)
@@ -4824,6 +4828,11 @@ assert(loadfile(ROOT .. "/tests/addon/gf012d_tests.lua"))()({ test = test, eq = 
 -- GF-017: the game's guild bank, gold only: reading while open, merging, sharing (GB), the 公會銀行 view
 -- (tests/addon/gf017_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gf017_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-UI-P: the owner's 0.16.18 screenshots: the wrench icon, text buttons on adventure rows, my own
+-- status words, row tooltips by the mouse, the adventure filters, the guild bank under its buttons,
+-- ＋ on add buttons, one scroll bar for every list (tests/addon/gfuip_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gfuip_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 

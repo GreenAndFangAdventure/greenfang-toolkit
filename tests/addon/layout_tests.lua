@@ -341,7 +341,8 @@ return function(T)
         ok(plain(row.name:GetText()):find("墓地", 1, true) and plain(row.name:GetText()):find("影牙", 1, true), "its dungeons")
         ok(plain(row.time:GetText()):find("現在", 1, true), "its time")
         -- GF-UI-N: 移除 sits where a ticket's 刪除 is (line 1, far right).
-        eq(row.buttons[1].label._text .. "," .. row.delete.label._text, "編輯,移除", "edit and remove")
+        -- GF-UI-P: text buttons (the word inside the frame).
+        eq(row.buttons[1].gfTextText._text .. "," .. row.delete.gfTextText._text, "編輯,移除", "edit and remove")
         ok(not row.buttons[2]:IsShown() and row.delete:IsShown(), "移除 is the far-right button")
         wow.click(row.buttons[1])
         local wf = _G[A.WORKER_NAME]

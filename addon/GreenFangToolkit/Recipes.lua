@@ -824,7 +824,7 @@ local function newRow(i)
     row:SetScript("OnEnter", function(self)
         local data = self.data
         if not data then return end
-        ns.tooltipAbove(self, RECIPE_TIP_X) -- next to the name, not the screen corner
+        ns.Widgets.rowTip(self) -- GF-UI-P: next to the mouse, beside the row (was next to the name)
         local shown = false
         if type(GameTooltip.SetSpellByID) == "function" then
             shown = pcall(GameTooltip.SetSpellByID, GameTooltip, data.id)

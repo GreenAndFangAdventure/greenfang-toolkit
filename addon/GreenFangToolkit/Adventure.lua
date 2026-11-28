@@ -2370,6 +2370,25 @@ Adv.STATE_NAME = { open = "招募中", final = "已定案", formed = "已成團"
     ended = "已過期", unfinished = "未成行", cancel = "已取消", worker = "上架", closed = "已結案" }
 Adv.STATE_NEXT = { open = "final", final = "formed", formed = "done" }
 
+-- GF-UI-P (owner 2026-11-28: 「申請後自己那列寫已定案，會以為整張單定案了」):
+-- on someone else's open ticket I am in, the badge says where I stand, in
+-- plain words; 已定案 stays the ticket's own word (its time is fixed). The
+-- notices say the same (錄取了你 / 遞補上了 / 你在候補 / 邀請你).
+--   i 受邀請 (invited, not answered) · p 已申請 (applied, the leader decides)
+--   m 已錄取 (a member) · w 候補中 (on the waiting list)
+-- The badge has room for 3 characters; the tooltip's first line says it whole.
+Adv.MY_STATUS_NAME = { i = "受邀請", p = "已申請", m = "已錄取", w = "候補中" }
+Adv.MY_STATUS_TIP = { i = "團長邀請你加入，請按接受或拒絕", p = "你已申請，等團長同意",
+    m = "團長已錄取你", w = "你在候補，有人退出就遞補" }
+function Adv.myStatus(v, my)
+    if not (v and my) or v.leader == my or v.closed then return nil end
+    for _, x in ipairs(v.invited or {}) do if x.a == my then return "i" end end
+    for _, x in ipairs(v.members or {}) do if x.a == my then return "m" end end
+    for _, x in ipairs(v.waitlist or {}) do if x.a == my then return "w" end end
+    for _, x in ipairs(v.pending or {}) do if x.a == my then return "p" end end
+    return nil
+end
+
 -- opts: { now, me, party (a set of authors; default my party) }.
 function Adv.whyState(v, opts)
     opts = opts or {}
@@ -2459,8 +2478,12 @@ function Adv.whyState(v, opts)
     local groups = { { state = st, name = Adv.STATE_NAME[st], items = cur } }
     local nextState = Adv.STATE_NEXT[st]
     if nextState then groups[2] = { state = nextState, name = Adv.STATE_NAME[nextState], items = nxt } end
-    return { state = st, name = Adv.STATE_NAME[st], groups = groups, action = leader and action or nil,
-        due = leader and Adv.finalDue(v, t) or nil }
+    -- GF-UI-P: mine = my own status on it (Adv.myStatus); the badge's name is then mine,
+    -- ticketName keeps the ticket's (the tooltip shows both).
+    local mine = Adv.myStatus(v, my)
+    return { state = st, name = mine and Adv.MY_STATUS_NAME[mine] or Adv.STATE_NAME[st], groups = groups,
+        action = leader and action or nil, due = leader and Adv.finalDue(v, t) or nil,
+        mine = mine, mineTip = mine and Adv.MY_STATUS_TIP[mine] or nil, ticketName = Adv.STATE_NAME[st] }
 end
 
 -- When a worker ticket ends by itself: the 24 hours, or its last slot when every slot has an end.

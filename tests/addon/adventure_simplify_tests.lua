@@ -672,7 +672,7 @@ return function(T)
         -- Names on the page and in the windows.
         ns.Framework.open("adventure")
         eq(plain(U.lfgButton:GetText()):gsub("^%s+", ""), "尋求組隊", "尋求組隊")
-        eq(U.nextInvite.label._text, "下一位", "下一位")
+        eq((plain(U.nextInvite:GetText()):gsub("^%s+", "")), "下一位", "下一位") -- GF-UI-P: a text button
         U.openTicket()
         local tf = _G[U.TICKET_NAME]
         eq(plain(tf.lfgCheck.label._text):gsub("^%s+", ""), "上架到尋求組隊", "上架到尋求組隊") -- GF-UI-O

@@ -269,7 +269,7 @@ return function(T)
         local UI = ns.SupplyUI
         UI.setTab("mine")
         -- B1
-        eq(UI.postButton._text, "刊登", "no ＋")
+        eq(UI.postButton._text, "＋刊登", "GF-UI-P (owner 2026-11-28): ＋ in front, as ＋冒險單")
         local pt = UI.postButton._points[1]
         eq(pt[4] .. "," .. pt[5], UI.LIST_X .. "," .. UI.TOOL_Y, "at the list's left edge, right over the header")
         ok(-pt[5] + UI.postButton._h <= -UI.HEAD_Y, "above the column header")
