@@ -171,6 +171,8 @@ local SECTIONS = {
     { title = "臨時黑箱（GF-012）", text = function() return ns.Bank and ns.Bank.diagText() or "" end },
     -- GF-009-12: the 找物品 item catalog (SupplyCatalogData.lua; GF-009-13: requests, list time).
     { title = "物品目錄（GF-009-12）", text = function() return ns.SupplyCatalog and ns.SupplyCatalog.diagText() or "" end },
+    -- GF-017: the game's guild bank (gold only): balance, log kept here, shared reads.
+    { title = "公會銀行（GF-017）", text = function() return ns.GuildBank and ns.GuildBank.diagText() or "" end },
 }
 
 -- GF-UI-B (GF-UI-A §2.11): 16 px text (18 px state line, gold section

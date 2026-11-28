@@ -179,7 +179,7 @@ return function(T)
             ok(-UI.TOP + c.line * c.step + 28 <= UI.ROWS * UI.ROW_H + 76 - 8, string.format("switch %s fits (line %d, step %d)", c.key, c.line, c.step))
             ok(c.step >= UI.SETTING_MIN, "step at least " .. UI.SETTING_MIN)
         end
-        eq(#boxes, 19, "19 rows (14 modules, WorkerMatch's 4 rows, 聊天框提示)")
+        eq(#boxes, 20, "20 rows (15 modules with GF-012-D's 黑箱申領, WorkerMatch's 4 rows, 聊天框提示)")
     end)
 
     test("GF-014-04 combat: the scan waits, the notice comes after combat", function()

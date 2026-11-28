@@ -410,14 +410,15 @@ return function(T)
         ns.Framework.open("bank")
         local UI, c = ns.BankUI, ns.BankUI.controls
         eq(c.view, "stock", "庫存 first")
-        eq(c.views.buttons[1]:GetText(), "庫存", "button 1"); eq(c.views.buttons[2]:GetText(), "保管人與分享設定", "button 2")
+        -- GF-012-D: 申領 is the second button now.
+        eq(c.views.buttons[1]:GetText(), "庫存", "button 1"); eq(c.views.buttons[3]:GetText(), "保管人與分享設定", "button 3")
         ok(c.stockView:IsShown() and not c.setupView:IsShown(), "only the stock view")
         ok(UI.STOCK_ROWS >= 10, "at least 10 rows: " .. UI.STOCK_ROWS)
         eq(#c.stockRows, UI.STOCK_ROWS, "pooled")
         local last = c.stockRows[UI.STOCK_ROWS]._points[1]
         ok(-last[5] + UI.STOCK_ROW_H <= ns.Framework.PANEL_HEIGHT - UI.STOCK_MORE_H, "the rows fit the page")
         eq(UI.ROWS, 8, "the list has 8 rows again")
-        wow.click(c.views.buttons[2])
+        wow.click(c.views.buttons[3])
         eq(c.view, "setup", "switched")
         ok(c.setupView:IsShown() and not c.stockView:IsShown(), "only the setup view")
         ok(c.share:IsShown() and c.scope.bags[1]:IsShown() and c.rows[1]:IsShown(), "switch, scope, list there")
