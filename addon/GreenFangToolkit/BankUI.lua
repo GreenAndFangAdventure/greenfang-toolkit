@@ -38,7 +38,9 @@ UI.Y = { views = -UI.TOP, status = -UI.TOP - 44, listHead = -UI.TOP - 76, rows =
     filters = -UI.TOP - 44, stockHead = -UI.TOP - 86, stockRows = -UI.TOP - 118 }
 -- GF-012-C: the stock list fills the page: as many 44 px rows as fit above
 -- the 「還有 N 項」 line at the bottom.
-UI.STOCK_ROW_H, UI.STOCK_W = 44, 1060
+-- GF-UI-P: the rows leave a column on the right for the scroll bar (Widgets.scrollBar).
+UI.BAR_ROOM = ns.Widgets.SCROLL_W + ns.Widgets.SCROLL_GAP
+UI.STOCK_ROW_H, UI.STOCK_W = 44, 1060 - UI.BAR_ROOM
 UI.STOCK_MORE_H = 26
 UI.STOCK_ROWS = math.floor(((ns.Framework.PANEL_HEIGHT or 680) + UI.Y.stockRows - UI.STOCK_MORE_H - 8) / UI.STOCK_ROW_H)
 UI.STOCK_MORE = "還有 %d 項，用滑鼠滾輪往下看"
@@ -101,6 +103,13 @@ end
 local function setEnabled(b, on) W().setEnabled(b, on) end
 local function shown(f, on) if on then f:Show() else f:Hide() end end
 
+-- GF-UI-P: a list's scroll bar right of its rows (rowsRight: the rows' right edge).
+function UI.bar(p, rowsRight, y, h, onScroll)
+    local b = W().scrollBar(p, h, onScroll)
+    b:SetPoint("TOPLEFT", p, "TOPLEFT", rowsRight + ns.Widgets.SCROLL_GAP, y)
+    return b
+end
+
 local function row(p, i)
     local r = CreateFrame("Frame", nil, p)
     r:SetSize(UI.ROW_W, UI.ROW_H)
@@ -154,17 +163,19 @@ local function buildSetup(p)
     c.offset = 0
     c.rows = {}
     for i = 1, UI.ROWS do c.rows[i] = row(p, i) end
+    c.bar = UI.bar(p, UI.X + UI.ROW_W, Y.rows, UI.ROWS * UI.ROW_H, function(o) c.offset = o; UI.refresh() end)
     c.listState = W().statePanel(p, UI.ROW_W, 120)
     c.listState:SetPoint("TOPLEFT", p, "TOPLEFT", X, Y.rows - 20)
     local addY = Y.rows - UI.ROWS * UI.ROW_H - 10
     c.nameLabel = text(p, ns.FIELD_FONT, X, addY - 6)
     c.nameLabel:SetText("職工") -- GF-UI-K: 成員 = 職工 (spec §3)
     -- GF-012-FIX (owner 2026-11-27: 成員一定是公會內的人，可以用選的): the box
-    -- only searches the guild roster; 選擇職工 appoints a typed name only when
+    -- only searches the guild roster; ＋保管人 (was 選擇職工) appoints a typed name only when
     -- it is exactly one roster member, otherwise it opens the picker.
     c.name = ns.Theme.editBox(p, 200, 30)
     c.name:SetPoint("TOPLEFT", p, "TOPLEFT", X + 50, addY)
-    c.appoint = ns.OrdersUI.textButton(p, "選擇職工", function()
+    -- GF-UI-P (owner 2026-11-28): buttons that add one to a list start with 「＋」 (as ＋冒險單).
+    c.appoint = ns.OrdersUI.textButton(p, "＋保管人", function()
         if B().canManage() then UI.choose(str(c.name:GetText())) end
     end, 100)
     c.appoint:SetPoint("TOPLEFT", p, "TOPLEFT", X + 260, addY)
@@ -175,13 +186,17 @@ local function buildSetup(p)
     local oy = addY - 44
     c.officerHead = header(p, "審核幹部", X, oy)
     c.officerMore = text(p, ns.DISABLED_FONT, X + 110, oy, 330)
-    c.officerAdd = ns.OrdersUI.textButton(p, "指定審核幹部", function()
+    c.officerAdd = ns.OrdersUI.textButton(p, "＋審核幹部", function()
         if B().canManage() then UI.openPicker("", "officer") end
     end, 130)
     c.officerAdd:SetPoint("TOPLEFT", p, "TOPLEFT", X + UI.ROW_W - 130, oy + 4)
     c.officerOffset = 0
     c.officerRows = {}
     for i = 1, UI.OFFICER_ROWS do c.officerRows[i] = UI.officerRow(p, oy - 30 - (i - 1) * UI.OFFICER_ROW_H, i) end
+    c.officerBar = UI.bar(p, X + UI.ROW_W, oy - 30, UI.OFFICER_ROWS * UI.OFFICER_ROW_H, function(o)
+        c.officerOffset = o
+        UI.drawOfficers(B().canManage())
+    end)
     c.officerEmpty = text(p, ns.DISABLED_FONT, X + 6, oy - 38, 600)
     -- 我的公產範圍
     c.scopeHead = header(p, "我的公產範圍", UI.RIGHT_X, Y.scopeHead)
@@ -267,6 +282,11 @@ local function buildStock(p)
     c.query, c.stockOffset = "", 0
     c.stockRows = {}
     for i = 1, UI.STOCK_ROWS do c.stockRows[i] = UI.stockRow(p, i) end
+    c.stockBar = UI.bar(p, X + UI.STOCK_W, Y.stockRows, UI.STOCK_ROWS * UI.STOCK_ROW_H, function(o)
+        c.stockOffset = o
+        UI.closeContact()
+        UI.drawStock()
+    end)
     local bottom = UI.Y.stockRows - UI.STOCK_ROWS * UI.STOCK_ROW_H
     c.stockCount = text(p, ns.LABEL_FONT, X + 4, bottom - 6, 200)
     c.stockMore = text(p, ns.DISABLED_FONT, X + 220, bottom - 6, 500)
@@ -607,6 +627,7 @@ function UI.drawSetup()
     end)
     c.total = #entries
     c.offset = math.max(0, math.min(c.offset or 0, #entries - UI.ROWS))
+    if c.bar then c.bar.sync(c.offset, #entries, UI.ROWS) end
     local rest = #entries - c.offset - UI.ROWS
     c.more:SetText(rest > 0 and string.format(UI.MORE_TEXT, rest) or "")
     for i, r in ipairs(c.rows) do
@@ -723,6 +744,7 @@ function UI.drawStock()
     c.stockList = rows
     c.stockTotal = #rows
     c.stockOffset = math.max(0, math.min(c.stockOffset or 0, #rows - UI.STOCK_ROWS))
+    if c.stockBar then c.stockBar.sync(c.stockOffset, #rows, UI.STOCK_ROWS) end
     local rest = #rows - c.stockOffset - UI.STOCK_ROWS
     c.stockMore:SetText(rest > 0 and string.format(UI.STOCK_MORE, rest) or "")
     c.stockCount:SetText(#rows > 0 and string.format(UI.STOCK_COUNT, #rows) or "")
@@ -871,6 +893,7 @@ function UI.drawOfficers(manage)
     local entries, cur = B().officerEntries()
     c.officerTotal = #entries
     c.officerOffset = math.max(0, math.min(c.officerOffset or 0, #entries - UI.OFFICER_ROWS))
+    if c.officerBar then c.officerBar.sync(c.officerOffset, #entries, UI.OFFICER_ROWS) end
     local rest = #entries - c.officerOffset - UI.OFFICER_ROWS
     c.officerMore:SetText(rest > 0 and string.format(UI.OFFICER_MORE, rest) or "")
     for i, r in ipairs(c.officerRows) do
@@ -966,6 +989,10 @@ function UI.buildRequests(p)
         L.head = header(p, key == "todo" and "要我處理的" or "我的申領", X, hy)
         L.more = text(p, ns.DISABLED_FONT, X + 140, hy, 500)
         for i = 1, UI.REQ_ROWS do L.rows[i] = reqRow(p, ry, i, key) end
+        L.bar = UI.bar(p, X + UI.STOCK_W, ry, UI.REQ_ROWS * UI.REQ_ROW_H, function(o)
+            L.offset = o
+            UI.drawRequests()
+        end)
         L.state = W().statePanel(p, UI.STOCK_W, 90)
         L.state:SetPoint("TOPLEFT", p, "TOPLEFT", X, ry - 10)
     end
@@ -989,6 +1016,7 @@ local function drawList(key, rows)
     local L = c.req[key]
     L.list = rows
     L.offset = math.max(0, math.min(L.offset or 0, #rows - UI.REQ_ROWS))
+    if L.bar then L.bar.sync(L.offset, #rows, UI.REQ_ROWS) end
     local rest = #rows - L.offset - UI.REQ_ROWS
     L.more:SetText(rest > 0 and string.format(UI.REQ_MORE, rest) or "")
     for i, r in ipairs(L.rows) do

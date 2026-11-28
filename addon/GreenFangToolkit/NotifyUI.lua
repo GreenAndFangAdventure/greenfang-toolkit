@@ -27,6 +27,8 @@ UI.W = 520
 UI.ROWS = 6
 UI.ROW_H = 66
 UI.TOP = -44
+-- GF-UI-P: the rows leave a column on the right for the scroll bar (Widgets.scrollBar).
+UI.ROW_W = UI.W - 24 - ns.Widgets.SCROLL_W - ns.Widgets.SCROLL_GAP
 UI.MODULE_SHORT = { supply = "調貨", radar = "雷達", adventure = "冒險", orders = "委託",
     order_new = "委託", order_status = "委託", adv_signup = "冒險", adv_result = "冒險", adv_final = "冒險", bank_keeper = "黑箱", recipe = "調貨" } -- GF-014-04
 for k, v in pairs({ order_guild = "委託", order_remind = "委託", adv_update = "冒險", adv_remind = "冒險", adv_leader = "冒險" }) do
@@ -157,7 +159,7 @@ local function row(i)
     local r = list.rows[i]
     if r then return r end
     r = CreateFrame("Button", nil, list)
-    r:SetSize(UI.W - 24, UI.ROW_H - 4)
+    r:SetSize(UI.ROW_W, UI.ROW_H - 4)
     r:SetPoint("TOPLEFT", list, "TOPLEFT", 12, UI.TOP - (i - 1) * UI.ROW_H)
     r.gfHover = Th.fill(r, Th.C.hover, "HIGHLIGHT")
     r.unreadFill = Th.fill(r, Th.C.selFill, "BACKGROUND") -- GF-UI-N
@@ -173,7 +175,7 @@ local function row(i)
     r.tag:SetPoint("TOPLEFT", r, "TOPLEFT", 16, -4)
     r.text = label(r, "", ns.LABEL_FONT)
     r.text:SetPoint("TOPLEFT", r, "TOPLEFT", 52, -4)
-    r.text:SetWidth(UI.W - 24 - 52 - 96)
+    r.text:SetWidth(UI.ROW_W - 52 - 96)
     if r.text.SetWordWrap then r.text:SetWordWrap(false) end
     r.when = label(r, "", ns.LABEL_FONT)
     r.when:SetPoint("TOPRIGHT", r, "TOPRIGHT", -4, -4)
@@ -294,6 +296,8 @@ local function build()
     f.more = label(f, "", ns.LABEL_FONT)
     f.more:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 16, 10)
     f.rows = {}
+    f.bar = ns.Widgets.scrollBar(f, UI.ROWS * UI.ROW_H, function(o) state.offset = o; UI.draw() end)
+    f.bar:SetPoint("TOPLEFT", f, "TOPLEFT", 12 + UI.ROW_W + ns.Widgets.SCROLL_GAP, UI.TOP)
     f.settings = CreateFrame("Frame", nil, f)
     f.settings:SetAllPoints(f)
     f.settings.boxes, f.settings.sync = UI.buildSettings(f.settings, 16, UI.TOP)
@@ -319,6 +323,7 @@ function UI.draw()
         for _, r in ipairs(list.rows) do r:Hide() end
         list.empty:SetText("")
         list.more:SetText("")
+        list.bar:Hide()
         list.settings:Show()
         list.settings.sync()
         Th.setSelected(list.setup, true)
@@ -329,6 +334,8 @@ function UI.draw()
     Th.setSelected(list.setup, false)
     state.items = N.list()
     state.offset = math.max(0, math.min(state.offset, math.max(0, #state.items - UI.ROWS)))
+    list.bar:Show()
+    list.bar.sync(state.offset, #state.items, UI.ROWS)
     W.setEnabled(list.readAll, N.unread() > 0)
     list.empty:SetText(#state.items == 0 and "目前沒有通知" or "")
     for i = 1, UI.ROWS do

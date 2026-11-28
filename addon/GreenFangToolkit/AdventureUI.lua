@@ -228,7 +228,7 @@ function UI.rowTimeText(v, width, measure)
             local sl = order[i]
             local t
             t, prev = UI.slotShort(sl, prev)
-            if v.final and sl.id == v.final then t = UI.FINAL_COLOR .. t .. "|r" .. tex("final", 16) end
+            if v.final and sl.id == v.final then t = UI.FINAL_COLOR .. t .. "|r" .. tex("final", UI.TEXT_ICON) end
             parts[#parts + 1] = t
         end
         local text = tex(order[1].now and "now" or "today") .. " " .. table.concat(parts, "、")
@@ -493,18 +493,157 @@ function UI.zoneOptions()
     return out
 end
 
+---------------------------------------------------------------------------
+-- GF-UI-P (owner 2026-11-28): the filter row, as 臨時黑箱's 庫存: 搜尋 (活動名、
+-- 團長／職工名), 種類 (全部／地城／任務), 區域 (moved here from the top row) and
+-- 只看有空位的 (冒險單 not full and still taking people; the other sections
+-- are people looking for a group, so it leaves them alone). Typing redraws at
+-- most UI.SEARCH_DELAY late. Each row's search text is kept until the data
+-- changes (Adventure.rowsFor hands out a new list then), and the filtered page
+-- is kept until the data or a filter changes.
+---------------------------------------------------------------------------
+
+UI.SEARCH_DELAY = 0.15
+UI.FILTER_Y = -84 -- the filter row (the top buttons are at -40)
+UI.LIST_Y = -124  -- the list starts under it
+UI.SEARCH_W, UI.KIND_W, UI.ZONE_W = 180, 120, 120
+UI.FILTER_X = { searchLabel = 24, search = 68, kindLabel = 268, kind = 312, zone = 452, room = 592 }
+UI.KIND_ITEMS = { { value = "all", text = "全部" }, { value = "dungeon", text = "地城" }, { value = "quest", text = "任務" } }
+UI.ROOM_LABEL = "只看有空位的"
+UI.EMPTY_FILTERED = "沒有符合的項目，換個篩選試試"
+UI.filter = { search = "", kind = "all", room = false }
+UI.filterStats = { built = 0, hits = 0, hay = 0 }
+
+local hayCache, hayEpoch = setmetatable({}, { __mode = "k" }), nil
+local function plainLower(t)
+    t = tostring(t or ""):gsub("|T.-|t", ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    return string.lower(t)
+end
+local function memberName(a)
+    local m = a and A().member(a)
+    return (m and m.name) or a or ""
+end
+-- The words a row is searched in (kept per object until the data changes).
+local function hay(obj, build)
+    local h = hayCache[obj]
+    if h then return h end
+    UI.filterStats.hay = UI.filterStats.hay + 1
+    h = plainLower(build())
+    hayCache[obj] = h
+    return h
+end
+function UI.ticketHay(v)
+    return hay(v, function() return UI.destText(v) .. " " .. memberName(v.leader) end)
+end
+function UI.workerHay(w, author)
+    return hay(w, function()
+        return UI.workerDest(w) .. " " .. UI.workerQuests(w) .. " " .. memberName(author)
+    end)
+end
+local function searchPass(h)
+    local q = UI.filter.search
+    return q == "" or h:find(q, 1, true) ~= nil
+end
+local function kindPass(isDungeon, isQuest)
+    local k = UI.filter.kind
+    return k == "all" or (k == "dungeon" and isDungeon) or (k == "quest" and isQuest) or false
+end
+function UI.ticketPass(v)
+    if not kindPass(v.dungeon ~= nil, v.dungeon == nil or #(v.quests or {}) > 0) then return false end
+    if UI.filter.room and UI.tab ~= "ended" and (v.closed or v.full or not (v.state == "open" or v.state == "final")) then
+        return false
+    end
+    return searchPass(UI.ticketHay(v))
+end
+function UI.workerPass(w, author)
+    if not kindPass(#UI.dungeonIds(w) > 0, #UI.questIds(w) > 0) then return false end
+    return searchPass(UI.workerHay(w, author))
+end
+function UI.lfgPass(r)
+    if not kindPass(true, false) then return false end
+    return searchPass(hay(r, function()
+        return UI.destText({ dungeon = r.dungeon, quests = {} }) .. " " .. tostring(r.leader or "") .. " " .. tostring(r.name or "")
+    end))
+end
+function UI.filtersOn()
+    local f = UI.filter
+    return f.search ~= "" or f.kind ~= "all" or f.room or UI.zoneFilter ~= nil
+end
+local function zoneKey()
+    if not UI.zoneFilter then return "" end
+    local z = {}
+    for k in pairs(UI.zoneFilter) do z[#z + 1] = tostring(k) end
+    table.sort(z)
+    return table.concat(z, "\1")
+end
+function UI.setSearch(text)
+    local q = plainLower(text)
+    q = q:gsub("^%s+", ""):gsub("%s+$", "")
+    if q == UI.filter.search then return false end
+    UI.filter.search = q
+    UI.refresh()
+    return true
+end
+function UI.setKind(kind)
+    if kind ~= "dungeon" and kind ~= "quest" then kind = "all" end
+    if kind == UI.filter.kind then return false end
+    UI.filter.kind = kind
+    if UI.kindDrop then UI.kindDrop.setValue(kind) end
+    UI.refresh()
+    return true
+end
+function UI.setRoom(on)
+    UI.filter.room = on and true or false
+    if UI.roomBox then UI.roomBox.set(UI.filter.room) end
+    UI.refresh()
+end
+-- Every filter off (a jump to a ticket the filters hide: 我的業務, a notice).
+function UI.clearFilters()
+    UI.filter.search, UI.filter.kind, UI.filter.room = "", "all", false
+    UI.zoneFilter = nil
+    if UI.zoneButton then UI.zoneButton.selected = nil end
+    if UI.searchBox then UI.searchBox:SetText(""); UI.searchBox.gfText = "" end
+    if UI.kindDrop then UI.kindDrop.setValue("all") end
+    if UI.roomBox then UI.roomBox.set(false) end
+end
+
+local pageCache = {}
 function UI.pageRows()
     local tickets, matched = A().rowsFor()
+    if hayEpoch ~= tickets then
+        for k in pairs(hayCache) do hayCache[k] = nil end
+        hayEpoch = tickets
+    end
+    local mine = A().myWorker()
+    local L = ns.NativeLFG
+    local lfgRes = L and L.results or nil
+    local workers = A().workers()
+    local f = UI.filter
+    local key = table.concat({ UI.tab, zoneKey(), f.kind, tostring(f.room), f.search }, "\2")
+    local pc = pageCache
+    if pc.out and pc.tickets == tickets and pc.matched == matched and pc.mine == mine and pc.lfg == lfgRes
+        and pc.key == key and pc.workers == workers then
+        UI.filterStats.hits = UI.filterStats.hits + 1
+        return pc.out
+    end
+    local out = UI.buildPageRows(tickets, matched, mine)
+    pc.out, pc.tickets, pc.matched, pc.mine, pc.lfg, pc.key, pc.workers = out, tickets, matched, mine, lfgRes, key, workers
+    UI.filterStats.built = UI.filterStats.built + 1
+    return out
+end
+function UI.forgetPage() pageCache.out = nil end
+
+function UI.buildPageRows(tickets, matched, mine)
     local out = {}
     local ended = UI.tab == "ended"
-    local mine = A().myWorker()
-    if mine and (mine.closed == true) == ended then
+    local my = S().selfAuthor()
+    if mine and (mine.closed == true) == ended and UI.workerPass(mine, my) then
         out[#out + 1] = { header = tex("worker", 20) .. " 我的職工單" }
         out[#out + 1] = { myWorker = mine }
     end
     local list = {}
     for _, r in ipairs(tickets) do
-        if (r.view.closed == true) == ended and zonePass({ UI.zoneOf(r.view) }) then list[#list + 1] = r end
+        if (r.view.closed == true) == ended and zonePass({ UI.zoneOf(r.view) }) and UI.ticketPass(r.view) then list[#list + 1] = r end
     end
     if #list > 0 then
         out[#out + 1] = { header = tex("adventure", 20) .. " 冒險單" }
@@ -512,14 +651,18 @@ function UI.pageRows()
     end
     if ended then return out end
     local shown = {}
-    for _, r in ipairs(matched) do if zonePass(workerZones(r.w)) then shown[#shown + 1] = r end end
+    for _, r in ipairs(matched) do
+        if zonePass(workerZones(r.w)) and UI.workerPass(r.w, r.worker) then shown[#shown + 1] = r end
+    end
     if #shown > 0 then
         out[#out + 1] = { header = tex("worker", 20) .. " 職工單" }
         for _, r in ipairs(shown) do r.isWorker = true; out[#out + 1] = r end
     end
     -- GF-002-I (R-17.17): every other open worker ticket too (with its quests), after the matching ones.
     local others = {}
-    for _, r in ipairs(UI.otherWorkers(matched)) do if zonePass(workerZones(r.otherWorker)) then others[#others + 1] = r end end
+    for _, r in ipairs(UI.otherWorkers(matched)) do
+        if zonePass(workerZones(r.otherWorker)) and UI.workerPass(r.otherWorker, r.worker) then others[#others + 1] = r end
+    end
     if #others > 0 then
         out[#out + 1] = { header = tex("worker", 20) .. " 全部職工" }
         for _, r in ipairs(others) do out[#out + 1] = r end
@@ -527,8 +670,12 @@ function UI.pageRows()
     -- GF-002-G: groups in the game's group finder for my dungeons (the last search).
     local lfg = UI.lfgRows()
     if #lfg > 0 and not UI.zoneFilter then
-        out[#out + 1] = { header = ns.GameIcons.markup("lfg", 20) .. " 尋求組隊" }
-        for _, r in ipairs(lfg) do out[#out + 1] = { lfg = r } end
+        local pass = {}
+        for _, r in ipairs(lfg) do if UI.lfgPass(r) then pass[#pass + 1] = r end end
+        if #pass > 0 then
+            out[#out + 1] = { header = ns.GameIcons.markup("lfg", 20) .. " 尋求組隊" }
+            for _, r in ipairs(pass) do out[#out + 1] = { lfg = r } end
+        end
     end
     return out
 end
@@ -747,10 +894,19 @@ end
 -- GF-UI-N (owner 0.16.12: 「角色文字沒有對齊」): the leader's class icon and line 2's
 -- first button icon start on one line (cls = buttons) and are one size (ROW_ICON),
 -- so the leader's name and the first button's name start on one line too (who).
+-- GF-UI-P (owner 2026-11-28): every button on a row is the same outlined text button
+-- (UI.textStyle, UI.ACTION_W wide), 刪除 / 移除 too; 刪除 ends at the row's right edge.
+UI.ACTION_W = 76
 UI.COL = { dest = 22, name = 76, time = 290, seats = 530, cls = 756, who = 756 + 28 + 4, whoW = 160,
-    detail = 76, detailW = 552, badge = 640, buttons = 756, delete = 956 }
+    detail = 76, detailW = 552, badge = 640, buttons = 756, delete = UI.ROW_WIDTH - UI.ACTION_W }
 UI.BUTTON_GAP = 8
 UI.DEST_ICON = 44
+-- GF-UI-P (GF-UI-O notes §3: 「清單列圖示大小種類太多」): a row's icons come in these
+-- sizes only: the art 44, the leader's class 28 (ns.ROW_ICON), the small marks 20
+-- (❗, seats, the state badge: Widgets.BADGE_ICON) and the icons inside its words 18
+-- (UI.TEXT_ICON; the 在線／離線 mark on the class icon is one of those).
+UI.ROW_SMALL = 20
+UI.TEXT_ICON = 18
 
 local function newRow(i)
     local C = UI.COL
@@ -758,7 +914,7 @@ local function newRow(i)
     row:SetSize(UI.ROW_WIDTH, ROW_HEIGHT)
     row.bg = row:CreateTexture(nil, "BACKGROUND"); row.bg:SetAllPoints()
     -- GF-UI-A §2.4 item 6: ❗ 20 px, between the two lines, on the art's middle line.
-    row.att = row:CreateTexture(nil, "ARTWORK"); row.att:SetSize(20, 20); row.att:SetPoint("LEFT", row, "LEFT", 2, 0)
+    row.att = row:CreateTexture(nil, "ARTWORK"); row.att:SetSize(UI.ROW_SMALL, UI.ROW_SMALL); row.att:SetPoint("LEFT", row, "LEFT", 2, 0)
     row.dest = row:CreateTexture(nil, "ARTWORK"); row.dest:SetSize(UI.DEST_ICON, UI.DEST_ICON)
     row.dest:SetPoint("LEFT", row, "LEFT", C.dest + 4, 0)
     local function text(x, w, y, font)
@@ -781,13 +937,14 @@ local function newRow(i)
     row.slots = {}
     for k = 1, UI.MAX_SLOTS do
         local s = row:CreateTexture(nil, "ARTWORK")
-        s:SetSize(20, 20)
-        s:SetPoint("LEFT", row, "LEFT", C.seats + (k - 1) * 22, UI.LINE1)
+        s:SetSize(UI.ROW_SMALL, UI.ROW_SMALL)
+        s:SetPoint("LEFT", row, "LEFT", C.seats + (k - 1) * (UI.ROW_SMALL + 2), UI.LINE1)
         s:Hide()
         row.slots[k] = s
     end
     row.cls = row:CreateTexture(nil, "ARTWORK"); row.cls:SetSize(ns.ROW_ICON, ns.ROW_ICON); row.cls:SetPoint("LEFT", row, "LEFT", C.cls, UI.LINE1)
-    row.off = row:CreateTexture(nil, "OVERLAY"); row.off:SetSize(16, 16); row.off:SetPoint("BOTTOMRIGHT", row.cls, "BOTTOMRIGHT", 4, -4)
+    -- GF-UI-P: the 在線／離線 mark sits inside line 1 (it reached 4 px into line 2's first button).
+    row.off = row:CreateTexture(nil, "OVERLAY"); row.off:SetSize(UI.TEXT_ICON, UI.TEXT_ICON); row.off:SetPoint("BOTTOMRIGHT", row.cls, "BOTTOMRIGHT", 4, 0)
     row.who = text(C.who, C.whoW, UI.LINE1)
     -- GF-002-I (R-17.11): the state badge; the mouse over it shows the ✓✗ checklist.
     row.badge = ns.Widgets.statusBadge(row)
@@ -797,12 +954,14 @@ local function newRow(i)
     UI.ROW_BUTTON_X = C.buttons
     for k = 1, 4 do
         local b = iconButton(row, ns.ROW_ICON, "yes", nil)
-        b:SetPoint("LEFT", row, "LEFT", UI.ROW_BUTTON_X, UI.LINE2) -- laid out by their names (fillRow)
+        UI.textStyle(b, true) -- GF-UI-P: text buttons only
+        b:SetPoint("LEFT", row, "LEFT", UI.ROW_BUTTON_X, UI.LINE2) -- laid out one after another (fillRow)
         row.buttons[k] = b
     end
     -- GF-002-J (owner 0.14.0): 刪除 on my own tickets, at the far right of line 1 (confirmed first).
     -- GF-UI-N (owner 0.16.12): my worker ticket's 移除 sits in the same place (row.deleteFn).
     row.delete = iconButton(row, ns.ROW_ICON, "no", "刪除", nil, "刪除")
+    UI.textStyle(row.delete, true) -- GF-UI-P: the same text button as the others
     row.delete:SetPoint("LEFT", row, "LEFT", UI.COL.delete, UI.LINE1)
     row.delete.action = "delete"
     row.delete:SetScript("OnClick", function()
@@ -838,7 +997,7 @@ local function newRow(i)
         if not v then return end
         local lines = UI.ticketTooltip(v)
         if #lines == 0 then return end
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        ns.Widgets.rowTip(self) -- GF-UI-P: next to the mouse, beside the row
         for _, l in ipairs(lines) do GameTooltip:AddLine(l, 1, 1, 1, true) end
         GameTooltip:Show()
     end)
@@ -966,7 +1125,6 @@ function UI.whyLines(why) return ns.Widgets.checklistLines(why, UI.WHY_OPTS) end
 -- GF-UI-G (owner trial): 密語 and 申請 in a row are thin outlined text buttons of one
 -- width (UI.ACTION_W), so the action column lines up from row to row.
 UI.TEXT_ACTIONS = { whisper = true, apply = true, lfgApply = true }
-UI.ACTION_W = 76
 function UI.textStyle(b, on)
     local T = ns.Theme
     if on then
@@ -1016,7 +1174,7 @@ local function setButtons(row, list)
         if spec then
             setButtonIcon(b, spec.icon); b.tip = spec.tip; b.action = spec.action
             ns.OrdersUI.setLabel(b, spec.tip) -- GF-002-D: the name next to the icon
-            UI.textStyle(b, UI.TEXT_ACTIONS[spec.action] == true)
+            UI.textStyle(b, true) -- GF-UI-P: every row button is a text button
             -- GF-002-H (R-16.16): 完成 glows inside the destination.
             b.glowing = spec.glow == true
             if spec.glow then b.sel:Show(); b.shine:Show() else b.sel:Hide(); b.shine:Hide() end
@@ -1188,11 +1346,10 @@ end
 
 function UI.workerTooltip(owner, lines)
     if not (owner and lines and #lines > 0) then return nil end
-    GameTooltip:SetOwner(owner, "ANCHOR_NONE")
-    GameTooltip:ClearAllPoints()
-    local p, rp = UI.tipAnchor(owner)
-    GameTooltip:SetPoint(p, owner, rp, 0, 0)
-    owner.tipPoint = p
+    -- GF-UI-P (owner 2026-11-28: it sat at the window's right edge, over the buttons):
+    -- next to the mouse, beside the row (Widgets.rowTip); UI.tipAnchor stays for other callers.
+    local place = ns.Widgets.rowTip(owner)
+    local p = place and place.point
     local max = UI.workerTipMaxLines()
     local tall = #lines > max
     local n = tall and (max - 1) or #lines
@@ -1285,7 +1442,7 @@ end
 -- first) or 移除 (my worker ticket).
 function UI.setDelete(row, name, action, fn)
     row.delete.tip, row.delete.action, row.deleteFn = name, action, fn
-    ns.OrdersUI.setLabel(row.delete, name)
+    UI.textStyle(row.delete, true) -- GF-UI-P: its word inside the frame
     row.delete:Show()
 end
 
@@ -1438,10 +1595,23 @@ function UI.askClear()
 end
 
 -- GF-002-E: the row buttons follow each other by their measured names (line 2).
+-- GF-UI-P: one width each (UI.ACTION_W); a button that would pass the row's right
+-- edge is not shown (at most 3 are ever asked for: 756 + 3 × 76 + 2 × 8 = 1000 ≤ 1030).
 function UI.flowButtons(row)
-    local shown = {}
-    for _, b in ipairs(row.buttons) do if b:IsShown() then shown[#shown + 1] = b end end
-    ns.OrdersUI.flow(row, shown, UI.ROW_BUTTON_X, UI.LINE2, UI.BUTTON_GAP, "LEFT")
+    local x = UI.ROW_BUTTON_X
+    for _, b in ipairs(row.buttons) do
+        if b:IsShown() then
+            local w = ns.OrdersUI.buttonSpan(b)
+            if x + w > UI.ROW_WIDTH then
+                b:Hide()
+            else
+                b:ClearAllPoints()
+                b:SetPoint("LEFT", row, "LEFT", x, UI.LINE2)
+                b.flowX = x
+                x = x + w + UI.BUTTON_GAP
+            end
+        end
+    end
 end
 
 -- GF-FIX-D (review 中-9): scrolling inside the same rows (the same first row,
@@ -1533,6 +1703,14 @@ function UI.focus(id)
     for i, r in ipairs(shownRows) do
         if r.view and r.view.id == id then UI.scrollToRow(i); return true end
     end
+    -- GF-UI-P: a filter hides it: every filter off, then once more.
+    if UI.filtersOn() then
+        UI.clearFilters()
+        UI.refresh()
+        for i, r in ipairs(shownRows) do
+            if r.view and r.view.id == id then UI.scrollToRow(i); return true end
+        end
+    end
     return true
 end
 
@@ -1554,7 +1732,7 @@ function UI.refresh()
     shownRows = UI.pageRows()
     content:SetHeight(math.max(1, #shownRows * ROW_HEIGHT))
     UI.layoutRows(true)
-    UI.emptyLine:SetText(#shownRows == 0 and "沒有冒險單" or "") -- GF-002-D
+    UI.emptyLine:SetText(#shownRows == 0 and (UI.filtersOn() and UI.EMPTY_FILTERED or "沒有冒險單") or "") -- GF-002-D
     -- GF-002-J: the tabs, the filter text, 清除 only on 已結束.
     for _, b in ipairs({ UI.activeTab, UI.endedTab }) do
         b.selected = b.tab == UI.tab
@@ -1564,6 +1742,13 @@ function UI.refresh()
     if UI.tab == "ended" then UI.clearButton:Show() else UI.clearButton:Hide() end
     if #A().pendingInvites() > 0 then UI.nextInvite:Show() else UI.nextInvite:Hide() end
     if ns.NativeLFG and ns.NativeLFG.canSearch() then UI.lfgButton:Show() else UI.lfgButton:Hide() end
+    -- GF-UI-P: 進行中 follows the last shown button (no gap where 尋求組隊 is hidden).
+    local after = UI.lfgButton:IsShown() and UI.lfgButton or UI.calendarButton
+    if UI.activeTab.gfAfter ~= after then
+        UI.activeTab.gfAfter = after
+        UI.activeTab:ClearAllPoints()
+        UI.activeTab:SetPoint("LEFT", after, "RIGHT", 24, 0)
+    end
 end
 
 local function build(p)
@@ -1597,12 +1782,34 @@ local function build(p)
         for _ in pairs(b.selected) do n = n + 1 end
         return "區域 " .. n
     end)
+    -- GF-UI-P: the filter row under the buttons (as 臨時黑箱's 庫存): 搜尋, 種類, 區域, 只看有空位的.
+    local FY, FX = UI.FILTER_Y, UI.FILTER_X
+    UI.searchLabel = ns.freeText(p:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
+    UI.searchLabel:SetPoint("TOPLEFT", p, "TOPLEFT", FX.searchLabel, FY - 6)
+    UI.searchLabel:SetText("搜尋")
+    UI.searchBox = ns.Theme.editBox(p, UI.SEARCH_W, ns.BUTTON_H)
+    UI.searchBox:SetPoint("TOPLEFT", p, "TOPLEFT", FX.search, FY)
+    if UI.searchBox.SetMaxLetters then UI.searchBox:SetMaxLetters(40) end
+    UI.searchBox:SetScript("OnTextChanged", function(self)
+        self.gfText = ns.str(self:GetText())
+        ns.coalesce("adventure-search", UI.SEARCH_DELAY, function()
+            if panel and panel:IsShown() then UI.setSearch(UI.searchBox.gfText) end
+        end)
+    end)
+    UI.searchBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    UI.kindLabel = ns.freeText(p:CreateFontString(nil, "ARTWORK", ns.FIELD_FONT))
+    UI.kindLabel:SetPoint("TOPLEFT", p, "TOPLEFT", FX.kindLabel, FY - 6)
+    UI.kindLabel:SetText("種類")
+    UI.kindDrop = ns.Widgets.dropdown(p, UI.KIND_W, function(v) UI.setKind(v) end)
+    UI.kindDrop:SetPoint("TOPLEFT", p, "TOPLEFT", FX.kind, FY)
+    UI.kindDrop.setItems(UI.KIND_ITEMS); UI.kindDrop.setValue("all")
     UI.zoneButton:ClearAllPoints()
-    UI.zoneButton:SetPoint("LEFT", UI.lfgButton, "RIGHT", 24, 0)
-    -- R-17.23: 進行中 / 已結束.
+    UI.zoneButton:SetPoint("TOPLEFT", p, "TOPLEFT", FX.zone, FY)
+    UI.roomBox = ns.checkBox(p, UI.ROOM_LABEL, FX.room, FY, function(on) UI.setRoom(on) end)
+    -- R-17.23: 進行中 / 已結束 (after 尋求組隊, or after 業務排程 while it is hidden: UI.refresh).
     UI.activeTab = ns.OrdersUI.textButton(p, "進行中", function() UI.setTab("active") end)
     UI.activeTab.tab = "active"
-    UI.activeTab:SetPoint("LEFT", UI.zoneButton, "RIGHT", 12, 0)
+    UI.activeTab:SetPoint("LEFT", UI.lfgButton, "RIGHT", 24, 0)
     UI.endedTab = ns.OrdersUI.textButton(p, "已結束", function() UI.setTab("ended") end)
     UI.endedTab.tab = "ended"
     UI.endedTab:SetPoint("LEFT", UI.activeTab, "RIGHT", 8, 0)
@@ -1611,13 +1818,14 @@ local function build(p)
     UI.clearButton:SetPoint("BOTTOMLEFT", p, "BOTTOMLEFT", 24, 10)
     UI.clearButton:Hide()
     scroll = ns.createFrame("ScrollFrame", nil, p, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 20, -84)
+    scroll:SetPoint("TOPLEFT", 20, UI.LIST_Y)
     scroll:SetPoint("BOTTOMRIGHT", -40, 52)
     content = CreateFrame("Frame", nil, scroll)
     content:SetSize(UI.ROW_WIDTH, 1)
     scroll:SetScrollChild(content)
     scroll:HookScript("OnVerticalScroll", function() UI.layoutRows() end)
-    UI.nextInvite = iconButton(p, ns.ICON, "invite", "下一位", function() A().inviteNext(); UI.refresh() end, "下一位")
+    -- GF-UI-P (GF-UI-O notes §3: 32 px among 28s): a text button like 清除 and the top row.
+    UI.nextInvite = ns.OrdersUI.textButton(p, tex("invite", 20) .. " 下一位", function() A().inviteNext(); UI.refresh() end)
     UI.nextInvite:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -310, 10)
     UI.nextInvite:Hide() -- only while names wait for a click (R-7.2 fallback)
     UI.emptyLine = p:CreateFontString(nil, "ARTWORK", ns.DISABLED_FONT)

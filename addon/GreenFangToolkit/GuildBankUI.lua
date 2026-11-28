@@ -18,7 +18,9 @@ local UI = {}
 ns.GuildBankUI = UI
 
 UI.KEY, UI.TEXT, UI.ORDER = "guildbank", "公會銀行", 40
-UI.W, UI.H = 1060, 560        -- used when the parent has no size yet
+UI.W, UI.H = 1060, 560        -- (kept for old callers; the page size comes from BankUI.VIEW_W / VIEW_H)
+UI.ORIGIN = { x = 20, y = -84 } -- where the view starts on the page when BankUI does not say (GF-UI-P)
+UI.BOTTOM = 8                  -- room left under the view
 UI.ROW_H = ns.PAGE_ROW or 36
 UI.MORE_H = 26
 UI.SEARCH_DELAY = 0.15
@@ -92,16 +94,32 @@ local function row(p, i, w)
     return r
 end
 
-function UI.build(parent)
+function UI.build(page)
     if c.built then return c.panel end
     c.built = true
-    c.panel = parent
-    local w = (parent.GetWidth and ns.num(parent:GetWidth())) or 0
-    local h = (parent.GetHeight and ns.num(parent:GetHeight())) or 0
-    -- A parent not laid out yet (or too small to be the page) gets the page's size.
-    if w < 600 then w = UI.W end
-    if h < 300 then h = UI.H end
+    c.panel = page
+    local pw = (page.GetWidth and ns.num(page:GetWidth())) or 0
+    local ph = (page.GetHeight and ns.num(page:GetHeight())) or 0
+    -- A page not laid out yet (or too small to be the page) gets 臨時黑箱's page size.
+    local B = ns.BankUI
+    if pw < 600 then pw = (B and B.VIEW_W) or 1100 end
+    if ph < 300 then ph = (B and B.VIEW_H) or 680 end
+    -- GF-UI-P (owner 2026-11-28: 「目前存款」 sat on the 綠皮調貨所／臨時黑箱 tabs and
+    -- the 庫存／申領… buttons): the view frame is the whole page, buttons included;
+    -- everything here goes in c.root, from where 臨時黑箱 says added views start
+    -- (BankUI.addView: x = UI.X, y = UI.Y.status), as 庫存 / 申領 / 保管人 do.
+    local ox = (B and B.X) or UI.ORIGIN.x
+    local oy = (B and B.Y and B.Y.status) or UI.ORIGIN.y
+    local parent = CreateFrame("Frame", nil, page)
+    parent:SetPoint("TOPLEFT", page, "TOPLEFT", ox, oy)
+    local w, h = pw - 2 * ox, ph + oy - UI.BOTTOM
+    parent:SetSize(w, h)
+    c.root = parent
     c.w = w
+    -- GF-UI-P: the rows leave a column on the right for the scroll bar.
+    local W = ns.Widgets
+    local rowW = w - W.SCROLL_W - W.SCROLL_GAP
+    c.rowW = rowW
     c.moneyLabel = text(parent, ns.FIELD_FONT, 0, UI.Y.money, 100)
     c.moneyLabel:SetText("目前存款")
     c.money = text(parent, ns.LABEL_FONT, 104, UI.Y.money, w - 104)
@@ -141,7 +159,12 @@ function UI.build(parent)
     if T().hline then c.headLine = T().hline(parent, UI.Y.head - 22, 0, 0) end
     c.nRows = math.max(3, math.floor((h + UI.Y.rows - UI.MORE_H - 4) / UI.ROW_H))
     c.rows = {}
-    for i = 1, c.nRows do c.rows[i] = row(parent, i, w) end
+    for i = 1, c.nRows do c.rows[i] = row(parent, i, rowW) end
+    c.bar = W.scrollBar(parent, c.nRows * UI.ROW_H, function(o)
+        c.offset = o
+        UI.drawRows(GB().rows(c.kind, c.searchApplied or ""))
+    end)
+    c.bar:SetPoint("TOPLEFT", parent, "TOPLEFT", rowW + W.SCROLL_GAP, UI.Y.rows)
     c.empty = text(parent, ns.DISABLED_FONT, 8, UI.Y.rows - 8, w - 16)
     c.more = text(parent, ns.DISABLED_FONT, 0, UI.Y.rows - c.nRows * UI.ROW_H - 4, w)
     -- A big note for the states without data (no guild, another guild ...).
@@ -219,6 +242,7 @@ function UI.drawRows(rows)
     end
     local rest = #rows - c.offset - c.nRows
     c.more:SetText(rest > 0 and string.format(UI.MORE_TEXT, rest) or "")
+    if c.bar then c.bar.sync(c.offset, #rows, c.nRows) end
 end
 
 -- What is on the page now (tests and scripts).
@@ -240,6 +264,7 @@ function UI.draw()
         c.headLine }
     for _, f in ipairs(parts) do if f then shown(f, ok) end end
     for _, b in ipairs(c.filters) do shown(b, ok) end
+    if c.bar then shown(c.bar, ok) end
     for _, h in ipairs(c.heads) do shown(h, ok) end
     if not ok then
         c.note:SetText(GB().TEXT[st.state] or GB().TEXT.other)
