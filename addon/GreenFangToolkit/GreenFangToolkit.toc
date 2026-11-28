@@ -64,3 +64,5 @@ BankStock.lua
 BankRequests.lua
 GuildBank.lua
 GuildBankUI.lua
+Help.lua
+HelpText.lua

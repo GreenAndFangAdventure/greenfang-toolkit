@@ -4855,6 +4855,11 @@ assert(loadfile(ROOT .. "/tests/addon/gf008f_tests.lua"))()({ test = test, eq = 
 -- 業務排程, three different legend marks (tests/addon/gfuiq_tests.lua).
 assert(loadfile(ROOT .. "/tests/addon/gfuiq_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
     ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
+-- GF-UI-R: the 說明 button: numbered frames on every page and pop-up, no overlap, inside the
+-- window, pooled, nothing made before the first press; ESC / page / close / combat end it
+-- (tests/addon/gfuir_tests.lua).
+assert(loadfile(ROOT .. "/tests/addon/gfuir_tests.lua"))()({ test = test, eq = eq, ok = ok, wow = wow,
+    ADDON_DIR = ADDON_DIR, deepEq = deepEq, realPrint = realPrint })
 ---------------------------------------------------------------------------
 
 local passed = 0
