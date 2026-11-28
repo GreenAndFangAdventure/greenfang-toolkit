@@ -560,6 +560,8 @@ local function build(p)
     bodyText:SetJustifyH("LEFT")
     bodyText:SetJustifyV("TOP")
     if bodyText.SetSpacing then bodyText:SetSpacing(4) end
+    -- GF-UI-R: the 說明 mode frames these (HelpText.lua); nothing else reads them.
+    SB.progressLine, SB.modeButton, SB.revealButton, SB.resetButton = progressLine, modeButton, revealButton, resetButton
 end
 
 ns.Framework.register({
